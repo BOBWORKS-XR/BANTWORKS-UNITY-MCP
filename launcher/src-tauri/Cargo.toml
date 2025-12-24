@@ -1,0 +1,23 @@
+[package]
+name = "bantworks-mcp-launcher"
+version = "1.2.0"
+description = "BANTWORKS MCP Configuration Launcher"
+authors = ["BOBWORKS"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+uuid = { version = "1", features = ["v4"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

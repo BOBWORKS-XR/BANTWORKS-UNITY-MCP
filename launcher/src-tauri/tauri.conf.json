@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BANTWORKS MCP",
+  "version": "1.2.0",
+  "identifier": "com.bobworks.bantworksmcp",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "fullscreen": false,
+        "height": 700,
+        "resizable": true,
+        "title": "BANTWORKS MCP",
+        "width": 900,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "copyright": "BOBWORKS",
+    "publisher": "BOBWORKS",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "longDescription": "Configure and manage BANTWORKS MCP for Claude Code integration",
+    "shortDescription": "BANTWORKS MCP Launcher",
+    "targets": "all",
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
+  }
+}

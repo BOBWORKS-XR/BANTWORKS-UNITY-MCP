@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BANTWORKS MCP</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="logo">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="#0f0f0f"/>
+          <rect x="2" y="2" width="28" height="28" rx="6" stroke="#00d4ff" stroke-width="2"/>
+          <path d="M8 12h16M8 16h12M8 20h14" stroke="#ff3b3b" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <h1 class="brand-title"><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> <span class="brand-mcp">MCP</span></h1>
+      </div>
+      <div class="status" id="status">
+        <span class="status-dot"></span>
+        <span class="status-text">Not Configured</span>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="section channels-section">
+        <div class="section-header">
+          <h2>Scene Channels</h2>
+          <button class="btn btn-primary" id="addChannelBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Add Scene
+          </button>
+        </div>
+
+        <div class="channels-list" id="channelsList">
+          <div class="empty-state" id="emptyState">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <rect x="8" y="12" width="32" height="24" rx="4" stroke="#6366f1" stroke-width="2"/>
+              <path d="M16 20h16M16 26h12" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            <p>No scenes configured</p>
+            <p class="hint">Click "Add Scene" to get started</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section settings-section">
+        <h2>Settings</h2>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>MCP Server Path</label>
+            <p class="hint">Path to the compiled MCP server</p>
+          </div>
+          <input type="text" id="mcpServerPath" class="input" value="C:/tools/banter-mcp/dist/index.js" />
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>Auto-configure Claude Code</label>
+            <p class="hint">Automatically update ~/.claude.json when switching channels</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="autoConfig" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="section actions-section">
+        <h2>Quick Actions</h2>
+
+        <div class="action-buttons">
+          <button class="btn btn-secondary" id="applyConfigBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M13 5L6 12L3 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Apply to Claude Code
+          </button>
+
+          <button class="btn btn-danger" id="disconnectBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Disconnect from Claude
+          </button>
+
+          <button class="btn btn-secondary" id="installExtensionBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 3v7M5 7l3 3 3-3M3 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Install Unity Extension
+          </button>
+
+          <button class="btn btn-secondary" id="openDocsBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="2"/>
+              <path d="M5 6h6M5 9h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            View Documentation
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v1.2.0</span> • <a href="#" id="githubLink">GitHub</a></p>
+    </footer>
+  </div>
+
+  <!-- Add Channel Modal -->
+  <div class="modal" id="addChannelModal">
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="modal-content">
+      <h3>Add Scene Channel</h3>
+
+      <div class="form-group">
+        <label for="channelName">Channel Name</label>
+        <input type="text" id="channelName" class="input" placeholder="My Banter Scene">
+      </div>
+
+      <div class="form-group">
+        <label for="scenePath">Unity Scene File</label>
+        <div class="input-with-button">
+          <input type="text" id="scenePath" class="input" placeholder="E:/unity/MyProject/Assets/Scenes/Main.unity">
+          <button class="btn btn-icon" id="browseBtn">Browse</button>
+        </div>
+        <p class="validation-msg" id="pathValidation"></p>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="confirmAddBtn" disabled>Add Scene</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "identifier": "default",
+  "description": "Default capabilities for Banter MCP Launcher",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open",
+    "dialog:allow-open",
+    "fs:default",
+    "fs:allow-read",
+    "fs:allow-write",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-copy-file"
+  ]
+}

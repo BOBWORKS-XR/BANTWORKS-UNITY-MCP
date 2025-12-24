@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+*.exe
+
+# Rust/Tauri build artifacts
+launcher/src-tauri/target/
+launcher/*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Backup files
+*.bak
+*.new
+patch_code.txt
+
+# Package manager locks (optional - uncomment if you want to exclude)
+# package-lock.json
+# Cargo.lock
