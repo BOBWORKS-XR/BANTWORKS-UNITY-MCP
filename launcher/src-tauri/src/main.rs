@@ -22,6 +22,8 @@ struct LauncherConfig {
     active_channel_id: Option<String>,
     mcp_server_path: String,
     auto_start: bool,
+    #[serde(default)]
+    enable_custom_scripts: bool,
 }
 
 /// Get the config file path
@@ -50,6 +52,7 @@ fn load_config() -> Result<LauncherConfig, String> {
             active_channel_id: None,
             mcp_server_path: "C:/tools/banter-mcp/dist/index.js".to_string(),
             auto_start: false,
+            enable_custom_scripts: false,
         })
     }
 }
@@ -270,7 +273,35 @@ fn main() {
             check_unity_extension,
             install_unity_extension,
             get_mcp_root,
+            set_unity_custom_scripts,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Set the custom scripts preference in Unity project's MCP state
+/// This writes to the _MCP/state folder which the Unity extension reads
+#[tauri::command]
+fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result<(), String> {
+    let state_dir = PathBuf::from(&unity_project_path)
+        .join("Assets")
+        .join("_MCP")
+        .join("state");
+
+    fs::create_dir_all(&state_dir)
+        .map_err(|e| format!("Failed to create MCP state directory: {}", e))?;
+
+    let settings_path = state_dir.join("launcher-settings.json");
+
+    let settings = serde_json::json!({
+        "enableCustomScripts": enabled
+    });
+
+    let content = serde_json::to_string_pretty(&settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+
+    fs::write(&settings_path, content)
+        .map_err(|e| format!("Failed to write settings: {}", e))?;
+
+    Ok(())
 }

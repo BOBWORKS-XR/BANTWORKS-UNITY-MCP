@@ -3,7 +3,8 @@ let config = {
   channels: [],
   active_channel_id: null,
   mcp_server_path: 'C:/tools/banter-mcp/dist/index.js',
-  auto_start: false
+  auto_start: false,
+  enable_custom_scripts: false
 };
 
 let mcpRoot = 'C:/tools/banter-mcp';
@@ -12,7 +13,7 @@ let mcpRoot = 'C:/tools/banter-mcp';
 let statusEl, channelsList, emptyState, addChannelBtn, addChannelModal;
 let modalBackdrop, channelNameInput, scenePathInput, pathValidation;
 let browseBtn, cancelBtn, confirmAddBtn, mcpServerPathInput;
-let autoConfigCheckbox, applyConfigBtn, disconnectBtn, installExtensionBtn, openDocsBtn;
+let autoConfigCheckbox, customScriptsCheckbox, applyConfigBtn, disconnectBtn, installExtensionBtn, openDocsBtn;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
@@ -31,6 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   confirmAddBtn = document.getElementById('confirmAddBtn');
   mcpServerPathInput = document.getElementById('mcpServerPath');
   autoConfigCheckbox = document.getElementById('autoConfig');
+  customScriptsCheckbox = document.getElementById('customScripts');
   applyConfigBtn = document.getElementById('applyConfigBtn');
   disconnectBtn = document.getElementById('disconnectBtn');
   installExtensionBtn = document.getElementById('installExtensionBtn');
@@ -124,6 +126,24 @@ function setupEventListeners() {
     }
   });
 
+  customScriptsCheckbox.addEventListener('change', async function() {
+    config.enable_custom_scripts = customScriptsCheckbox.checked;
+    try {
+      await window.__TAURI__.core.invoke('save_config', { config: config });
+      // Also update Unity extension setting if active channel exists
+      var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
+      if (channel) {
+        await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
+          unityProjectPath: channel.unity_project_path,
+          enabled: customScriptsCheckbox.checked
+        });
+      }
+      showToast(customScriptsCheckbox.checked ? 'Custom scripts enabled' : 'Custom scripts disabled', 'success');
+    } catch (err) {
+      console.error('Failed to save config:', err);
+    }
+  });
+
   // Quick actions
   applyConfigBtn.addEventListener('click', applyToClaudeCode);
   disconnectBtn.addEventListener('click', disconnectFromClaude);
@@ -140,6 +160,7 @@ function setupEventListeners() {
 function updateUI() {
   mcpServerPathInput.value = config.mcp_server_path;
   autoConfigCheckbox.checked = config.auto_start !== false;
+  customScriptsCheckbox.checked = config.enable_custom_scripts === true;
   renderChannels();
   updateStatus();
 }

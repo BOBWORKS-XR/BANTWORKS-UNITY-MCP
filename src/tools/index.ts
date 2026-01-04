@@ -414,6 +414,40 @@ Requires BanterMCPBridge extension.`,
       },
     },
 
+    {
+      name: "set_object_reference",
+      description: `Set an object reference field on a component (e.g., assign a Transform to a serialized field).
+Use this to wire up references between GameObjects in the scene.
+The field type is auto-detected (Transform, GameObject, or specific Component).
+Requires BanterMCPBridge extension.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          objectPath: {
+            type: "string",
+            description: "Path to the GameObject containing the component (e.g., 'Player/Body')",
+          },
+          componentType: {
+            type: "string",
+            description: "Component type name (e.g., 'VRPlayerController', 'PhysicsRig')",
+          },
+          propertyName: {
+            type: "string",
+            description: "Serialized field name (e.g., 'headTarget', 'cameraRig')",
+          },
+          targetPath: {
+            type: "string",
+            description: "Path to the target GameObject to assign (e.g., 'Player/Head'), or 'null' to clear",
+          },
+          targetComponent: {
+            type: "string",
+            description: "Optional: specific component type on the target (e.g., 'Rigidbody'). If omitted, auto-detects based on field type.",
+          },
+        },
+        required: ["objectPath", "componentType", "propertyName", "targetPath"],
+      },
+    },
+
     // Batch Operations
     {
       name: "batch_create",
@@ -702,6 +736,7 @@ export async function handleToolCall(
         config
       );
       break;
+case "set_object_reference":      result = await setObjectReference(        args.objectPath as string,        args.componentType as string,        args.propertyName as string,        args.targetPath as string,        args.targetComponent as string | undefined,        config      );      break;
 
     case "batch_create":
       result = await batchCreate(
@@ -1377,4 +1412,42 @@ async function getObjectBounds(
     error: "Timeout waiting for bounds result from Unity",
     objectPath,
   };
+}
+
+async function setObjectReference(
+  objectPath: string,
+  componentType: string,
+  propertyName: string,
+  targetPath: string,
+  targetComponent: string | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const command = {
+    type: "set_object_reference",
+    objectPath,
+    componentType,
+    propertyName,
+    targetPath,
+    targetComponent: targetComponent || null,
+  };
+
+  const result = await sendUnityCommand(command, config);
+
+  if (result.success) {
+    const targetInfo = targetComponent ? ` (${targetComponent})` : "";
+    return {
+      success: true,
+      message: `Set reference command sent: ${componentType}.${propertyName} -> ${targetPath}${targetInfo}`,
+      commandId: result.commandId,
+      details: {
+        objectPath,
+        componentType,
+        propertyName,
+        targetPath,
+        targetComponent: targetComponent || "(auto-detect)",
+      },
+    };
+  }
+
+  return result;
 }

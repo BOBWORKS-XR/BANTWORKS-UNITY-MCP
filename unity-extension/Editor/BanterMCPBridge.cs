@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -43,7 +43,20 @@ namespace BantworksMCP
         public static string ScanStatus { get; private set; }     // Current status message
         public static float ScanStartTime { get; private set; }   // When scan started (EditorApplication.timeSinceStartup)
 
-        static BanterMCPBridge()
+        // Project mode toggle - enables custom script support for non-Banter projects
+        private static readonly string EnableCustomScriptsKey = "BantworksMCP_EnableCustomScripts";
+        public static bool EnableCustomScripts
+        {
+            get => EditorPrefs.GetBool(EnableCustomScriptsKey, false);
+            set => EditorPrefs.SetBool(EnableCustomScriptsKey, value);
+        }
+
+        // Console log capture
+        private static readonly List<ConsoleLogEntry> capturedLogs = new List<ConsoleLogEntry>();
+        private static readonly int MaxLogEntries = 500;
+        private static readonly object logLock = new object();
+
+        static BantworksMCPBridge()
         {
             // Initialize folders
             EnsureDirectories();
@@ -57,6 +70,9 @@ namespace BantworksMCP
             // Subscribe to asset import events
             AssetDatabase.importPackageCompleted += OnImportCompleted;
             AssetDatabase.importPackageFailed += OnImportFailed;
+
+            // Subscribe to console log events
+            Application.logMessageReceived += OnLogMessageReceived;
 
             // Initial state export
             ExportProjectState();
@@ -125,6 +141,28 @@ namespace BantworksMCP
         private static void OnImportFailed(string packageName, string errorMessage)
         {
             ExportImportStatus(false, errorMessage);
+        }
+
+        private static void OnLogMessageReceived(string condition, string stackTrace, LogType type)
+        {
+            lock (logLock)
+            {
+                var entry = new ConsoleLogEntry
+                {
+                    level = type.ToString(),
+                    message = condition,
+                    stackTrace = stackTrace,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                capturedLogs.Add(entry);
+
+                // Keep only the last MaxLogEntries
+                while (capturedLogs.Count > MaxLogEntries)
+                {
+                    capturedLogs.RemoveAt(0);
+                }
+            }
         }
 
         #region Menu Items
@@ -495,9 +533,52 @@ namespace BantworksMCP
             // Search all assemblies
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                var type = assembly.GetTypes().FirstOrDefault(t => t.Name == typeName);
-                if (type != null && typeof(Component).IsAssignableFrom(type))
-                    return type;
+                try
+                {
+                    // First try exact match by full name (namespace.classname)
+                    var type = assembly.GetType(typeName);
+                    if (type != null && typeof(Component).IsAssignableFrom(type))
+                        return type;
+
+                    // Then try by simple name only (for Banter SDK types)
+                    type = assembly.GetTypes().FirstOrDefault(t => t.Name == typeName);
+                    if (type != null && typeof(Component).IsAssignableFrom(type))
+                    {
+                        // Check if it's a Banter type or if custom scripts are enabled
+                        string typeNamespace = type.Namespace ?? "";
+                        bool isBanterType = typeNamespace.StartsWith("Banter") ||
+                                           typeNamespace.StartsWith("UnityEngine");
+
+                        if (isBanterType || EnableCustomScripts)
+                            return type;
+                    }
+
+                    // Only search user namespaces if custom scripts toggle is ON
+                    if (EnableCustomScripts)
+                    {
+                        string[] userNamespaces = new string[]
+                        {
+                            "PhysicsCharacterController.",
+                            "Player.",
+                            "Character.",
+                            "VR.",
+                            "Game.",
+                            "Scripts."
+                        };
+
+                        foreach (var userNs in userNamespaces)
+                        {
+                            type = assembly.GetType(userNs + typeName);
+                            if (type != null && typeof(Component).IsAssignableFrom(type))
+                                return type;
+                        }
+                    }
+                }
+                catch (ReflectionTypeLoadException)
+                {
+                    // Some assemblies may fail to load types, skip them
+                    continue;
+                }
             }
 
             return null;
@@ -1146,18 +1227,45 @@ namespace BantworksMCP
             try
             {
                 var logs = new ConsoleLogs();
-                logs.logs = new List<ConsoleLogEntry>();
                 logs.timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                // Note: Getting console logs requires reflection or LogHandler
-                // This is a simplified version
+                lock (logLock)
+                {
+                    logs.logs = new List<ConsoleLogEntry>(capturedLogs);
+                }
 
-                string json = JsonUtility.ToJson(logs, true);
-                File.WriteAllText(Path.Combine(StateFolder, "console-log.json"), json);
+                // Build JSON manually for better formatting
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("{");
+                sb.AppendLine($"    \"timestamp\": {logs.timestamp},");
+                sb.AppendLine($"    \"count\": {logs.logs.Count},");
+                sb.AppendLine("    \"logs\": [");
+
+                for (int i = 0; i < logs.logs.Count; i++)
+                {
+                    var log = logs.logs[i];
+                    sb.Append("        {");
+                    sb.Append($"\"level\": \"{log.level}\", ");
+                    sb.Append($"\"message\": \"{EscapeJsonString(log.message)}\", ");
+                    sb.Append($"\"timestamp\": {log.timestamp}");
+                    if (!string.IsNullOrEmpty(log.stackTrace))
+                    {
+                        sb.Append($", \"stackTrace\": \"{EscapeJsonString(log.stackTrace)}\"");
+                    }
+                    sb.Append("}");
+                    if (i < logs.logs.Count - 1) sb.AppendLine(",");
+                    else sb.AppendLine();
+                }
+
+                sb.AppendLine("    ]");
+                sb.AppendLine("}");
+
+                File.WriteAllText(Path.Combine(StateFolder, "console-log.json"), sb.ToString());
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting console logs: {e.Message}");
+                // Avoid recursive logging by using Console.WriteLine
+                System.Console.WriteLine($"[BANTWORKS MCP] Error exporting console logs: {e.Message}");
             }
         }
 
@@ -1792,6 +1900,35 @@ namespace BantworksMCP
                     EditorGUILayout.EndHorizontal();
                 }
             }
+
+            EditorGUILayout.Space();
+            DrawSeparator();
+            EditorGUILayout.Space();
+
+            // Project Mode Section
+            GUILayout.Label("Project Mode", EditorStyles.boldLabel);
+            EditorGUILayout.Space();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("Custom Scripts:", GUILayout.Width(100));
+            bool customScriptsEnabled = BantworksMCPBridge.EnableCustomScripts;
+            bool newValue = EditorGUILayout.Toggle(customScriptsEnabled, GUILayout.Width(20));
+            if (newValue != customScriptsEnabled)
+            {
+                BantworksMCPBridge.EnableCustomScripts = newValue;
+            }
+            GUILayout.Label(newValue ? "Enabled (Non-Banter)" : "Disabled (Banter Only)",
+                EditorStyles.miniLabel);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("", GUILayout.Width(100));
+            EditorGUILayout.HelpBox(
+                newValue
+                    ? "MCP can add custom C# scripts from Assembly-CSharp"
+                    : "MCP only adds Unity built-in and Banter SDK components",
+                MessageType.Info);
+            EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space();
             DrawSeparator();
