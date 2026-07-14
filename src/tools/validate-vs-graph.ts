@@ -6,6 +6,7 @@
  */
 
 import { BANTER_VS_NODES, VS_CRITICAL_NOTES } from "../resources/banter-vs-nodes.js";
+import { BANTER_CUSTOM_VS_NODES } from "../resources/banter-custom-vs-nodes.js";
 
 export interface VSValidationResult {
   valid: boolean;
@@ -73,7 +74,10 @@ const UNITY_NODE_TYPES = new Set([
 
 // Known Banter node types
 const BANTER_NODE_TYPES = new Set(
-  Object.values(BANTER_VS_NODES).map((node) => node.fullType)
+  [
+    ...Object.values(BANTER_VS_NODES).map((node) => node.fullType),
+    ...Object.values(BANTER_CUSTOM_VS_NODES).map((node) => node.fullType),
+  ]
 );
 
 // Event nodes that require coroutine: false
@@ -100,6 +104,9 @@ const EVENT_NODES = new Set([
   "Unity.VisualScripting.OnCollisionExit",
   "Unity.VisualScripting.OnTriggerEnter",
   "Unity.VisualScripting.OnTriggerExit",
+  ...Object.values(BANTER_CUSTOM_VS_NODES)
+    .filter((node) => node.isEvent)
+    .map((node) => node.fullType),
 ]);
 
 // GUID validation regex
@@ -130,33 +137,28 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
     }
 
     const graphData = graph.graph;
+    if (graphData.$version !== "A") {
+      errors.push(`Graph root missing required "$version": "A"`);
+    }
 
     // Validate nodes
-    if (graphData.units && Array.isArray(graphData.units.$content)) {
-      const nodes = graphData.units.$content;
-      nodeCount = nodes.length;
-      const nodeIds = new Map<string, unknown>();
+    const nodes = collectNodes(graphData);
+    nodeCount = nodes.length;
+    const nodeIds = new Map<string, unknown>();
 
+    if (nodes.length > 0) {
       for (const node of nodes) {
         validateNode(node, errors, warnings, nodeIds);
       }
     } else {
-      warnings.push("No nodes found in graph (units.$content)");
+      warnings.push("No nodes found in graph (expected graph.elements or units.$content)");
     }
 
     // Validate connections
-    if (graphData.controlConnections && Array.isArray(graphData.controlConnections.$content)) {
-      connectionCount += graphData.controlConnections.$content.length;
-      for (const conn of graphData.controlConnections.$content) {
-        validateConnection(conn, "control", errors, warnings);
-      }
-    }
-
-    if (graphData.valueConnections && Array.isArray(graphData.valueConnections.$content)) {
-      connectionCount += graphData.valueConnections.$content.length;
-      for (const conn of graphData.valueConnections.$content) {
-        validateConnection(conn, "value", errors, warnings);
-      }
+    const connections = collectConnections(graphData);
+    connectionCount = connections.length;
+    for (const { conn, type } of connections) {
+      validateConnection(conn, type, errors, warnings);
     }
 
     // Validate variables
@@ -185,6 +187,61 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
   };
 }
 
+function collectNodes(graphData: Record<string, unknown>): Array<Record<string, unknown>> {
+  const nodes: Array<Record<string, unknown>> = [];
+
+  const units = graphData.units as Record<string, unknown> | undefined;
+  if (Array.isArray(units?.$content)) {
+    nodes.push(...(units.$content as Array<Record<string, unknown>>));
+  }
+
+  if (Array.isArray(graphData.elements)) {
+    nodes.push(
+      ...(graphData.elements as Array<Record<string, unknown>>).filter((element) => {
+        const type = element.$type as string | undefined;
+        return Boolean(type) &&
+          type !== "Unity.VisualScripting.GraphGroup" &&
+          type !== "Unity.VisualScripting.ControlConnection" &&
+          type !== "Unity.VisualScripting.ValueConnection";
+      })
+    );
+  }
+
+  return nodes;
+}
+
+function collectConnections(
+  graphData: Record<string, unknown>
+): Array<{ conn: Record<string, unknown>; type: "control" | "value" }> {
+  const connections: Array<{ conn: Record<string, unknown>; type: "control" | "value" }> = [];
+
+  const controlConnections = graphData.controlConnections as Record<string, unknown> | undefined;
+  if (Array.isArray(controlConnections?.$content)) {
+    for (const conn of controlConnections.$content as Array<Record<string, unknown>>) {
+      connections.push({ conn, type: "control" });
+    }
+  }
+
+  const valueConnections = graphData.valueConnections as Record<string, unknown> | undefined;
+  if (Array.isArray(valueConnections?.$content)) {
+    for (const conn of valueConnections.$content as Array<Record<string, unknown>>) {
+      connections.push({ conn, type: "value" });
+    }
+  }
+
+  if (Array.isArray(graphData.elements)) {
+    for (const element of graphData.elements as Array<Record<string, unknown>>) {
+      if (element.$type === "Unity.VisualScripting.ControlConnection") {
+        connections.push({ conn: element, type: "control" });
+      } else if (element.$type === "Unity.VisualScripting.ValueConnection") {
+        connections.push({ conn: element, type: "value" });
+      }
+    }
+  }
+
+  return connections;
+}
+
 function validateNode(
   node: Record<string, unknown>,
   errors: string[],
@@ -194,6 +251,10 @@ function validateNode(
   const nodeType = node.$type as string;
   const nodeId = node.$id as string;
   const guid = node.guid as string;
+
+  if (node.$version !== "A") {
+    errors.push(`Node ${nodeId ?? "(missing id)"} (${nodeType ?? "missing type"}) missing required "$version": "A"`);
+  }
 
   // Check $id format
   if (typeof nodeId !== "string") {
@@ -283,6 +344,10 @@ function validateConnection(
 ): void {
   const guid = conn.guid as string;
   const connType = conn.$type as string;
+
+  if (conn.$version !== "A") {
+    errors.push(`Connection ${guid ?? "(missing guid)"} missing required "$version": "A"`);
+  }
 
   // Validate GUID
   if (!guid) {

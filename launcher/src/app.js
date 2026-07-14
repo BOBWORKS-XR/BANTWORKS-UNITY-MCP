@@ -13,7 +13,8 @@ let mcpRoot = 'C:/tools/banter-mcp';
 let statusEl, channelsList, emptyState, addChannelBtn, addChannelModal;
 let modalBackdrop, channelNameInput, scenePathInput, pathValidation;
 let browseBtn, cancelBtn, confirmAddBtn, mcpServerPathInput;
-let autoConfigCheckbox, customScriptsCheckbox, applyConfigBtn, disconnectBtn, installExtensionBtn, openDocsBtn;
+let autoConfigCheckbox, customScriptsCheckbox, applyConfigBtn, applyCodexBtn;
+let disconnectBtn, disconnectCodexBtn, installExtensionBtn, openDocsBtn;
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
@@ -34,7 +35,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   autoConfigCheckbox = document.getElementById('autoConfig');
   customScriptsCheckbox = document.getElementById('customScripts');
   applyConfigBtn = document.getElementById('applyConfigBtn');
+  applyCodexBtn = document.getElementById('applyCodexBtn');
   disconnectBtn = document.getElementById('disconnectBtn');
+  disconnectCodexBtn = document.getElementById('disconnectCodexBtn');
   installExtensionBtn = document.getElementById('installExtensionBtn');
   openDocsBtn = document.getElementById('openDocsBtn');
 
@@ -146,11 +149,13 @@ function setupEventListeners() {
 
   // Quick actions
   applyConfigBtn.addEventListener('click', applyToClaudeCode);
+  applyCodexBtn.addEventListener('click', applyToCodex);
   disconnectBtn.addEventListener('click', disconnectFromClaude);
+  disconnectCodexBtn.addEventListener('click', disconnectFromCodex);
   installExtensionBtn.addEventListener('click', installExtension);
   openDocsBtn.addEventListener('click', async function() {
     try {
-      await window.__TAURI__.shell.open('https://github.com/anthropics/claude-code');
+      await window.__TAURI__.shell.open('https://github.com/BOBWORKS-XR/BANTWORKS-UNITY-MCP');
     } catch (err) {
       console.error('Failed to open docs:', err);
     }
@@ -254,7 +259,11 @@ async function selectChannel(channelId) {
           channel: channel,
           mcpServerPath: config.mcp_server_path
         });
-        showToast('Applied to Claude Code', 'success');
+        await window.__TAURI__.core.invoke('update_codex_mcp_config', {
+          channel: channel,
+          mcpServerPath: config.mcp_server_path
+        });
+        showToast('Applied to Claude and Codex', 'success');
       }
     }
 
@@ -378,6 +387,26 @@ async function applyToClaudeCode() {
   }
 }
 
+async function applyToCodex() {
+  var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
+
+  if (!channel) {
+    showToast('No channel selected', 'error');
+    return;
+  }
+
+  try {
+    await window.__TAURI__.core.invoke('update_codex_mcp_config', {
+      channel: channel,
+      mcpServerPath: config.mcp_server_path
+    });
+    showToast('Applied to Codex (~/.codex/config.toml)', 'success');
+  } catch (err) {
+    console.error('Failed to apply Codex config:', err);
+    showToast('Failed to update Codex config', 'error');
+  }
+}
+
 async function disconnectFromClaude() {
   try {
     await window.__TAURI__.core.invoke('remove_claude_mcp_config');
@@ -385,6 +414,16 @@ async function disconnectFromClaude() {
   } catch (err) {
     console.error('Failed to disconnect:', err);
     showToast('Failed to disconnect: ' + String(err), 'error');
+  }
+}
+
+async function disconnectFromCodex() {
+  try {
+    await window.__TAURI__.core.invoke('remove_codex_mcp_config');
+    showToast('Disconnected Banter MCP from Codex', 'success');
+  } catch (err) {
+    console.error('Failed to disconnect Codex:', err);
+    showToast('Failed to disconnect Codex: ' + String(err), 'error');
   }
 }
 
@@ -400,6 +439,10 @@ async function installExtension() {
     await window.__TAURI__.core.invoke('install_unity_extension', {
       unityProjectPath: channel.unity_project_path,
       mcpRoot: mcpRoot
+    });
+    await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
+      unityProjectPath: channel.unity_project_path,
+      enabled: customScriptsCheckbox.checked
     });
     showToast('Unity extension installed', 'success');
     updateUI();

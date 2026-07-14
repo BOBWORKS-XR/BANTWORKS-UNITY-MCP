@@ -1,6 +1,17 @@
-# Banter MCP
+# BANTWORKS MCP
 
-A Model Context Protocol (MCP) server for Banter SDK development. Provides Claude with full awareness of your Unity project and tools to create Visual Scripting graphs, WebRoot JavaScript, and more.
+A Model Context Protocol (MCP) server and Unity Editor bridge for Banter SDK development. It gives Codex, Claude Code, and other compatible MCP clients awareness of a selected Unity project, with tools to create Visual Scripting graphs, WebRoot JavaScript, and more.
+
+## Client Compatibility
+
+BANTWORKS MCP uses the standard stdio MCP transport. Codex is a first-class supported client:
+
+- The Windows launcher can write the selected Unity channel to Codex at `~/.codex/config.toml`.
+- `setup.ps1` can configure Codex from its `[X] Apply to Codex` menu action.
+- The launcher can keep Claude Code and Codex synchronized when a scene channel changes.
+- Other stdio-compatible MCP clients can launch the same `dist/index.js` server with the `UNITY_PROJECT_PATH` environment variable.
+
+The repository is intentionally generic. It contains no project-specific gameplay, respawn, or scene logic; those belong in the Unity project using the bridge.
 
 ## Features
 
@@ -20,19 +31,32 @@ npm install
 npm run build
 ```
 
-### 2. Add to Claude Code
+### 2. Connect Codex or Claude Code
+
+Both clients launch the same MCP server. Set `UNITY_PROJECT_PATH` in the client configuration so the server knows which Unity project to inspect and modify.
+
+#### Codex
+
+Add this to `~/.codex/config.toml` (on Windows, normally `C:/Users/<you>/.codex/config.toml`):
+
+```toml
+[mcp_servers.banter]
+command = "node"
+args = ["C:/tools/banter-mcp/dist/index.js"]
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+
+[mcp_servers.banter.env]
+UNITY_PROJECT_PATH = "E:/unity/MCP_base"
+```
+
+#### Claude Code
 
 ```bash
 claude mcp add banter --scope user -- node C:/tools/banter-mcp/dist/index.js
 ```
 
-Set your Unity project path:
-```bash
-# Windows PowerShell
-$env:UNITY_PROJECT_PATH = "E:/unity/MCP_base"
-```
-
-Or add to your `.claude.json`:
+Or add the server directly to `.claude.json`:
 ```json
 {
   "mcpServers": {
@@ -47,7 +71,15 @@ Or add to your `.claude.json`:
 }
 ```
 
-### 3. Install Unity Extension (Optional - for full feedback loop)
+Restart the selected MCP client after changing its configuration.
+
+### 3. Configure Through the Windows Launcher (Optional)
+
+The BANTWORKS MCP launcher can manage multiple Unity scene channels and install the Unity bridge. Select a channel, then use **Apply to Codex** or **Apply to Claude Code**. With **Auto-configure Clients** enabled, changing the active channel updates both configurations.
+
+`setup.ps1` offers the same workflow in PowerShell: use `[X] Apply to Codex` or `[C] Apply to Claude Code` after choosing an active project.
+
+### 4. Install Unity Extension (Optional - for full feedback loop)
 
 Copy the Unity extension to your project:
 ```
@@ -55,11 +87,11 @@ C:/tools/banter-mcp/unity-extension/Editor/BanterMCPBridge.cs
   → YourProject/Assets/Editor/BanterMCPBridge.cs
 ```
 
-Unity will compile it automatically and start exporting project state.
+Unity will compile it automatically and start exporting project state to `YourProject/.bantworks-mcp/state`.
 
 ## Usage
 
-### Resources (Knowledge Claude can read)
+### Resources (Knowledge available to MCP clients)
 
 | Resource | Description |
 |----------|-------------|
@@ -71,7 +103,7 @@ Unity will compile it automatically and start exporting project state.
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (Actions Claude can take)
+### Tools (Actions available to MCP clients)
 
 | Tool | Description |
 |------|-------------|
@@ -99,7 +131,7 @@ Unity will compile it automatically and start exporting project state.
 ```
 You: "Create a grabbable ball that changes color when grabbed"
 
-Claude:
+Codex or Claude Code:
 1. Reads banter://components for component info
 2. Uses generate_vs_graph to create the logic
 3. Uses validate_vs_graph to check for errors
@@ -115,8 +147,7 @@ banter-mcp/
 ├── src/
 │   ├── index.ts              # MCP server entry point
 │   ├── lib/
-│   │   ├── config.ts         # Configuration management
-│   │   └── http-server.ts    # HTTP transport (optional)
+│   │   └── config.ts         # Configuration management
 │   ├── resources/            # Static knowledge
 │   │   ├── banter-components.ts
 │   │   ├── banter-vs-nodes.ts
@@ -139,19 +170,20 @@ banter-mcp/
 └── tsconfig.json
 ```
 
-## HTTP Mode (Optional)
+## Transport
 
-For sharing or remote access:
+This server currently supports stdio transport only:
 
 ```bash
-node dist/index.js --http --port 42067
+node dist/index.js
 ```
 
-Then configure clients to connect to `http://localhost:42067/mcp`
+The old `--http` flag is intentionally rejected until an HTTP transport is implemented.
 
 ## Local AI Support
 
 This MCP follows the standard MCP protocol, so it works with any MCP-compatible client, including:
+- Codex (desktop and CLI, via `~/.codex/config.toml`)
 - Claude Code (stdio)
 - Claude Desktop (stdio)
 - Cursor (stdio)

@@ -1,5 +1,5 @@
 /**
- * MCP Tools - Actions Claude can take
+ * MCP Tools - Actions available to connected MCP clients
  */
 
 import type { BanterMCPConfig } from "../lib/config.js";
@@ -9,6 +9,7 @@ import { generateVSGraph, GenerateVSGraphResult } from "./generate-vs-graph.js";
 import { queryProjectState, ProjectStateResult } from "./query-project.js";
 import { checkImportStatus, ImportStatusResult } from "./check-import-status.js";
 import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
+import { atomicWriteFileSync } from "../lib/files.js";
 
 interface Tool {
   name: string;
@@ -583,7 +584,7 @@ Categories include: Buildings, Nature, Props, Characters, Vehicles, etc.`,
       name: "scan_prefabs",
       description: `Trigger Unity to scan and catalog all prefabs in the project.
 Use this if the prefab catalog is missing or out of date.
-The scan runs in Unity Editor and saves results to _MCP/state/prefab-catalog.json.`,
+The scan runs in Unity Editor and saves results to .bantworks-mcp/state/prefab-catalog.json.`,
       inputSchema: {
         type: "object",
         properties: {},
@@ -736,7 +737,17 @@ export async function handleToolCall(
         config
       );
       break;
-case "set_object_reference":      result = await setObjectReference(        args.objectPath as string,        args.componentType as string,        args.propertyName as string,        args.targetPath as string,        args.targetComponent as string | undefined,        config      );      break;
+
+    case "set_object_reference":
+      result = await setObjectReference(
+        args.objectPath as string,
+        args.componentType as string,
+        args.propertyName as string,
+        args.targetPath as string,
+        args.targetComponent as string | undefined,
+        config
+      );
+      break;
 
     case "batch_create":
       result = await batchCreate(
@@ -867,21 +878,16 @@ async function refreshUnityAssets(
   const path = await import("path");
 
   // Write a refresh command for Unity to pick up
-  const commandPath = path.join(config.mcpCommandsPath, "refresh.json");
-
   try {
-    // Ensure command directory exists
-    if (!fs.existsSync(config.mcpCommandsPath)) {
-      fs.mkdirSync(config.mcpCommandsPath, { recursive: true });
-    }
-
     const command = {
       type: "refresh",
       path: assetPath || null,
       timestamp: Date.now(),
     };
 
-    fs.writeFileSync(commandPath, JSON.stringify(command, null, 2));
+    const crypto = await import("crypto");
+    const commandPath = path.join(config.mcpCommandsPath, `refresh-${crypto.randomUUID()}.json`);
+    atomicWriteFileSync(commandPath, JSON.stringify(command, null, 2));
 
     return {
       success: true,
@@ -896,38 +902,109 @@ async function refreshUnityAssets(
   }
 }
 
+interface UnityCommandResult {
+  success: boolean;
+  commandId?: string;
+  completed?: boolean;
+  status?: "completed" | "queued";
+  message?: string;
+  error?: string;
+}
+
+interface BridgeCommandResult {
+  commandId?: string;
+  success?: boolean;
+  message?: string;
+  error?: string;
+  timestamp?: number;
+}
+
 async function sendUnityCommand(
   command: Record<string, unknown>,
   config: BanterMCPConfig
-): Promise<{ success: boolean; error?: string; commandId?: string }> {
+): Promise<UnityCommandResult> {
   const fs = await import("fs");
   const path = await import("path");
   const crypto = await import("crypto");
 
   try {
-    // Ensure command directory exists
-    if (!fs.existsSync(config.mcpCommandsPath)) {
-      fs.mkdirSync(config.mcpCommandsPath, { recursive: true });
-    }
-
     // Generate unique command ID
     const commandId = crypto.randomUUID();
     const commandFile = path.join(config.mcpCommandsPath, `${commandId}.json`);
 
-    // Write command file
-    fs.writeFileSync(commandFile, JSON.stringify({
+    // Unity only sees the final file name after the command JSON is complete.
+    atomicWriteFileSync(commandFile, JSON.stringify({
       ...command,
       id: commandId,
       timestamp: Date.now(),
     }, null, 2));
 
-    return { success: true, commandId };
+    const result = await waitForUnityCommandResult(commandId, config, 3000);
+    if (!result) {
+      return {
+        success: true,
+        commandId,
+        completed: false,
+        status: "queued",
+        message: "Command queued. Unity did not acknowledge it within 3 seconds.",
+      };
+    }
+
+    return {
+      success: result.success === true,
+      commandId,
+      completed: true,
+      status: "completed",
+      message: result.message,
+      error: result.error,
+    };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
+}
+
+async function waitForUnityCommandResult(
+  commandId: string,
+  config: BanterMCPConfig,
+  timeoutMs: number
+): Promise<BridgeCommandResult | undefined> {
+  const fs = await import("fs");
+  const path = await import("path");
+  const resultPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as BridgeCommandResult;
+        if (result.commandId === commandId) {
+          fs.unlinkSync(resultPath);
+          return result;
+        }
+      } catch {
+        // The bridge may be replacing the file. Retry on the next poll.
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return undefined;
+}
+
+function commandResponse(result: UnityCommandResult, completedMessage: string): Record<string, unknown> {
+  return {
+    success: true,
+    commandId: result.commandId,
+    status: result.status,
+    message: result.completed
+      ? completedMessage
+      : `${completedMessage} It is still queued in Unity.`,
+    unityMessage: result.message,
+  };
 }
 
 async function createGameObject(
@@ -953,9 +1030,7 @@ async function createGameObject(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Created GameObject '${name}'${primitiveType ? ` (${primitiveType})` : ""}`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Created GameObject '${name}'${primitiveType ? ` (${primitiveType})` : ""}`),
       details: {
         name,
         primitiveType: primitiveType || "Empty",
@@ -983,9 +1058,7 @@ async function deleteGameObject(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Delete command sent for '${objectPath}'`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Deleted GameObject '${objectPath}'`),
     };
   }
 
@@ -1016,9 +1089,7 @@ async function modifyGameObject(
     if (scale) changes.push(`scale: [${scale.join(", ")}]`);
 
     return {
-      success: true,
-      message: `Modify command sent for '${objectPath}'`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Modified GameObject '${objectPath}'`),
       changes: changes.length > 0 ? changes : ["No changes specified"],
     };
   }
@@ -1041,9 +1112,7 @@ async function addComponent(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Add component command sent: ${componentType} to '${objectPath}'`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Added component ${componentType} to '${objectPath}'`),
     };
   }
 
@@ -1065,9 +1134,7 @@ async function removeComponent(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Remove component command sent: ${componentType} from '${objectPath}'`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Removed component ${componentType} from '${objectPath}'`),
     };
   }
 
@@ -1093,9 +1160,7 @@ async function setComponentProperty(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Set property command sent: ${componentType}.${propertyName} = ${value} on '${objectPath}'`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Set ${componentType}.${propertyName} on '${objectPath}'`),
     };
   }
 
@@ -1135,9 +1200,7 @@ async function batchCreate(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Batch create command sent: ${objects.length} objects`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Created ${objects.length} GameObjects`),
       objectCount: objects.length,
       objects: objects.map((o) => o.name),
     };
@@ -1169,9 +1232,7 @@ async function instantiatePrefab(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Instantiate prefab command sent: ${prefabPath}`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Instantiated prefab ${prefabPath}`),
       details: {
         prefabPath,
         name: name || "(prefab name)",
@@ -1219,9 +1280,7 @@ async function batchInstantiatePrefabs(
 
   if (result.success) {
     return {
-      success: true,
-      message: `Batch instantiate command sent: ${prefabs.length} prefabs`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Instantiated ${prefabs.length} prefabs`),
       prefabCount: prefabs.length,
       prefabs: prefabs.map((p) => p.prefabPath.split("/").pop()),
     };
@@ -1341,9 +1400,7 @@ async function scanPrefabs(config: BanterMCPConfig): Promise<unknown> {
 
   if (result.success) {
     return {
-      success: true,
-      message: "Scan prefabs command sent to Unity. The catalog will be generated shortly.",
-      commandId: result.commandId,
+      ...commandResponse(result, "Prefab scan started."),
       note: "Use get_prefab_catalog after a few seconds to retrieve the results.",
     };
   }
@@ -1436,9 +1493,7 @@ async function setObjectReference(
   if (result.success) {
     const targetInfo = targetComponent ? ` (${targetComponent})` : "";
     return {
-      success: true,
-      message: `Set reference command sent: ${componentType}.${propertyName} -> ${targetPath}${targetInfo}`,
-      commandId: result.commandId,
+      ...commandResponse(result, `Set ${componentType}.${propertyName} -> ${targetPath}${targetInfo}`),
       details: {
         objectPath,
         componentType,

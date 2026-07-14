@@ -27,12 +27,15 @@ export function getConfig(): BanterMCPConfig {
   const unityProjectPath = process.env.UNITY_PROJECT_PATH || process.env.BANTER_PROJECT_PATH || "";
 
   const assetsPath = path.join(unityProjectPath, "Assets");
-  const mcpStatePath = path.join(assetsPath, "_MCP", "state");
-  const mcpCommandsPath = path.join(assetsPath, "_MCP", "commands");
+  const mcpRootPath = path.join(unityProjectPath, ".bantworks-mcp");
+  const mcpStatePath = path.join(mcpRootPath, "state");
+  const mcpCommandsPath = path.join(mcpRootPath, "commands");
   const webRootPath = path.join(assetsPath, "WebRoot");
+  const unityBridgePath = path.join(assetsPath, "Editor", "BanterMCPBridge.cs");
 
-  // Check if Unity extension is installed by looking for state directory
-  const hasUnityExtension = fs.existsSync(mcpStatePath);
+  // Check if Unity extension is installed or has already exported state.
+  const hasUnityExtension = Boolean(unityProjectPath) &&
+    (fs.existsSync(unityBridgePath) || fs.existsSync(mcpStatePath));
 
   return {
     unityProjectPath,

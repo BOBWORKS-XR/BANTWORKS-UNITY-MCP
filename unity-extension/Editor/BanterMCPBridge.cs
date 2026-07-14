@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -22,14 +23,20 @@ namespace BantworksMCP
     [InitializeOnLoad]
     public static class BantworksMCPBridge
     {
-        private static readonly string MCPFolder = "Assets/_MCP";
-        private static readonly string StateFolder = "Assets/_MCP/state";
-        private static readonly string CommandsFolder = "Assets/_MCP/commands";
+        private static readonly string ProjectRoot = Directory.GetParent(Application.dataPath)?.FullName ?? Directory.GetCurrentDirectory();
+        private static readonly string MCPFolder = Path.Combine(ProjectRoot, ".bantworks-mcp");
+        private static readonly string StateFolder = Path.Combine(MCPFolder, "state");
+        private static readonly string CommandsFolder = Path.Combine(MCPFolder, "commands");
+        private static readonly string FailedCommandsFolder = Path.Combine(CommandsFolder, "failed");
+        private static readonly string CommandResultsFolder = Path.Combine(StateFolder, "command-results");
 
         private static double lastCommandCheck = 0;
         private static double lastStateExport = 0;
+        private static double lastLauncherSettingsCheck = 0;
         private static readonly double CommandCheckInterval = 0.5; // seconds
         private static readonly double StateExportInterval = 2.0; // seconds
+        private static readonly double LauncherSettingsCheckInterval = 1.0; // seconds
+        private static DateTime lastLauncherSettingsWriteTime = DateTime.MinValue;
 
         // Public status for window
         public static bool IsConnected { get; private set; }
@@ -60,6 +67,7 @@ namespace BantworksMCP
         {
             // Initialize folders
             EnsureDirectories();
+            LoadLauncherSettingsIfChanged();
 
             // Subscribe to editor events
             EditorApplication.update += OnEditorUpdate;
@@ -97,6 +105,14 @@ namespace BantworksMCP
                 Directory.CreateDirectory(StateFolder);
             if (!Directory.Exists(CommandsFolder))
                 Directory.CreateDirectory(CommandsFolder);
+            if (!Directory.Exists(FailedCommandsFolder))
+                Directory.CreateDirectory(FailedCommandsFolder);
+            if (!Directory.Exists(CommandResultsFolder))
+                Directory.CreateDirectory(CommandResultsFolder);
+
+            string ignorePath = Path.Combine(MCPFolder, ".gitignore");
+            if (!File.Exists(ignorePath))
+                File.WriteAllText(ignorePath, "*\n!.gitignore\n");
         }
 
         private static void OnEditorUpdate()
@@ -115,6 +131,42 @@ namespace BantworksMCP
             {
                 lastStateExport = time;
                 ExportProjectState();
+            }
+
+            // Pick up launcher settings changes while Unity is open
+            if (time - lastLauncherSettingsCheck > LauncherSettingsCheckInterval)
+            {
+                lastLauncherSettingsCheck = time;
+                LoadLauncherSettingsIfChanged();
+            }
+        }
+
+        private static void LoadLauncherSettingsIfChanged()
+        {
+            string settingsPath = Path.Combine(StateFolder, "launcher-settings.json");
+            if (!File.Exists(settingsPath))
+                return;
+
+            try
+            {
+                DateTime writeTime = File.GetLastWriteTimeUtc(settingsPath);
+                if (writeTime <= lastLauncherSettingsWriteTime)
+                    return;
+
+                string json = File.ReadAllText(settingsPath);
+                var settings = JsonUtility.FromJson<LauncherSettings>(json);
+                if (settings != null && EnableCustomScripts != settings.enableCustomScripts)
+                {
+                    EnableCustomScripts = settings.enableCustomScripts;
+                    LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Launcher settings applied";
+                    Debug.Log($"[BANTWORKS MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
+                }
+
+                lastLauncherSettingsWriteTime = writeTime;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[BANTWORKS MCP] Could not read launcher settings: {e.Message}");
             }
         }
 
@@ -224,10 +276,13 @@ namespace BantworksMCP
 
             foreach (string file in commandFiles)
             {
+                MCPCommand command = null;
                 try
                 {
                     string json = File.ReadAllText(file);
-                    ProcessCommandJson(json);
+                    command = JsonUtility.FromJson<MCPCommand>(json);
+                    string message = ProcessCommandJson(json, command);
+                    WriteCommandResult(command?.id, true, message, null);
                     CommandsProcessed++;
                     LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Command processed";
 
@@ -237,83 +292,138 @@ namespace BantworksMCP
                 catch (Exception e)
                 {
                     Debug.LogError($"[BANTWORKS MCP] Error processing command {file}: {e.Message}");
+                    WriteCommandResult(command?.id, false, null, e.Message);
+                    ArchiveFailedCommand(file);
                 }
             }
         }
 
-        private static void ProcessCommandJson(string json)
+        private static string ProcessCommandJson(string json, MCPCommand baseCommand)
         {
-            // Parse the command type first
-            var baseCommand = JsonUtility.FromJson<MCPCommand>(json);
+            if (baseCommand == null || string.IsNullOrWhiteSpace(baseCommand.type))
+                throw new InvalidOperationException("Command is missing a type");
 
             switch (baseCommand.type)
             {
                 case "refresh":
                     AssetDatabase.Refresh();
                     ExportImportStatus(true, null);
-                    break;
+                    return "Unity assets refreshed";
 
                 case "export-state":
                     ExportProjectState();
-                    break;
+                    return "Project state exported";
 
                 case "create_gameobject":
                     var createCmd = JsonUtility.FromJson<CreateGameObjectCommand>(json);
                     CreateGameObject(createCmd);
-                    break;
+                    return $"Created GameObject: {createCmd.name}";
 
                 case "delete_gameobject":
                     var deleteCmd = JsonUtility.FromJson<DeleteGameObjectCommand>(json);
                     DeleteGameObject(deleteCmd);
-                    break;
+                    return $"Deleted GameObject: {deleteCmd.objectPath}";
 
                 case "modify_gameobject":
                     var modifyCmd = JsonUtility.FromJson<ModifyGameObjectCommand>(json);
                     ModifyGameObject(modifyCmd);
-                    break;
+                    return $"Modified GameObject: {modifyCmd.objectPath}";
 
                 case "add_component":
                     var addCompCmd = JsonUtility.FromJson<AddComponentCommand>(json);
                     AddComponentToObject(addCompCmd);
-                    break;
+                    return $"Added component: {addCompCmd.componentType}";
 
                 case "remove_component":
                     var removeCompCmd = JsonUtility.FromJson<RemoveComponentCommand>(json);
                     RemoveComponentFromObject(removeCompCmd);
-                    break;
+                    return $"Removed component: {removeCompCmd.componentType}";
 
                 case "set_component_property":
                     var setPropCmd = JsonUtility.FromJson<SetComponentPropertyCommand>(json);
                     SetComponentProperty(setPropCmd);
-                    break;
+                    return $"Set component property: {setPropCmd.componentType}.{setPropCmd.propertyName}";
+
+                case "set_object_reference":
+                    var setRefCmd = JsonUtility.FromJson<SetObjectReferenceCommand>(json);
+                    SetObjectReference(setRefCmd);
+                    return $"Set object reference: {setRefCmd.componentType}.{setRefCmd.propertyName}";
 
                 case "batch":
                     var batchCmd = JsonUtility.FromJson<BatchCommand>(json);
                     ProcessBatchCommand(batchCmd, json);
-                    break;
+                    return "Batch command completed";
 
                 case "instantiate_prefab":
                     var prefabCmd = JsonUtility.FromJson<InstantiatePrefabCommand>(json);
                     InstantiatePrefab(prefabCmd);
-                    break;
+                    return $"Instantiated prefab: {prefabCmd.prefabPath}";
 
                 case "scan_prefabs":
                     ScanAndExportPrefabCatalog();
-                    break;
+                    return "Prefab catalog scan completed";
 
                 case "get_object_bounds":
                     var boundsCmd = JsonUtility.FromJson<GetBoundsCommand>(json);
                     GetObjectBounds(boundsCmd);
-                    break;
+                    return $"Read bounds for: {boundsCmd.objectPath}";
 
                 default:
-                    Debug.LogWarning($"[BANTWORKS MCP] Unknown command type: {baseCommand.type}");
-                    break;
+                    throw new InvalidOperationException($"Unknown command type: {baseCommand.type}");
+            }
+        }
+
+        private static void ArchiveFailedCommand(string sourcePath)
+        {
+            try
+            {
+                if (!File.Exists(sourcePath))
+                    return;
+
+                string targetPath = Path.Combine(FailedCommandsFolder, Path.GetFileName(sourcePath));
+                if (File.Exists(targetPath))
+                    targetPath = Path.Combine(FailedCommandsFolder, $"{Path.GetFileNameWithoutExtension(sourcePath)}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.json");
+
+                File.Move(sourcePath, targetPath);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[BANTWORKS MCP] Could not archive failed command {sourcePath}: {e.Message}");
+            }
+        }
+
+        private static void WriteCommandResult(string commandId, bool success, string message, string error)
+        {
+            if (string.IsNullOrWhiteSpace(commandId))
+                return;
+
+            try
+            {
+                var result = new CommandResult
+                {
+                    commandId = commandId,
+                    success = success,
+                    message = message,
+                    error = error,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+
+                WriteAtomicText(Path.Combine(CommandResultsFolder, $"{commandId}.json"), JsonUtility.ToJson(result, true));
+            }
+            catch (Exception e)
+            {
+                System.Console.WriteLine($"[BANTWORKS MCP] Could not write command result: {e.Message}");
             }
         }
 
         private static void CreateGameObject(CreateGameObjectCommand cmd)
         {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.name))
+                throw new InvalidOperationException("Create GameObject command requires a name");
+
+            GameObject parent = string.IsNullOrEmpty(cmd.parentPath)
+                ? null
+                : FindGameObjectByPath(cmd.parentPath);
             GameObject obj = null;
 
             // Create based on primitive type
@@ -331,8 +441,7 @@ namespace BantworksMCP
                 }
                 else
                 {
-                    obj = new GameObject(cmd.name);
-                    Debug.LogWarning($"[BANTWORKS MCP] Unknown primitive type: {cmd.primitiveType}, created empty object");
+                    throw new InvalidOperationException($"Unknown primitive type: {cmd.primitiveType}");
                 }
             }
 
@@ -353,17 +462,9 @@ namespace BantworksMCP
             }
 
             // Set parent if specified
-            if (!string.IsNullOrEmpty(cmd.parentPath))
+            if (parent != null)
             {
-                var parent = GameObject.Find(cmd.parentPath);
-                if (parent != null)
-                {
-                    obj.transform.SetParent(parent.transform, true);
-                }
-                else
-                {
-                    Debug.LogWarning($"[BANTWORKS MCP] Parent not found: {cmd.parentPath}");
-                }
+                obj.transform.SetParent(parent.transform, true);
             }
 
             // Mark scene dirty
@@ -378,28 +479,16 @@ namespace BantworksMCP
 
         private static void DeleteGameObject(DeleteGameObjectCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj != null)
-            {
-                Undo.DestroyObjectImmediate(obj);
-                EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-                Debug.Log($"[BANTWORKS MCP] Deleted GameObject: {cmd.objectPath}");
-                ExportSceneHierarchy();
-            }
-            else
-            {
-                Debug.LogWarning($"[BANTWORKS MCP] Object not found: {cmd.objectPath}");
-            }
+            var obj = FindGameObjectByPath(cmd?.objectPath);
+            Undo.DestroyObjectImmediate(obj);
+            EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+            Debug.Log($"[BANTWORKS MCP] Deleted GameObject: {cmd.objectPath}");
+            ExportSceneHierarchy();
         }
 
         private static void ModifyGameObject(ModifyGameObjectCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj == null)
-            {
-                Debug.LogWarning($"[BANTWORKS MCP] Object not found: {cmd.objectPath}");
-                return;
-            }
+            var obj = FindGameObjectByPath(cmd?.objectPath);
 
             Undo.RecordObject(obj.transform, "MCP Modify Transform");
 
@@ -425,19 +514,13 @@ namespace BantworksMCP
 
         private static void AddComponentToObject(AddComponentCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj == null)
-            {
-                Debug.LogWarning($"[BANTWORKS MCP] Object not found: {cmd.objectPath}");
-                return;
-            }
+            var obj = FindGameObjectByPath(cmd?.objectPath);
 
             // Try to find the component type
             Type componentType = FindComponentType(cmd.componentType);
             if (componentType == null)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Component type not found: {cmd.componentType}");
-                return;
+                throw new InvalidOperationException($"Component type not found: {cmd.componentType}");
             }
 
             Undo.AddComponent(obj, componentType);
@@ -448,18 +531,12 @@ namespace BantworksMCP
 
         private static void RemoveComponentFromObject(RemoveComponentCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj == null)
-            {
-                Debug.LogWarning($"[BANTWORKS MCP] Object not found: {cmd.objectPath}");
-                return;
-            }
+            var obj = FindGameObjectByPath(cmd?.objectPath);
 
             var component = obj.GetComponent(cmd.componentType);
             if (component == null)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Component not found: {cmd.componentType} on {cmd.objectPath}");
-                return;
+                throw new InvalidOperationException($"Component not found: {cmd.componentType} on {cmd.objectPath}");
             }
 
             Undo.DestroyObjectImmediate(component);
@@ -470,26 +547,19 @@ namespace BantworksMCP
 
         private static void SetComponentProperty(SetComponentPropertyCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj == null)
-            {
-                Debug.LogWarning($"[BANTWORKS MCP] Object not found: {cmd.objectPath}");
-                return;
-            }
+            var obj = FindGameObjectByPath(cmd?.objectPath);
 
             var component = obj.GetComponent(cmd.componentType);
             if (component == null)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Component not found: {cmd.componentType} on {cmd.objectPath}");
-                return;
+                throw new InvalidOperationException($"Component not found: {cmd.componentType} on {cmd.objectPath}");
             }
 
             var so = new SerializedObject(component);
             var prop = so.FindProperty(cmd.propertyName);
             if (prop == null)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Property not found: {cmd.propertyName} on {cmd.componentType}");
-                return;
+                throw new InvalidOperationException($"Property not found: {cmd.propertyName} on {cmd.componentType}");
             }
 
             Undo.RecordObject(component, "MCP Set Property");
@@ -501,6 +571,97 @@ namespace BantworksMCP
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
             Debug.Log($"[BANTWORKS MCP] Set {cmd.propertyName} on {cmd.componentType}");
             ExportSceneHierarchy();
+        }
+
+        private static void SetObjectReference(SetObjectReferenceCommand cmd)
+        {
+            var obj = FindGameObjectByPath(cmd?.objectPath);
+
+            var component = obj.GetComponent(cmd.componentType);
+            if (component == null)
+            {
+                throw new InvalidOperationException($"Component not found: {cmd.componentType} on {cmd.objectPath}");
+            }
+
+            var so = new SerializedObject(component);
+            var prop = so.FindProperty(cmd.propertyName);
+            if (prop == null)
+            {
+                throw new InvalidOperationException($"Property not found: {cmd.propertyName} on {cmd.componentType}");
+            }
+
+            if (prop.propertyType != SerializedPropertyType.ObjectReference)
+            {
+                throw new InvalidOperationException($"Property is not an object reference: {cmd.propertyName} on {cmd.componentType}");
+            }
+
+            UnityEngine.Object targetObject = null;
+            bool clearReference = string.IsNullOrWhiteSpace(cmd.targetPath) ||
+                                  string.Equals(cmd.targetPath, "null", StringComparison.OrdinalIgnoreCase);
+
+            if (!clearReference)
+            {
+                var targetGameObject = FindGameObjectByPath(cmd.targetPath);
+
+                targetObject = ResolveObjectReferenceTarget(component.GetType(), cmd.propertyName, targetGameObject, cmd.targetComponent);
+                if (targetObject == null)
+                {
+                    throw new InvalidOperationException($"Could not resolve target reference for {cmd.propertyName} from {cmd.targetPath}");
+                }
+            }
+
+            Undo.RecordObject(component, "MCP Set Object Reference");
+            prop.objectReferenceValue = targetObject;
+            so.ApplyModifiedProperties();
+
+            EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+            Debug.Log($"[BANTWORKS MCP] Set reference {cmd.propertyName} on {cmd.componentType}");
+            ExportSceneHierarchy();
+        }
+
+        private static UnityEngine.Object ResolveObjectReferenceTarget(Type componentType, string propertyName, GameObject targetGameObject, string targetComponent)
+        {
+            if (!string.IsNullOrEmpty(targetComponent))
+            {
+                if (string.Equals(targetComponent, "GameObject", StringComparison.OrdinalIgnoreCase))
+                    return targetGameObject;
+
+                Type explicitType = FindComponentType(targetComponent);
+                if (explicitType == null)
+                    return null;
+
+                return targetGameObject.GetComponent(explicitType);
+            }
+
+            Type memberType = FindSerializedMemberType(componentType, propertyName);
+            if (memberType == null || memberType == typeof(UnityEngine.Object) || memberType == typeof(GameObject))
+                return targetGameObject;
+
+            if (typeof(Component).IsAssignableFrom(memberType))
+                return targetGameObject.GetComponent(memberType);
+
+            if (typeof(GameObject).IsAssignableFrom(memberType))
+                return targetGameObject;
+
+            return null;
+        }
+
+        private static Type FindSerializedMemberType(Type componentType, string propertyName)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+            Type currentType = componentType;
+            while (currentType != null)
+            {
+                var field = currentType.GetField(propertyName, flags);
+                if (field != null)
+                    return field.FieldType;
+
+                currentType = currentType.BaseType;
+            }
+
+            var property = componentType.GetProperty(propertyName, flags);
+            return property?.PropertyType;
         }
 
         private static Type FindComponentType(string typeName)
@@ -584,22 +745,46 @@ namespace BantworksMCP
             return null;
         }
 
+        private static GameObject FindGameObjectByPath(string objectPath)
+        {
+            if (string.IsNullOrWhiteSpace(objectPath))
+                throw new InvalidOperationException("GameObject path is required");
+
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var matches = Resources.FindObjectsOfTypeAll<GameObject>()
+                .Where(candidate => candidate.scene == activeScene && GetGameObjectPath(candidate) == objectPath)
+                .ToList();
+
+            if (matches.Count == 1)
+                return matches[0];
+
+            if (matches.Count == 0)
+                throw new InvalidOperationException($"GameObject not found in active scene: {objectPath}");
+
+            throw new InvalidOperationException(
+                $"GameObject path is ambiguous: {objectPath}. Rename duplicate siblings before issuing a mutation command.");
+        }
+
         private static void InstantiatePrefab(InstantiatePrefabCommand cmd)
         {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.prefabPath))
+                throw new InvalidOperationException("Instantiate prefab command requires prefabPath");
+
+            GameObject parent = string.IsNullOrEmpty(cmd.parentPath)
+                ? null
+                : FindGameObjectByPath(cmd.parentPath);
             // Load prefab from asset path
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(cmd.prefabPath);
             if (prefab == null)
             {
-                Debug.LogError($"[BANTWORKS MCP] Prefab not found: {cmd.prefabPath}");
-                return;
+                throw new InvalidOperationException($"Prefab not found: {cmd.prefabPath}");
             }
 
             // Instantiate prefab
             GameObject obj = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
             if (obj == null)
             {
-                Debug.LogError($"[BANTWORKS MCP] Failed to instantiate prefab: {cmd.prefabPath}");
-                return;
+                throw new InvalidOperationException($"Failed to instantiate prefab: {cmd.prefabPath}");
             }
 
             // Set name if provided
@@ -625,17 +810,9 @@ namespace BantworksMCP
             }
 
             // Set parent if specified
-            if (!string.IsNullOrEmpty(cmd.parentPath))
+            if (parent != null)
             {
-                var parent = GameObject.Find(cmd.parentPath);
-                if (parent != null)
-                {
-                    obj.transform.SetParent(parent.transform, true);
-                }
-                else
-                {
-                    Debug.LogWarning($"[BANTWORKS MCP] Parent not found: {cmd.parentPath}");
-                }
+                obj.transform.SetParent(parent.transform, true);
             }
 
             // Register undo
@@ -651,10 +828,10 @@ namespace BantworksMCP
         private static void InstantiatePrefabSilent(InstantiatePrefabCommand cmd)
         {
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(cmd.prefabPath);
-            if (prefab == null) return;
+            if (prefab == null) throw new InvalidOperationException($"Prefab not found: {cmd.prefabPath}");
 
             GameObject obj = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-            if (obj == null) return;
+            if (obj == null) throw new InvalidOperationException($"Failed to instantiate prefab: {cmd.prefabPath}");
 
             if (!string.IsNullOrEmpty(cmd.name))
                 obj.name = cmd.name;
@@ -670,21 +847,14 @@ namespace BantworksMCP
 
             if (!string.IsNullOrEmpty(cmd.parentPath))
             {
-                var parent = GameObject.Find(cmd.parentPath);
-                if (parent != null)
-                    obj.transform.SetParent(parent.transform, true);
+                var parent = FindGameObjectByPath(cmd.parentPath);
+                obj.transform.SetParent(parent.transform, true);
             }
         }
 
         private static void GetObjectBounds(GetBoundsCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj == null)
-            {
-                Debug.LogWarning($"[BANTWORKS MCP] Object not found for bounds: {cmd.objectPath}");
-                ExportBoundsResult(cmd.objectPath, false, null);
-                return;
-            }
+            var obj = FindGameObjectByPath(cmd?.objectPath);
 
             Bounds bounds = CalculateGameObjectBounds(obj);
             ExportBoundsResult(cmd.objectPath, true, bounds);
@@ -705,10 +875,10 @@ namespace BantworksMCP
                 {
                     var b = bounds.Value;
                     sb.AppendLine($"    \"bounds\": {{");
-                    sb.AppendLine($"        \"center\": [{b.center.x:F3}, {b.center.y:F3}, {b.center.z:F3}],");
-                    sb.AppendLine($"        \"size\": [{b.size.x:F3}, {b.size.y:F3}, {b.size.z:F3}],");
-                    sb.AppendLine($"        \"min\": [{b.min.x:F3}, {b.min.y:F3}, {b.min.z:F3}],");
-                    sb.AppendLine($"        \"max\": [{b.max.x:F3}, {b.max.y:F3}, {b.max.z:F3}]");
+                    sb.AppendLine($"        \"center\": [{FormatJsonFloat(b.center.x)}, {FormatJsonFloat(b.center.y)}, {FormatJsonFloat(b.center.z)}],");
+                    sb.AppendLine($"        \"size\": [{FormatJsonFloat(b.size.x)}, {FormatJsonFloat(b.size.y)}, {FormatJsonFloat(b.size.z)}],");
+                    sb.AppendLine($"        \"min\": [{FormatJsonFloat(b.min.x)}, {FormatJsonFloat(b.min.y)}, {FormatJsonFloat(b.min.z)}],");
+                    sb.AppendLine($"        \"max\": [{FormatJsonFloat(b.max.x)}, {FormatJsonFloat(b.max.y)}, {FormatJsonFloat(b.max.z)}]");
                     sb.AppendLine($"    }}");
                 }
                 else
@@ -718,7 +888,7 @@ namespace BantworksMCP
 
                 sb.AppendLine("}");
 
-                File.WriteAllText(Path.Combine(StateFolder, "bounds-result.json"), sb.ToString());
+                WriteAtomicText(Path.Combine(StateFolder, "bounds-result.json"), sb.ToString());
             }
             catch (Exception e)
             {
@@ -782,6 +952,9 @@ namespace BantworksMCP
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
             Debug.Log($"[BANTWORKS MCP] Batch completed: {createdCount} operations, {errorCount} errors");
             ExportSceneHierarchy();
+
+            if (errorCount > 0)
+                throw new InvalidOperationException($"Batch completed with {errorCount} failed operation(s). {createdCount} operation(s) were applied.");
         }
 
         /// <summary>
@@ -919,6 +1092,12 @@ namespace BantworksMCP
 
         private static void CreateGameObjectSilent(CreateGameObjectCommand cmd)
         {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.name))
+                throw new InvalidOperationException("Create GameObject command requires a name");
+
+            GameObject parent = string.IsNullOrEmpty(cmd.parentPath)
+                ? null
+                : FindGameObjectByPath(cmd.parentPath);
             GameObject obj = null;
 
             if (string.IsNullOrEmpty(cmd.primitiveType))
@@ -935,7 +1114,7 @@ namespace BantworksMCP
                 }
                 else
                 {
-                    obj = new GameObject(cmd.name);
+                    throw new InvalidOperationException($"Unknown primitive type: {cmd.primitiveType}");
                 }
             }
 
@@ -948,25 +1127,21 @@ namespace BantworksMCP
             if (cmd.scale != null && cmd.scale.Length == 3)
                 obj.transform.localScale = new Vector3(cmd.scale[0], cmd.scale[1], cmd.scale[2]);
 
-            if (!string.IsNullOrEmpty(cmd.parentPath))
+            if (parent != null)
             {
-                var parent = GameObject.Find(cmd.parentPath);
-                if (parent != null)
-                    obj.transform.SetParent(parent.transform, true);
+                obj.transform.SetParent(parent.transform, true);
             }
         }
 
         private static void DeleteGameObjectSilent(DeleteGameObjectCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj != null)
-                UnityEngine.Object.DestroyImmediate(obj);
+            var obj = FindGameObjectByPath(cmd?.objectPath);
+            UnityEngine.Object.DestroyImmediate(obj);
         }
 
         private static void ModifyGameObjectSilent(ModifyGameObjectCommand cmd)
         {
-            var obj = GameObject.Find(cmd.objectPath);
-            if (obj == null) return;
+            var obj = FindGameObjectByPath(cmd?.objectPath);
 
             if (cmd.position != null && cmd.position.Length == 3)
                 obj.transform.position = new Vector3(cmd.position[0], cmd.position[1], cmd.position[2]);
@@ -986,10 +1161,10 @@ namespace BantworksMCP
                     prop.boolValue = bool.Parse(valueJson);
                     break;
                 case SerializedPropertyType.Integer:
-                    prop.intValue = int.Parse(valueJson);
+                    prop.intValue = int.Parse(valueJson, CultureInfo.InvariantCulture);
                     break;
                 case SerializedPropertyType.Float:
-                    prop.floatValue = float.Parse(valueJson);
+                    prop.floatValue = float.Parse(valueJson, CultureInfo.InvariantCulture);
                     break;
                 case SerializedPropertyType.String:
                     prop.stringValue = valueJson;
@@ -1007,17 +1182,52 @@ namespace BantworksMCP
                     prop.colorValue = color;
                     break;
                 case SerializedPropertyType.Enum:
-                    prop.enumValueIndex = int.Parse(valueJson);
+                    prop.enumValueIndex = int.Parse(valueJson, CultureInfo.InvariantCulture);
                     break;
                 default:
-                    Debug.LogWarning($"[BANTWORKS MCP] Unsupported property type: {prop.propertyType}");
-                    break;
+                    throw new InvalidOperationException($"Unsupported property type: {prop.propertyType}");
             }
         }
 
         #endregion
 
         #region State Export
+
+        private static void WriteAtomicText(string destinationPath, string contents)
+        {
+            string temporaryPath = destinationPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temporaryPath, contents);
+
+                for (int attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        if (File.Exists(destinationPath))
+                            File.Replace(temporaryPath, destinationPath, null);
+                        else
+                            File.Move(temporaryPath, destinationPath);
+                        return;
+                    }
+                    catch (IOException) when (attempt < 8)
+                    {
+                        // A polling MCP reader can hold the previous file for a few milliseconds on Windows.
+                        System.Threading.Thread.Sleep(25);
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
+        }
+
+        private static string FormatJsonFloat(float value)
+        {
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
 
         private static void ExportProjectState()
         {
@@ -1046,7 +1256,7 @@ namespace BantworksMCP
                 hierarchy.timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
                 string json = JsonUtility.ToJson(hierarchy, true);
-                File.WriteAllText(Path.Combine(StateFolder, "scene-hierarchy.json"), json);
+                WriteAtomicText(Path.Combine(StateFolder, "scene-hierarchy.json"), json);
             }
             catch (Exception e)
             {
@@ -1214,7 +1424,7 @@ namespace BantworksMCP
                 };
 
                 string json = JsonUtility.ToJson(state, true);
-                File.WriteAllText(Path.Combine(StateFolder, "editor-state.json"), json);
+                WriteAtomicText(Path.Combine(StateFolder, "editor-state.json"), json);
             }
             catch (Exception e)
             {
@@ -1260,7 +1470,7 @@ namespace BantworksMCP
                 sb.AppendLine("    ]");
                 sb.AppendLine("}");
 
-                File.WriteAllText(Path.Combine(StateFolder, "console-log.json"), sb.ToString());
+                WriteAtomicText(Path.Combine(StateFolder, "console-log.json"), sb.ToString());
             }
             catch (Exception e)
             {
@@ -1282,7 +1492,7 @@ namespace BantworksMCP
                 };
 
                 string json = JsonUtility.ToJson(status, true);
-                File.WriteAllText(Path.Combine(StateFolder, "import-status.json"), json);
+                WriteAtomicText(Path.Combine(StateFolder, "import-status.json"), json);
             }
             catch (Exception e)
             {
@@ -1422,9 +1632,9 @@ namespace BantworksMCP
                         if (!string.IsNullOrEmpty(p.subcategory))
                             sb.Append($", \"subcategory\": \"{EscapeJsonString(p.subcategory)}\"");
                         if (p.boundsSize != null)
-                            sb.Append($", \"boundsSize\": [{p.boundsSize[0]:F2}, {p.boundsSize[1]:F2}, {p.boundsSize[2]:F2}]");
+                            sb.Append($", \"boundsSize\": [{FormatJsonFloat(p.boundsSize[0])}, {FormatJsonFloat(p.boundsSize[1])}, {FormatJsonFloat(p.boundsSize[2])}]");
                         if (p.boundsCenter != null)
-                            sb.Append($", \"boundsCenter\": [{p.boundsCenter[0]:F2}, {p.boundsCenter[1]:F2}, {p.boundsCenter[2]:F2}]");
+                            sb.Append($", \"boundsCenter\": [{FormatJsonFloat(p.boundsCenter[0])}, {FormatJsonFloat(p.boundsCenter[1])}, {FormatJsonFloat(p.boundsCenter[2])}]");
                         sb.Append("}");
                         if (j < prefabList.Count - 1) sb.AppendLine(",");
                         else sb.AppendLine();
@@ -1441,7 +1651,7 @@ namespace BantworksMCP
 
                 // Write catalog file
                 string catalogPath = Path.Combine(StateFolder, "prefab-catalog.json");
-                File.WriteAllText(catalogPath, sb.ToString());
+                WriteAtomicText(catalogPath, sb.ToString());
 
                 stopwatch.Stop();
 
@@ -1462,8 +1672,30 @@ namespace BantworksMCP
 
         private static string EscapeJsonString(string s)
         {
-            if (string.IsNullOrEmpty(s)) return s;
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+
+            var escaped = new System.Text.StringBuilder(s.Length + 16);
+            foreach (char character in s)
+            {
+                switch (character)
+                {
+                    case '\\': escaped.Append("\\\\"); break;
+                    case '"': escaped.Append("\\\""); break;
+                    case '\b': escaped.Append("\\b"); break;
+                    case '\f': escaped.Append("\\f"); break;
+                    case '\n': escaped.Append("\\n"); break;
+                    case '\r': escaped.Append("\\r"); break;
+                    case '\t': escaped.Append("\\t"); break;
+                    default:
+                        if (character < 0x20)
+                            escaped.Append("\\u").Append(((int)character).ToString("X4", CultureInfo.InvariantCulture));
+                        else
+                            escaped.Append(character);
+                        break;
+                }
+            }
+
+            return escaped.ToString();
         }
 
         /// <summary>
@@ -1589,6 +1821,7 @@ namespace BantworksMCP
         [Serializable]
         private class MCPCommand
         {
+            public string id;
             public string type;
             public string path;
             public string stateType;
@@ -1648,6 +1881,17 @@ namespace BantworksMCP
             public string componentType;
             public string propertyName;
             public string value;
+        }
+
+        [Serializable]
+        private class SetObjectReferenceCommand
+        {
+            public string type;
+            public string objectPath;
+            public string componentType;
+            public string propertyName;
+            public string targetPath;
+            public string targetComponent;
         }
 
         [Serializable]
@@ -1750,6 +1994,22 @@ namespace BantworksMCP
             public bool hasErrors;
             public string errorMessage;
             public long timestamp;
+        }
+
+        [Serializable]
+        private class CommandResult
+        {
+            public string commandId;
+            public bool success;
+            public string message;
+            public string error;
+            public long timestamp;
+        }
+
+        [Serializable]
+        private class LauncherSettings
+        {
+            public bool enableCustomScripts;
         }
 
         #endregion

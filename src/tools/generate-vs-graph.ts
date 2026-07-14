@@ -5,7 +5,8 @@
  * Handles all the complexity of the Unity VS format.
  */
 
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
+import { BANTER_CUSTOM_VS_NODES } from "../resources/banter-custom-vs-nodes.js";
 
 export interface NodeSpec {
   type: string;
@@ -68,7 +69,17 @@ const TYPE_HANDLES: Record<string, string> = {
 };
 
 // Shorthand type names to full node types
+const BANTER_CUSTOM_NODE_TYPE_MAP: Record<string, string> = Object.fromEntries(
+  Object.values(BANTER_CUSTOM_VS_NODES).map((node) => [node.name, node.fullType])
+);
+
+const BANTER_CUSTOM_NODES_BY_FULL_TYPE = new Map(
+  Object.values(BANTER_CUSTOM_VS_NODES).map((node) => [node.fullType, node])
+);
+
 const NODE_TYPE_MAP: Record<string, string> = {
+  ...BANTER_CUSTOM_NODE_TYPE_MAP,
+
   // Banter events
   OnGrab: "Banter.VisualScripting.OnGrab",
   OnRelease: "Banter.VisualScripting.OnRelease",
@@ -146,6 +157,9 @@ const EVENT_NODES = new Set([
   "Unity.VisualScripting.Update",
   "Unity.VisualScripting.OnCollisionEnter",
   "Unity.VisualScripting.OnTriggerEnter",
+  ...Object.values(BANTER_CUSTOM_VS_NODES)
+    .filter((node) => node.isEvent)
+    .map((node) => node.fullType),
 ]);
 
 /**
@@ -188,7 +202,8 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
         sourceKey: conn.fromPort,
         destinationUnit: { $ref: destId },
         destinationKey: conn.toPort,
-        guid: uuidv4(),
+        guid: randomUUID(),
+        $version: "A",
         $type: conn.type === "control"
           ? "Unity.VisualScripting.ControlConnection"
           : "Unity.VisualScripting.ValueConnection",
@@ -263,9 +278,10 @@ function createNodeObject(
   position?: { x: number; y: number },
   properties?: Record<string, unknown>
 ): Record<string, unknown> {
+  const customNode = BANTER_CUSTOM_NODES_BY_FULL_TYPE.get(type);
   const node: Record<string, unknown> = {
     position: position || { x: 0, y: 0 },
-    guid: uuidv4(),
+    guid: randomUUID(),
     $version: "A",
     $type: type,
     $id,
@@ -319,6 +335,22 @@ function createNodeObject(
     node.defaultValues = properties?.defaultValues || { target: null };
   } else if (type === "Unity.VisualScripting.This" || type === "Unity.VisualScripting.Self") {
     node.defaultValues = {};
+  } else if (customNode) {
+    node.defaultValues = {
+      ...customDefaultValuesToSerializedDefaults(customNode.defaultValues),
+      ...(properties?.defaultValues as Record<string, unknown> | undefined),
+    };
+
+    // Only copy sample scalar fields that are safe across generated nodes.
+    const serializedFields = customNode.serializedFields as Record<string, unknown>;
+    if (typeof serializedFields.argumentCount === "number") {
+      node.argumentCount = serializedFields.argumentCount;
+    }
+
+    if (properties) {
+      const { defaultValues: _defaultValues, ...rest } = properties;
+      Object.assign(node, rest);
+    }
   } else if (properties) {
     // Apply any other properties
     Object.assign(node, properties);
@@ -330,6 +362,36 @@ function createNodeObject(
   }
 
   return node;
+}
+
+function customDefaultValuesToSerializedDefaults(
+  defaults: Array<{ name: string; type: string | null; defaultValue: unknown }>
+): Record<string, unknown> {
+  const serialized: Record<string, unknown> = {};
+
+  for (const item of defaults) {
+    serialized[item.name] = customDefaultValueToSerializedValue(item.type, item.defaultValue);
+  }
+
+  return serialized;
+}
+
+function customDefaultValueToSerializedValue(type: string | null, value: unknown): unknown {
+  if (value === null || type === null) {
+    return value;
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return {
+      ...(value as Record<string, unknown>),
+      $type: type,
+    };
+  }
+
+  return {
+    $content: value,
+    $type: type,
+  };
 }
 
 function createVariableObject(v: VariableSpec): Record<string, unknown> {

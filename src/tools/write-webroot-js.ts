@@ -7,6 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { BanterMCPConfig } from "../lib/config.js";
+import { atomicWriteFileSync, resolvePathWithin } from "../lib/files.js";
 
 export interface WriteWebRootResult {
   success: boolean;
@@ -60,9 +61,9 @@ export async function writeWebRootJS(
 ${code}`;
     }
 
-    // Write the file
-    const filePath = path.join(config.webRootPath, filename);
-    fs.writeFileSync(filePath, finalCode, "utf-8");
+    // Keep user-supplied filenames inside the project's WebRoot folder.
+    const filePath = resolvePathWithin(config.webRootPath, filename, "filename");
+    atomicWriteFileSync(filePath, finalCode);
 
     const relativePath = path.relative(config.unityProjectPath, filePath);
 

@@ -60,8 +60,8 @@
 
         <div class="setting-row">
           <div class="setting-info">
-            <label>Auto-configure Claude Code</label>
-            <p class="hint">Automatically update ~/.claude.json when switching channels</p>
+            <label>Auto-configure Clients</label>
+            <p class="hint">Keep Claude Code and Codex synchronized with the selected Unity channel</p>
           </div>
           <label class="toggle">
             <input type="checkbox" id="autoConfig" checked>
@@ -92,11 +92,25 @@
             Apply to Claude Code
           </button>
 
+          <button class="btn btn-secondary" id="applyCodexBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M13 5L6 12L3 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Apply to Codex
+          </button>
+
           <button class="btn btn-danger" id="disconnectBtn">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
             Disconnect from Claude
+          </button>
+
+          <button class="btn btn-danger" id="disconnectCodexBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Disconnect from Codex
           </button>
 
           <button class="btn btn-secondary" id="installExtensionBtn">
@@ -118,7 +132,7 @@
     </main>
 
     <footer class="footer">
-      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v1.3.0</span> • <a href="#" id="githubLink">GitHub</a></p>
+      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v1.4.0</span> • <a href="#" id="githubLink">GitHub</a></p>
     </footer>
   </div>
 

@@ -1,5 +1,5 @@
-# Banter MCP Setup Script
-# Run this in PowerShell to configure your projects
+# BANTWORKS MCP Setup Script
+# Run this in PowerShell to configure Unity projects for Codex or Claude Code.
 
 param(
     [switch]$Install,
@@ -9,8 +9,9 @@ param(
     [switch]$Help
 )
 
-$ConfigPath = "$env:APPDATA\banter-mcp\config.json"
+$ConfigPath = "$env:APPDATA\banter-mcp\launcher-config.json"
 $ClaudeConfigPath = "$env:USERPROFILE\.claude.json"
+$CodexConfigPath = "$env:USERPROFILE\.codex\config.toml"
 $MCPRoot = "C:\tools\banter-mcp"
 
 function Ensure-ConfigDir {
@@ -29,6 +30,8 @@ function Load-Config {
         channels = @()
         active_channel_id = $null
         mcp_server_path = "$MCPRoot\dist\index.js"
+        auto_start = $false
+        enable_custom_scripts = $false
     }
 }
 
@@ -40,7 +43,7 @@ function Save-Config($config) {
 function Show-Menu {
     Clear-Host
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "       Banter MCP Configuration        " -ForegroundColor Cyan
+    Write-Host "      BANTWORKS MCP Configuration       " -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
@@ -67,6 +70,7 @@ function Show-Menu {
     Write-Host "  [S] Set active project"
     Write-Host "  [R] Remove a project"
     Write-Host "  [C] Apply to Claude Code"
+    Write-Host "  [X] Apply to Codex"
     Write-Host "  [E] Install Unity Extension"
     Write-Host "  [Q] Quit"
     Write-Host ""
@@ -106,6 +110,7 @@ function Add-Project {
         id = [guid]::NewGuid().ToString()
         name = $name
         unity_project_path = $path
+        scene_path = $null
         enabled = $true
     }
 
@@ -205,13 +210,19 @@ function Apply-ToClaudeCode {
         $claudeConfig | Add-Member -NotePropertyName "mcpServers" -NotePropertyValue @{} -Force
     }
 
+    $envVars = @{
+        UNITY_PROJECT_PATH = $activeChannel.unity_project_path
+    }
+
+    if ($activeChannel.scene_path) {
+        $envVars.UNITY_SCENE_PATH = $activeChannel.scene_path
+    }
+
     # Add/update banter MCP
     $claudeConfig.mcpServers | Add-Member -NotePropertyName "banter" -NotePropertyValue @{
         command = "node"
         args = @($config.mcp_server_path)
-        env = @{
-            UNITY_PROJECT_PATH = $activeChannel.unity_project_path
-        }
+        env = $envVars
     } -Force
 
     $claudeConfig | ConvertTo-Json -Depth 10 | Set-Content $ClaudeConfigPath
@@ -222,6 +233,96 @@ function Apply-ToClaudeCode {
     Write-Host "  Path: $($activeChannel.unity_project_path)" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "Restart Claude Code for changes to take effect." -ForegroundColor Yellow
+}
+
+function Remove-TomlTableBlock($content, $tableName) {
+    $target = "[$tableName]"
+    $lines = $content -split "`r?`n"
+    $output = New-Object System.Collections.Generic.List[string]
+    $skipping = $false
+
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+
+        if ($trimmed -eq $target) {
+            $skipping = $true
+            continue
+        }
+
+        if ($skipping -and $trimmed.StartsWith("[") -and $trimmed.EndsWith("]")) {
+            $skipping = $false
+        }
+
+        if (-not $skipping) {
+            $output.Add($line)
+        }
+    }
+
+    return ($output -join "`n").TrimEnd()
+}
+
+function Escape-TomlString($value) {
+    return ($value -replace "\\", "\\" -replace '"', '\"')
+}
+
+function Apply-ToCodex {
+    $config = Load-Config
+
+    if (-not $config.active_channel_id) {
+        Write-Host "No active project selected!" -ForegroundColor Yellow
+        return
+    }
+
+    $activeChannel = $config.channels | Where-Object { $_.id -eq $config.active_channel_id }
+
+    if (-not $activeChannel) {
+        Write-Host "Active channel not found!" -ForegroundColor Red
+        return
+    }
+
+    $configDir = Split-Path $CodexConfigPath
+    if (-not (Test-Path $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+
+    $content = if (Test-Path $CodexConfigPath) {
+        Get-Content $CodexConfigPath -Raw
+    } else {
+        ""
+    }
+
+    $content = Remove-TomlTableBlock $content "mcp_servers.banter"
+    $content = Remove-TomlTableBlock $content "mcp_servers.banter.env"
+
+    if (-not [string]::IsNullOrWhiteSpace($content)) {
+        $content = $content.TrimEnd() + "`n`n"
+    }
+
+    $serverPath = Escape-TomlString ($config.mcp_server_path -replace "\\", "/")
+    $projectPath = Escape-TomlString ($activeChannel.unity_project_path -replace "\\", "/")
+
+    $content += "[mcp_servers.banter]`n"
+    $content += "command = `"node`"`n"
+    $content += "args = [`"$serverPath`"]`n"
+    $content += "startup_timeout_sec = 20`n"
+    $content += "tool_timeout_sec = 60`n`n"
+    $content += "[mcp_servers.banter.env]`n"
+    $content += "UNITY_PROJECT_PATH = `"$projectPath`"`n"
+
+    if ($activeChannel.scene_path) {
+        $scenePath = Escape-TomlString ($activeChannel.scene_path -replace "\\", "/")
+        $content += "UNITY_SCENE_PATH = `"$scenePath`"`n"
+    }
+
+    Set-Content -LiteralPath $CodexConfigPath -Value $content
+
+    Write-Host ""
+    Write-Host "Applied to Codex!" -ForegroundColor Green
+    Write-Host "  Config: $CodexConfigPath" -ForegroundColor DarkGray
+    Write-Host "  Project: $($activeChannel.name)" -ForegroundColor Cyan
+    Write-Host "  Path: $($activeChannel.unity_project_path)" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "Restart Codex for changes to take effect." -ForegroundColor Yellow
 }
 
 function Install-UnityExtension {
@@ -255,6 +356,15 @@ function Install-UnityExtension {
 
     Copy-Item $sourcePath $destPath -Force
 
+    $stateDir = "$($activeChannel.unity_project_path)\.bantworks-mcp\state"
+    if (-not (Test-Path $stateDir)) {
+        New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
+    }
+
+    @{
+        enableCustomScripts = [bool]$config.enable_custom_scripts
+    } | ConvertTo-Json | Set-Content "$stateDir\launcher-settings.json"
+
     Write-Host ""
     Write-Host "Unity extension installed!" -ForegroundColor Green
     Write-Host "  Destination: $destPath" -ForegroundColor DarkGray
@@ -272,6 +382,7 @@ while ($true) {
         "S" { Set-ActiveProject; Read-Host "Press Enter to continue" }
         "R" { Remove-Project; Read-Host "Press Enter to continue" }
         "C" { Apply-ToClaudeCode; Read-Host "Press Enter to continue" }
+        "X" { Apply-ToCodex; Read-Host "Press Enter to continue" }
         "E" { Install-UnityExtension; Read-Host "Press Enter to continue" }
         "Q" { Write-Host "Goodbye!" -ForegroundColor Cyan; exit }
         default { Write-Host "Invalid option!" -ForegroundColor Red; Start-Sleep -Seconds 1 }

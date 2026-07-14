@@ -7,6 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { BanterMCPConfig } from "../lib/config.js";
+import { atomicWriteFileSync, resolvePathWithin } from "../lib/files.js";
 
 export interface WriteVSGraphResult {
   success: boolean;
@@ -59,8 +60,15 @@ export async function writeVSGraph(
       };
     }
 
-    // Create the target directory
-    const targetDir = path.join(config.assetsPath, folder);
+    if (path.basename(graphName) !== graphName || graphName === "." || graphName === "..") {
+      return {
+        success: false,
+        error: "graphName must be a file name without path separators",
+      };
+    }
+
+    // Create the target directory, constrained to the Unity Assets folder.
+    const targetDir = resolvePathWithin(config.assetsPath, folder, "folder");
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
@@ -69,14 +77,14 @@ export async function writeVSGraph(
     const assetContent = generateAssetFile(graphName, graphJson);
 
     // Write the file
-    const assetPath = path.join(targetDir, `${graphName}.asset`);
-    fs.writeFileSync(assetPath, assetContent, "utf-8");
+    const assetPath = resolvePathWithin(targetDir, `${graphName}.asset`, "graphName");
+    atomicWriteFileSync(assetPath, assetContent);
 
     // Write a .meta file hint for Unity (helps with import)
     const metaPath = `${assetPath}.meta`;
     if (!fs.existsSync(metaPath)) {
       const metaContent = generateMetaFile();
-      fs.writeFileSync(metaPath, metaContent, "utf-8");
+      atomicWriteFileSync(metaPath, metaContent);
     }
 
     // Trigger Unity refresh if extension is installed
@@ -153,20 +161,16 @@ function generateUnityGuid(): string {
 
 async function triggerUnityRefresh(config: BanterMCPConfig, assetPath: string): Promise<void> {
   // Write a refresh command for Unity's MCP Bridge to pick up
-  const commandPath = path.join(config.mcpCommandsPath, "refresh.json");
+    try {
+      const { randomUUID } = await import("crypto");
+      const commandPath = path.join(config.mcpCommandsPath, `refresh-${randomUUID()}.json`);
+      const command = {
+        type: "refresh",
+        path: assetPath,
+        timestamp: Date.now(),
+      };
 
-  try {
-    if (!fs.existsSync(config.mcpCommandsPath)) {
-      fs.mkdirSync(config.mcpCommandsPath, { recursive: true });
-    }
-
-    const command = {
-      type: "refresh",
-      path: assetPath,
-      timestamp: Date.now(),
-    };
-
-    fs.writeFileSync(commandPath, JSON.stringify(command, null, 2));
+      atomicWriteFileSync(commandPath, JSON.stringify(command, null, 2));
   } catch {
     // Non-critical error, Unity will refresh eventually
   }

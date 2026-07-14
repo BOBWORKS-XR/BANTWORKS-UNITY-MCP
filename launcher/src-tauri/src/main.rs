@@ -36,6 +36,33 @@ fn get_config_path() -> PathBuf {
     config_dir.join("launcher-config.json")
 }
 
+/// Write a text file by publishing a complete temporary file in the same directory.
+/// This prevents launcher/config readers from observing truncated JSON or TOML.
+fn atomic_write(path: &PathBuf, content: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("Path has no parent directory: {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("Path has no file name: {}", path.display()))?;
+    let temporary_path = parent.join(format!(".{}.{}.tmp", file_name, uuid::Uuid::new_v4()));
+
+    fs::write(&temporary_path, content)
+        .map_err(|e| format!("Failed to write temporary file {}: {}", temporary_path.display(), e))?;
+
+    match fs::rename(&temporary_path, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&temporary_path);
+            Err(format!("Failed to publish {}: {}", path.display(), error))
+        }
+    }
+}
+
 /// Load configuration from disk
 #[tauri::command]
 fn load_config() -> Result<LauncherConfig, String> {
@@ -44,8 +71,7 @@ fn load_config() -> Result<LauncherConfig, String> {
     if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
     } else {
         Ok(LauncherConfig {
             channels: vec![],
@@ -64,8 +90,7 @@ fn save_config(config: LauncherConfig) -> Result<(), String> {
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))
+    atomic_write(&config_path, &content)
 }
 
 /// Add a new scene channel
@@ -136,6 +161,14 @@ fn get_claude_config_path() -> PathBuf {
         .join(".claude.json")
 }
 
+/// Get Codex config path
+fn get_codex_config_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".codex")
+        .join("config.toml")
+}
+
 /// Read current Claude Code MCP configuration
 #[tauri::command]
 fn get_claude_mcp_config() -> Result<serde_json::Value, String> {
@@ -144,8 +177,7 @@ fn get_claude_mcp_config() -> Result<serde_json::Value, String> {
     if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read Claude config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse Claude config: {}", e))
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse Claude config: {}", e))
     } else {
         Ok(serde_json::json!({}))
     }
@@ -153,13 +185,17 @@ fn get_claude_mcp_config() -> Result<serde_json::Value, String> {
 
 /// Update Claude Code MCP configuration for a channel
 #[tauri::command]
-fn update_claude_mcp_config(channel: ProjectChannel, mcp_server_path: String) -> Result<(), String> {
+fn update_claude_mcp_config(
+    channel: ProjectChannel,
+    mcp_server_path: String,
+) -> Result<(), String> {
     let config_path = get_claude_config_path();
 
     let mut config: serde_json::Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read Claude config: {}", e))?;
-        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse Claude config; refusing to overwrite it: {}", e))?
     } else {
         serde_json::json!({})
     };
@@ -185,8 +221,7 @@ fn update_claude_mcp_config(channel: ProjectChannel, mcp_server_path: String) ->
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize Claude config: {}", e))?;
 
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write Claude config: {}", e))
+    atomic_write(&config_path, &content)
 }
 
 /// Remove Banter MCP from Claude config
@@ -213,8 +248,106 @@ fn remove_claude_mcp_config() -> Result<(), String> {
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize Claude config: {}", e))?;
 
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write Claude config: {}", e))
+    atomic_write(&config_path, &content)
+}
+
+/// Update Codex MCP configuration for a channel
+#[tauri::command]
+fn update_codex_mcp_config(channel: ProjectChannel, mcp_server_path: String) -> Result<(), String> {
+    let config_path = get_codex_config_path();
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create Codex config directory: {}", e))?;
+    }
+
+    let existing = if config_path.exists() {
+        fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read Codex config: {}", e))?
+    } else {
+        String::new()
+    };
+
+    let mut content = remove_toml_table_block(&existing, "mcp_servers.banter");
+    content = remove_toml_table_block(&content, "mcp_servers.banter.env");
+
+    if !content.ends_with('\n') && !content.is_empty() {
+        content.push('\n');
+    }
+
+    content.push_str("\n[mcp_servers.banter]\n");
+    content.push_str("command = \"node\"\n");
+    content.push_str(&format!(
+        "args = [\"{}\"]\n",
+        escape_toml_string(&mcp_server_path)
+    ));
+    content.push_str("startup_timeout_sec = 20\n");
+    content.push_str("tool_timeout_sec = 60\n");
+    content.push_str("\n[mcp_servers.banter.env]\n");
+    content.push_str(&format!(
+        "UNITY_PROJECT_PATH = \"{}\"\n",
+        escape_toml_string(&channel.unity_project_path.replace("\\", "/"))
+    ));
+
+    if let Some(scene) = &channel.scene_path {
+        content.push_str(&format!(
+            "UNITY_SCENE_PATH = \"{}\"\n",
+            escape_toml_string(&scene.replace("\\", "/"))
+        ));
+    }
+
+    atomic_write(&config_path, &content)
+}
+
+/// Remove Banter MCP from Codex config
+#[tauri::command]
+fn remove_codex_mcp_config() -> Result<(), String> {
+    let config_path = get_codex_config_path();
+
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let existing = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read Codex config: {}", e))?;
+    let content = remove_toml_table_block(
+        &remove_toml_table_block(&existing, "mcp_servers.banter"),
+        "mcp_servers.banter.env",
+    );
+
+    atomic_write(&config_path, &content)
+}
+
+fn remove_toml_table_block(content: &str, table_name: &str) -> String {
+    let target = format!("[{}]", table_name);
+    let mut output = Vec::new();
+    let mut skipping = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == target {
+            skipping = true;
+            continue;
+        }
+
+        if skipping && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            skipping = false;
+        }
+
+        if !skipping {
+            output.push(line);
+        }
+    }
+
+    let mut result = output.join("\n");
+    if content.ends_with('\n') && !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+fn escape_toml_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Check if Unity extension is installed in a project
@@ -242,11 +375,35 @@ fn install_unity_extension(unity_project_path: String, mcp_root: String) -> Resu
 
     let dest = dest_dir.join("BanterMCPBridge.cs");
 
+    if !source.exists() {
+        return Err(format!("Unity bridge source was not found: {}", source.display()));
+    }
+
+    if !PathBuf::from(&unity_project_path).join("Assets").is_dir() {
+        return Err(format!("Not a Unity project (Assets folder not found): {}", unity_project_path));
+    }
+
     fs::create_dir_all(&dest_dir)
         .map_err(|e| format!("Failed to create Editor directory: {}", e))?;
 
-    fs::copy(&source, &dest)
-        .map_err(|e| format!("Failed to copy extension: {}", e))?;
+    if dest.exists() {
+        let backup_dir = PathBuf::from(&unity_project_path)
+            .join(".bantworks-mcp")
+            .join("backups");
+        fs::create_dir_all(&backup_dir)
+            .map_err(|e| format!("Failed to create bridge backup directory: {}", e))?;
+        let backup = backup_dir.join(format!("BanterMCPBridge-{}.cs", uuid::Uuid::new_v4()));
+        fs::copy(&dest, &backup)
+            .map_err(|e| format!("Failed to back up existing Unity bridge: {}", e))?;
+    }
+
+    let temporary_dest = dest_dir.join(format!(".BanterMCPBridge-{}.tmp", uuid::Uuid::new_v4()));
+    fs::copy(&source, &temporary_dest)
+        .map_err(|e| format!("Failed to stage Unity bridge: {}", e))?;
+    fs::rename(&temporary_dest, &dest).map_err(|e| {
+        let _ = fs::remove_file(&temporary_dest);
+        format!("Failed to install Unity bridge: {}", e)
+    })?;
 
     Ok(())
 }
@@ -270,6 +427,8 @@ fn main() {
             get_claude_mcp_config,
             update_claude_mcp_config,
             remove_claude_mcp_config,
+            update_codex_mcp_config,
+            remove_codex_mcp_config,
             check_unity_extension,
             install_unity_extension,
             get_mcp_root,
@@ -280,12 +439,11 @@ fn main() {
 }
 
 /// Set the custom scripts preference in Unity project's MCP state
-/// This writes to the _MCP/state folder which the Unity extension reads
+/// This writes to the project runtime state folder which the Unity extension reads
 #[tauri::command]
 fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result<(), String> {
     let state_dir = PathBuf::from(&unity_project_path)
-        .join("Assets")
-        .join("_MCP")
+        .join(".bantworks-mcp")
         .join("state");
 
     fs::create_dir_all(&state_dir)
@@ -300,8 +458,7 @@ fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result
     let content = serde_json::to_string_pretty(&settings)
         .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
-    fs::write(&settings_path, content)
-        .map_err(|e| format!("Failed to write settings: {}", e))?;
+    atomic_write(&settings_path, &content)?;
 
     Ok(())
 }

@@ -1,5 +1,5 @@
 /**
- * MCP Resources - Knowledge and state that Claude can read
+ * MCP Resources - Knowledge and state available to connected MCP clients
  */
 
 import * as fs from "fs";
@@ -7,12 +7,14 @@ import * as path from "path";
 import type { BanterMCPConfig } from "../lib/config.js";
 import { BANTER_COMPONENTS } from "./banter-components.js";
 import { BANTER_VS_NODES } from "./banter-vs-nodes.js";
+import { BANTER_CUSTOM_VS_NODES, BANTER_CUSTOM_VS_NODE_LOG } from "./banter-custom-vs-nodes.js";
 import { BANTER_JS_API } from "./banter-js-api.js";
 import { UNITY_TYPES } from "./unity-types.js";
 import { VS_GRAPH_INSTRUCTIONS } from "./vs-graph-instructions.js";
+import { UNITY_VS_JSON_MANUAL } from "./unity-vs-json-manual.js";
 
 /**
- * System prompt that instructs Claude to be proactive in Banter development
+ * System prompt that guides connected MCP clients during Banter development
  */
 const BANTER_SYSTEM_PROMPT = `# Banter MCP - Proactive Development Assistant
 
@@ -53,6 +55,8 @@ When the user asks for something in their scene:
 - \`generate_vs_graph\` - Create interaction logic
 - \`validate_vs_graph\` - Check for errors
 - \`write_vs_graph\` - Save to the project
+- Before creating Visual Scripting graphs, read \`banter://custom-vs-nodes\` for exact Banter custom \`$type\` names/default values and \`banter://unity-vs-json-manual\` for JSON structure rules.
+- Use real random GUIDs, string \`$id\` values, and \`"$version": "A"\` on graph elements/connections.
 
 ### Project Info
 - \`query_project_state\` - See scene hierarchy
@@ -122,8 +126,20 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://vs-nodes",
       name: "Banter Visual Scripting Nodes",
-      description: "All 164 Visual Scripting nodes available in Banter",
+      description: "Hand-authored Banter Visual Scripting node reference with port notes",
       mimeType: "application/json",
+    },
+    {
+      uri: "banter://custom-vs-nodes",
+      name: "Banter Custom Visual Scripting Nodes",
+      description: "Exact custom Banter Visual Scripting node catalog extracted from AllCustomNodes.asset",
+      mimeType: "application/json",
+    },
+    {
+      uri: "banter://custom-vs-node-log",
+      name: "Banter Custom Visual Scripting Node Log",
+      description: "Markdown log of every custom Banter Visual Scripting node, category, and serialized default value",
+      mimeType: "text/markdown",
     },
     {
       uri: "banter://js-api",
@@ -135,6 +151,12 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
       uri: "banter://vs-instructions",
       name: "Visual Scripting Graph Instructions",
       description: "How to programmatically create Visual Scripting .asset files",
+      mimeType: "text/markdown",
+    },
+    {
+      uri: "banter://unity-vs-json-manual",
+      name: "Unity Visual Scripting JSON Manual",
+      description: "Complete Unity Visual Scripting JSON rules, pitfalls, and examples supplied by the user",
       mimeType: "text/markdown",
     },
     {
@@ -151,7 +173,13 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
       {
         uri: "project://state",
         name: "Project State",
-        description: "Current Unity project state including scene hierarchy",
+        description: "Current Unity scene hierarchy exported by the Unity bridge",
+        mimeType: "application/json",
+      },
+      {
+        uri: "project://editor-state",
+        name: "Editor State",
+        description: "Unity editor play mode, compile state, active scene, and selected objects",
         mimeType: "application/json",
       },
       {
@@ -164,6 +192,12 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
         uri: "project://import-status",
         name: "Import Status",
         description: "Status of the last asset import operation",
+        mimeType: "application/json",
+      },
+      {
+        uri: "project://prefab-catalog",
+        name: "Prefab Catalog",
+        description: "Categorized prefab catalog exported by the Unity bridge",
         mimeType: "application/json",
       }
     );
@@ -198,6 +232,15 @@ export function handleResourceRead(
       content = JSON.stringify(BANTER_VS_NODES, null, 2);
       break;
 
+    case "banter://custom-vs-nodes":
+      content = JSON.stringify(BANTER_CUSTOM_VS_NODES, null, 2);
+      break;
+
+    case "banter://custom-vs-node-log":
+      content = BANTER_CUSTOM_VS_NODE_LOG;
+      mimeType = "text/markdown";
+      break;
+
     case "banter://js-api":
       content = JSON.stringify(BANTER_JS_API, null, 2);
       break;
@@ -207,13 +250,22 @@ export function handleResourceRead(
       mimeType = "text/markdown";
       break;
 
+    case "banter://unity-vs-json-manual":
+      content = UNITY_VS_JSON_MANUAL;
+      mimeType = "text/markdown";
+      break;
+
     case "unity://types":
       content = JSON.stringify(UNITY_TYPES, null, 2);
       break;
 
     // Dynamic project state
     case "project://state":
-      content = readProjectFile(config.mcpStatePath, "project-state.json");
+      content = readProjectFile(config.mcpStatePath, "scene-hierarchy.json");
+      break;
+
+    case "project://editor-state":
+      content = readProjectFile(config.mcpStatePath, "editor-state.json");
       break;
 
     case "project://console":
@@ -222,6 +274,10 @@ export function handleResourceRead(
 
     case "project://import-status":
       content = readProjectFile(config.mcpStatePath, "import-status.json");
+      break;
+
+    case "project://prefab-catalog":
+      content = readProjectFile(config.mcpStatePath, "prefab-catalog.json");
       break;
 
     default:

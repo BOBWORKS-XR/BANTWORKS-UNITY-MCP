@@ -7,7 +7,6 @@
  *
  * Usage:
  *   stdio mode (default): node dist/index.js
- *   HTTP mode: node dist/index.js --http [--port 42067]
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -32,7 +31,7 @@ const config = getConfig();
 const server = new Server(
   {
     name: "banter-mcp",
-    version: "1.0.0",
+    version: "1.4.0",
   },
   {
     capabilities: {
@@ -79,15 +78,10 @@ async function main() {
   const useHttp = args.includes("--http");
 
   if (useHttp) {
-    // HTTP transport - for shared/remote access
-    const portArg = args.find((a, i) => args[i - 1] === "--port");
-    const port = portArg ? parseInt(portArg) : 42067;
-
-    const { createHttpServer } = await import("./lib/http-server.js");
-    await createHttpServer(server, port);
-    console.error(`Banter MCP running on http://localhost:${port}/mcp`);
+    console.error("Banter MCP HTTP transport is not implemented. Use stdio mode: node dist/index.js");
+    process.exit(1);
   } else {
-    // Stdio transport - for Claude Code integration
+    // Stdio transport for Codex, Claude Code, and other MCP clients.
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("Banter MCP running on stdio");
