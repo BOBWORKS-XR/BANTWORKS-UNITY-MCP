@@ -7,6 +7,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { BanterMCPConfig } from "../lib/config.js";
+import { atomicWriteFileSync } from "../lib/files.js";
 
 export interface ProjectStateResult {
   success: boolean;
@@ -302,20 +303,18 @@ function objectContains(item: unknown, filterLower: string): boolean {
 }
 
 async function requestStateExport(config: BanterMCPConfig, stateType: string): Promise<void> {
-  const commandPath = path.join(config.mcpCommandsPath, "export-state.json");
-
   try {
-    if (!fs.existsSync(config.mcpCommandsPath)) {
-      fs.mkdirSync(config.mcpCommandsPath, { recursive: true });
-    }
-
+    const { randomUUID } = await import("crypto");
+    const commandPath = path.join(config.mcpCommandsPath, `export-state-${randomUUID()}.json`);
     const command = {
       type: "export-state",
       stateType: stateType.replace(".json", ""),
       timestamp: Date.now(),
     };
 
-    fs.writeFileSync(commandPath, JSON.stringify(command, null, 2));
+    // Publish a uniquely named, complete command so concurrent state queries
+    // cannot overwrite one another or expose partial JSON to Unity.
+    atomicWriteFileSync(commandPath, JSON.stringify(command, null, 2));
   } catch {
     // Non-critical
   }

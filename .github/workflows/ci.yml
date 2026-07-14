@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Node MCP server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --omit=dev --audit-level=high
+
+  launcher:
+    name: Tauri launcher
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: launcher/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo check

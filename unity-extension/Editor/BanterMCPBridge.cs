@@ -29,6 +29,7 @@ namespace BantworksMCP
         private static readonly string CommandsFolder = Path.Combine(MCPFolder, "commands");
         private static readonly string FailedCommandsFolder = Path.Combine(CommandsFolder, "failed");
         private static readonly string CommandResultsFolder = Path.Combine(StateFolder, "command-results");
+        private static readonly string BoundsResultsFolder = Path.Combine(StateFolder, "bounds-results");
 
         private static double lastCommandCheck = 0;
         private static double lastStateExport = 0;
@@ -109,6 +110,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(FailedCommandsFolder);
             if (!Directory.Exists(CommandResultsFolder))
                 Directory.CreateDirectory(CommandResultsFolder);
+            if (!Directory.Exists(BoundsResultsFolder))
+                Directory.CreateDirectory(BoundsResultsFolder);
 
             string ignorePath = Path.Combine(MCPFolder, ".gitignore");
             if (!File.Exists(ignorePath))
@@ -857,16 +860,20 @@ namespace BantworksMCP
             var obj = FindGameObjectByPath(cmd?.objectPath);
 
             Bounds bounds = CalculateGameObjectBounds(obj);
-            ExportBoundsResult(cmd.objectPath, true, bounds);
+            ExportBoundsResult(cmd.id, cmd.objectPath, true, bounds);
             Debug.Log($"[BANTWORKS MCP] Got bounds for {cmd.objectPath}: size={bounds.size}, center={bounds.center}");
         }
 
-        private static void ExportBoundsResult(string objectPath, bool success, Bounds? bounds)
+        private static void ExportBoundsResult(string commandId, string objectPath, bool success, Bounds? bounds)
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(commandId))
+                    throw new InvalidOperationException("Bounds command is missing an ID");
+
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine("{");
+                sb.AppendLine($"    \"commandId\": \"{EscapeJsonString(commandId)}\",");
                 sb.AppendLine($"    \"success\": {(success ? "true" : "false")},");
                 sb.AppendLine($"    \"objectPath\": \"{EscapeJsonString(objectPath)}\",");
                 sb.AppendLine($"    \"timestamp\": {DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},");
@@ -888,7 +895,7 @@ namespace BantworksMCP
 
                 sb.AppendLine("}");
 
-                WriteAtomicText(Path.Combine(StateFolder, "bounds-result.json"), sb.ToString());
+                WriteAtomicText(Path.Combine(BoundsResultsFolder, $"{commandId}.json"), sb.ToString());
             }
             catch (Exception e)
             {
@@ -1916,6 +1923,7 @@ namespace BantworksMCP
         [Serializable]
         private class GetBoundsCommand
         {
+            public string id;
             public string type;
             public string objectPath;
         }

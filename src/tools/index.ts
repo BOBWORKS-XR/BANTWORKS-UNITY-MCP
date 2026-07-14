@@ -9,6 +9,7 @@ import { generateVSGraph, GenerateVSGraphResult } from "./generate-vs-graph.js";
 import { queryProjectState, ProjectStateResult } from "./query-project.js";
 import { checkImportStatus, ImportStatusResult } from "./check-import-status.js";
 import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
+import { getBridgeStatus } from "./get-bridge-status.js";
 import { atomicWriteFileSync } from "../lib/files.js";
 
 interface Tool {
@@ -170,6 +171,19 @@ Use BS.* API for all Banter functionality.`,
     },
 
     // Project State Tools
+    {
+      name: "get_bridge_status",
+      description: `Inspect BANTWORKS MCP bridge health without modifying the project.
+Reports the configured project, bridge installation, state and command directories,
+state freshness, and the next setup step when the bridge is not ready.
+
+Use this first after configuring a new Unity project or when Unity tools appear unavailable.`,
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+
     {
       name: "query_project_state",
       description: `Query the current Unity project state.
@@ -663,6 +677,10 @@ export async function handleToolCall(
         args.filter as string | undefined,
         config
       );
+      break;
+
+    case "get_bridge_status":
+      result = getBridgeStatus(config);
       break;
 
     case "check_import_status":
@@ -1426,8 +1444,21 @@ async function getObjectBounds(
     return result;
   }
 
-  // Wait for Unity to write the bounds result
-  const boundsPath = pathModule.join(config.mcpStatePath, "bounds-result.json");
+  if (!result.commandId) {
+    return {
+      success: false,
+      objectPath,
+      error: "Unity accepted the bounds request without a command ID.",
+    };
+  }
+
+  // Each request has a private result file, so simultaneous bounds queries
+  // cannot consume each other's response.
+  const boundsPath = pathModule.join(
+    config.mcpStatePath,
+    "bounds-results",
+    `${result.commandId}.json`
+  );
   const startTime = Date.now();
   const timeout = 5000;
 
@@ -1436,8 +1467,7 @@ async function getObjectBounds(
       try {
         const boundsData = JSON.parse(fs.readFileSync(boundsPath, "utf-8"));
 
-        // Check if this is the result we're waiting for
-        if (boundsData.objectPath === objectPath && boundsData.timestamp > startTime - 1000) {
+        if (boundsData.commandId === result.commandId && boundsData.objectPath === objectPath) {
           // Clean up the file
           fs.unlinkSync(boundsPath);
 

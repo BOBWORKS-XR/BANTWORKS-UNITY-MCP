@@ -1,6 +1,6 @@
-# Building the Tauri Desktop App
+# Building the BANTWORKS MCP Launcher
 
-The Tauri launcher provides a native desktop GUI for managing Banter MCP projects.
+The Tauri launcher provides a native Windows GUI for managing Unity scene channels and configuring BANTWORKS MCP for Codex or Claude Code.
 
 ## Prerequisites
 
@@ -35,8 +35,10 @@ cargo tauri build
 
 The built executable will be at:
 ```
-launcher\src-tauri\target\release\banter-mcp-launcher.exe
+launcher\src-tauri\target\release\bantworks-mcp-launcher.exe
 ```
+
+Run `cargo check` before creating a release build. Building the launcher does not update an already installed copy under `%LOCALAPPDATA%`; distribute or install the newly built artifact deliberately.
 
 ## Development Mode
 
@@ -49,7 +51,7 @@ cargo tauri dev
 
 - **Manage multiple Unity projects** as "channels"
 - **One-click switching** between projects
-- **Auto-configure Claude Code** (~/.claude.json)
+- **Configure Codex** (`~/.codex/config.toml`) and Claude Code (`~/.claude.json`)
 - **Install Unity extension** with one click
 - **Shows extension status** for each project
 
