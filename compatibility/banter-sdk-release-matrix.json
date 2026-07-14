@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/SideQuestVR/BanterSDK.git",
+    "packageId": "com.sidequest.banter"
+  },
+  "selectionPolicy": "Latest public patch tag from each Banter SDK 3.x minor line represented by a public release",
+  "entries": [
+    {
+      "id": "banter-3.0.2-unity-6000.3.2f1",
+      "releaseTag": "3.0.2",
+      "packageVersion": "3.0.2",
+      "revision": "a25b261db11d7ced12704a3a9ffc83778da3afd6",
+      "unityVersion": "6000.3.2f1",
+      "visualScriptingVersion": "1.9.9",
+      "testFrameworkVersion": "1.6.0",
+      "expectedOutcome": "package-compilation-failed",
+      "expectedDiagnosticCodes": ["CS0619", "CS0029", "CS0266"]
+    },
+    {
+      "id": "banter-3.1.2-unity-6000.3.2f1",
+      "releaseTag": "3.1.2",
+      "packageVersion": "3.1.2",
+      "revision": "c75593e029cfcb7aecca6a880082f6d5d6853883",
+      "unityVersion": "6000.3.2f1",
+      "visualScriptingVersion": "1.9.9",
+      "testFrameworkVersion": "1.6.0",
+      "expectedOutcome": "package-compilation-failed",
+      "expectedDiagnosticCodes": ["CS0619", "CS0029", "CS0266"]
+    },
+    {
+      "id": "banter-3.2.2-unity-6000.3.2f1",
+      "releaseTag": "3.2.2",
+      "packageVersion": "3.2.2",
+      "revision": "8cff56ed80a7f694d0de204a4fa7bfc660f6d503",
+      "unityVersion": "6000.3.2f1",
+      "visualScriptingVersion": "1.9.9",
+      "testFrameworkVersion": "1.6.0",
+      "expectedOutcome": "passed"
+    }
+  ]
+}

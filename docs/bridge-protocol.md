@@ -140,8 +140,12 @@ package manifest, lock file, revision hash, and Unity version without requiring
 a running Editor. `get_banter_sdk_info` adds Banter-specific provenance: it
 locates the selected package source, reports git revision or package-cache
 identity, and compares Visual Scripting and scene-component C# classes with the
-embedded source-hashed catalogues. These counts prove source presence only;
-Unity import and Banter build validation remain authoritative.
+embedded source-hashed catalogues. It also matches the exact revision and Unity
+version against the pinned public release matrix, explicitly distinguishing a
+verified match, different source content with the same version, and an untested
+editor version. A revision/package-metadata mismatch fails closed instead of
+inheriting release evidence. Class counts prove source presence only; Unity
+import and Banter build validation remain authoritative.
 
 `validate_vs_graph_in_unity` accepts only an `Assets/.../*.asset` path. The
 bridge forces a synchronous AssetDatabase import, loads the main asset, verifies

@@ -1,6 +1,11 @@
 param(
     [string]$UnityEditorPath = "C:\Program Files\Unity\Hub\Editor\6000.3.2f1\Editor\Unity.exe",
-    [string]$BanterPackageReference = "https://github.com/SideQuestVR/BanterSDK.git#44e873c3dea26a2d4e12bd2f837d614da926c54f",
+    [string]$BanterPackageReference = "https://github.com/SideQuestVR/BanterSDK.git#8cff56ed80a7f694d0de204a4fa7bfc660f6d503",
+    [string]$ExpectedBanterVersion = "3.2.2",
+    [string]$ExpectedUnityVersion = "6000.3.2f1",
+    [string]$VisualScriptingVersion = "1.9.9",
+    [string]$TestFrameworkVersion = "1.6.0",
+    [string]$ResultPath,
     [switch]$KeepFixture
 )
 
@@ -13,7 +18,19 @@ if (-not (Test-Path -LiteralPath $UnityEditorPath -PathType Leaf)) {
 if ($BanterPackageReference -notmatch '^https://github\.com/SideQuestVR/BanterSDK\.git#[0-9a-fA-F]{40}$') {
     throw "BanterPackageReference must pin a 40-character commit from the public SideQuestVR/BanterSDK Git package."
 }
+if ($ExpectedBanterVersion -and $ExpectedBanterVersion -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+    throw "ExpectedBanterVersion must be an exact semantic version."
+}
+if ($ExpectedUnityVersion -and $ExpectedUnityVersion -notmatch '^\d+\.\d+\.\d+[a-z]\d+$') {
+    throw "ExpectedUnityVersion must be an exact Unity editor version."
+}
+foreach ($packageVersion in @($VisualScriptingVersion, $TestFrameworkVersion)) {
+    if ($packageVersion -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+        throw "Unity package versions must be exact semantic versions: $packageVersion"
+    }
+}
 $ExpectedRevision = $BanterPackageReference.Substring($BanterPackageReference.LastIndexOf('#') + 1).ToLowerInvariant()
+$StartedAtUtc = [System.DateTimeOffset]::UtcNow
 
 $TempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd(
     [System.IO.Path]::DirectorySeparatorChar,
@@ -65,9 +82,9 @@ try {
 
     $ManifestPath = Join-Path $ProjectPath "Packages\manifest.json"
     $Manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-    Set-PackageDependency $Manifest "com.unity.visualscripting" "1.9.9"
-    # Banter 3.2.1 imports NUnit from runtime code but does not declare the package.
-    Set-PackageDependency $Manifest "com.unity.test-framework" "1.1.33"
+    Set-PackageDependency $Manifest "com.unity.visualscripting" $VisualScriptingVersion
+    # The exercised Banter package source imports NUnit but does not declare the package.
+    Set-PackageDependency $Manifest "com.unity.test-framework" $TestFrameworkVersion
     Set-PackageDependency $Manifest "com.sidequest.banter" $BanterPackageReference
     [System.IO.File]::WriteAllText(
         $ManifestPath,
@@ -369,6 +386,72 @@ namespace BantworksMCPFixture
     }
     if ([string]$BanterLock.hash -ne $ExpectedRevision) {
         throw "Banter resolved revision '$($BanterLock.hash)' instead of '$ExpectedRevision'."
+    }
+    if ($ExpectedBanterVersion -and [string]$Marker.banterVersion -ne $ExpectedBanterVersion) {
+        throw "Banter package metadata reported '$($Marker.banterVersion)' instead of '$ExpectedBanterVersion'."
+    }
+    if ($ExpectedUnityVersion -and [string]$Marker.unityVersion -ne $ExpectedUnityVersion) {
+        throw "Unity reported '$($Marker.unityVersion)' instead of '$ExpectedUnityVersion'."
+    }
+
+    $VisualScriptingLock = $Lock.dependencies.PSObject.Properties["com.unity.visualscripting"].Value
+    if ($null -eq $VisualScriptingLock -or [string]$VisualScriptingLock.version -ne $VisualScriptingVersion) {
+        throw "Visual Scripting resolved '$($VisualScriptingLock.version)' instead of '$VisualScriptingVersion'."
+    }
+    $TestFrameworkLock = $Lock.dependencies.PSObject.Properties["com.unity.test-framework"].Value
+    if ($null -eq $TestFrameworkLock -or [string]$TestFrameworkLock.version -ne $TestFrameworkVersion) {
+        throw "Test Framework resolved '$($TestFrameworkLock.version)' instead of '$TestFrameworkVersion'."
+    }
+
+    $CompletedAtUtc = [System.DateTimeOffset]::UtcNow
+    $Evidence = [ordered]@{
+        schemaVersion = 1
+        success = $true
+        startedAtUtc = $StartedAtUtc.ToString("o")
+        completedAtUtc = $CompletedAtUtc.ToString("o")
+        durationSeconds = [Math]::Round(($CompletedAtUtc - $StartedAtUtc).TotalSeconds, 3)
+        unity = [ordered]@{
+            version = [string]$Marker.unityVersion
+            editorPath = [System.IO.Path]::GetFullPath($UnityEditorPath)
+        }
+        packages = [ordered]@{
+            banter = [ordered]@{
+                packageId = "com.sidequest.banter"
+                version = [string]$Marker.banterVersion
+                source = [string]$Marker.banterSource
+                revision = $ExpectedRevision
+                requested = $BanterPackageReference
+            }
+            visualScripting = [ordered]@{
+                packageId = "com.unity.visualscripting"
+                version = [string]$VisualScriptingLock.version
+            }
+            testFramework = [ordered]@{
+                packageId = "com.unity.test-framework"
+                version = [string]$TestFrameworkLock.version
+            }
+        }
+        checks = [ordered]@{
+            graphImported = [bool]$Marker.graphImported
+            attachmentPersisted = [bool]$Marker.attachmentPersisted
+            positiveValidationPassed = [bool]$Marker.positiveValidationPassed
+            negativeValidationRejected = [bool]$Marker.negativeValidationRejected
+            recoveryValidationPassed = [bool]$Marker.recoveryValidationPassed
+        }
+    }
+
+    if ($ResultPath) {
+        $ResolvedResultPath = [System.IO.Path]::GetFullPath($ResultPath)
+        $ResultParent = Split-Path -Parent $ResolvedResultPath
+        if ($ResultParent) {
+            New-Item -ItemType Directory -Path $ResultParent -Force | Out-Null
+        }
+        $TemporaryResultPath = $ResolvedResultPath + ".tmp-" + [System.Guid]::NewGuid().ToString("N")
+        [System.IO.File]::WriteAllText(
+            $TemporaryResultPath,
+            ($Evidence | ConvertTo-Json -Depth 20),
+            [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::Move($TemporaryResultPath, $ResolvedResultPath, $true)
     }
 
     Write-Host "Unity Banter Visual Scripting smoke passed:"

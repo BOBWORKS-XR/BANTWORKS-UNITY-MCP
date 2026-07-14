@@ -11,7 +11,7 @@ enforced by the repository workflow.
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Node.js 18, 20, 22, 24 | CI target | TypeScript build, 43 server tests, standalone esbuild bundle, and isolated no-`node_modules` smoke |
+| Node.js 18, 20, 22, 24 | CI target | TypeScript build, 47 server tests, standalone esbuild bundle, and isolated no-`node_modules` smoke |
 | Codex desktop/CLI | Supported configuration | Launcher and `setup.ps1` write stdio configuration, project environment, 20-second startup timeout, and 600-second tool timeout |
 | Claude Code/Desktop | Supported configuration | Launcher and `setup.ps1` write the same stdio server and selected project environment |
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |
@@ -27,7 +27,10 @@ the default remains `all` for backward compatibility.
 | 2022.3.39f1 | 1.9.4 | None | Manual: bridge compiled; canonical Start graph imported and deserialized with no missing elements |
 | 6000.3.2f1 | 1.9.9 | 3.2.2, source fingerprint `c893607975bb44f319445b533b421d184f6a5285` | Manual: bridge and SDK compiled; generated `Banter.VisualScripting.OnGrab` graph imported with one node and no missing elements; SDK validator passed |
 | 6000.3.2f1 | 1.9.9 | Same as above | Manual negative fixture: a forbidden custom unit imported, and the SDK validator returned the expected failure and exact forbidden type |
-| 6000.3.2f1 | 1.9.9 | Public Git package 3.2.1 at `44e873c3dea26a2d4e12bd2f837d614da926c54f` | Automated local disposable fixture: BANTWORKS generated `OnGrab`; bridge import validation passed; `ScriptMachine` assignment survived scene reload; SDK allow-list positive, forbidden-unit negative, and recovery checks passed |
+| 6000.3.2f1 | 1.9.9 | Observed Git snapshot reporting 3.2.1 at `44e873c3dea26a2d4e12bd2f837d614da926c54f` | Automated local disposable fixture: BANTWORKS generated `OnGrab`; bridge import validation passed; `ScriptMachine` assignment survived scene reload; SDK allow-list positive, forbidden-unit negative, and recovery checks passed |
+| 6000.3.2f1 | 1.9.9 | Public release 3.0.2 at `a25b261db11d7ced12704a3a9ffc83778da3afd6` | Automated expected incompatibility: package compilation failed with `CS0619`, `CS0029`, and `CS0266` for legacy `PhysicMaterial` APIs |
+| 6000.3.2f1 | 1.9.9 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Automated expected incompatibility: package compilation failed with `CS0619`, `CS0029`, and `CS0266` for legacy `PhysicMaterial` APIs |
+| 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Automated local matrix: generated `OnGrab` imported; `ScriptMachine` assignment survived scene reload; SDK allow-list positive, forbidden-unit negative, and recovery checks passed |
 | 6000.3.10f1 | 1.9.9 | None | Automated local disposable fixture: bridge compiled; path/GUID assignment, clear, type mismatch, incompatible type, traversal, and non-reference rejection passed; a real `ScriptGraphAsset` attached to and cleared from `ScriptMachine.nest.macro` |
 
 The observed Banter 3.2.2 package declares Unity 2022.3.39f1 metadata, but its
@@ -37,16 +40,22 @@ Unity 6000.3.2f1 after its declared test dependency was present. Treat the
 package source and a clean compile as authoritative; do not infer compatibility
 from the semantic version or package metadata alone.
 
-The pinned public Banter 3.2.1 package imports NUnit from runtime code but does
-not declare `com.unity.test-framework`. The repeatable fixture adds Test
-Framework 1.1.33 explicitly so this upstream package requirement is visible and
-reproducible rather than supplied accidentally by an existing project.
+The exercised Banter package source imports NUnit from runtime code but does not
+declare `com.unity.test-framework`. The repeatable Unity 6 fixtures request Test
+Framework 1.6.0 explicitly and verify the resolved lock entry, so this upstream
+package requirement is visible rather than supplied accidentally by an existing
+project. An earlier 1.1.33 request was upgraded by Unity to 1.6.0 and is not
+reported as the resolved version.
 
-`get_banter_sdk_info` reports the selected package source identity and compares
-its classes with the embedded catalogues. `validate_vs_graph_in_unity` checks
-actual import/deserialization, and `validate_banter_visual_scripting` invokes
-the installed SDK's public allow-list validator. These checks should be run in
-the target project before treating a generated graph as ready.
+`get_banter_sdk_info` reports the selected package source identity, compares its
+classes with the embedded catalogues, and returns `matched`, `different-source`,
+`source-metadata-mismatch`, `unity-version-unverified`, or `unverified`
+public-release evidence. It only returns `matched` for an exact revision,
+package version, and editor combination.
+`validate_vs_graph_in_unity` checks actual import/deserialization, and
+`validate_banter_visual_scripting` invokes the installed SDK's public allow-list
+validator. These checks should be run in the target project before treating a
+generated graph as ready.
 
 ## Unity Test Framework
 
@@ -73,6 +82,9 @@ under the project's `.bantworks-mcp` state so a client can resume polling.
 
 - The Unity fixtures are repeatable locally but are not yet automated on
   GitHub-hosted runners with a licensed Unity Editor.
+- The public release matrix covers one Unity editor and the latest patch of
+  three Banter SDK 3.x minor lines; it is observed compatibility, not an SDK
+  support-policy declaration.
 - The launcher configuration writers have unit coverage, but client startup is
   not exercised end to end in CI.
 - Banter runtime behavior still requires testing inside the target scene; graph

@@ -13,6 +13,17 @@ cargo check
 
 Changes to `BanterMCPBridge.cs` should also be compiled by Unity in a representative project before release. Include the Unity version, Banter SDK version, and the observed Console result in the pull request.
 
+For Banter graph, bridge, or release-compatibility changes, run the focused
+fixture while iterating and the full expectation-based matrix before release:
+
+```powershell
+./scripts/smoke-unity-banter-vs.ps1
+./scripts/smoke-unity-banter-matrix.ps1
+```
+
+The matrix passes when every pinned release matches its documented outcome;
+that can include an exact known package-compilation incompatibility.
+
 ## Change Scope
 
 - Keep the MCP bridge generic. Do not add project-specific gameplay or scene content.

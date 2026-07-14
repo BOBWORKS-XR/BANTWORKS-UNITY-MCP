@@ -39,13 +39,14 @@ export function getBanterSDKInfo(config: BanterMCPConfig): Record<string, unknow
       : {};
     const requestedVersion = manifest.dependencies?.[PACKAGE_ID];
     const locked = lock.dependencies?.[PACKAGE_ID];
+    const unityVersion = readUnityVersion(config.unityProjectPath);
 
     if (!requestedVersion && !locked) {
       return {
         success: true,
         installed: false,
         packageId: PACKAGE_ID,
-        unityVersion: readUnityVersion(config.unityProjectPath),
+        unityVersion,
         catalog: BANTER_SDK_COMPATIBILITY.catalog,
         nextStep: `Add ${PACKAGE_ID} to Packages/manifest.json, then let Unity resolve packages.`,
       };
@@ -64,14 +65,20 @@ export function getBanterSDKInfo(config: BanterMCPConfig): Record<string, unknow
       packageRoot: selected?.packageRoot,
       candidateCount: candidates.length,
     };
+    const publicReleaseValidation = matchPublicReleaseValidation(
+      selected?.packageVersion,
+      locked?.hash,
+      unityVersion
+    );
 
     if (!selected) {
       return {
         success: true,
         installed: true,
         packageId: PACKAGE_ID,
-        unityVersion: readUnityVersion(config.unityProjectPath),
+        unityVersion,
         package: packageInfo,
+        publicReleaseValidation,
         visualScripting: unknownCoverage("Resolved Banter package source was not found in Library/PackageCache or Packages."),
         components: unknownCoverage("Resolved Banter package source was not found in Library/PackageCache or Packages."),
         catalog: BANTER_SDK_COMPATIBILITY.catalog,
@@ -92,8 +99,9 @@ export function getBanterSDKInfo(config: BanterMCPConfig): Record<string, unknow
       success: true,
       installed: true,
       packageId: PACKAGE_ID,
-      unityVersion: readUnityVersion(config.unityProjectPath),
+      unityVersion,
       package: packageInfo,
+      publicReleaseValidation,
       visualScripting: compareCoverage(catalogNodes, discoveredNodes),
       components: compareCoverage(catalogComponents, discoveredComponents),
       catalog: BANTER_SDK_COMPATIBILITY.catalog,
@@ -105,6 +113,65 @@ export function getBanterSDKInfo(config: BanterMCPConfig): Record<string, unknow
       error: error instanceof Error ? error.message : "Could not inspect Banter SDK metadata",
     };
   }
+}
+
+function matchPublicReleaseValidation(
+  packageVersion: string | undefined,
+  revision: string | undefined,
+  unityVersion: string | undefined
+): Record<string, unknown> {
+  const matrix = BANTER_SDK_COMPATIBILITY.publicReleaseValidationMatrix;
+  const normalizedRevision = revision?.toLowerCase();
+  const revisionProfile = matrix.profiles.find((profile) => profile.revision === normalizedRevision);
+
+  if (revisionProfile && revisionProfile.packageVersion !== packageVersion) {
+    return {
+      status: "source-metadata-mismatch",
+      projectRevision: revision,
+      packageVersion,
+      expectedPackageVersion: revisionProfile.packageVersion,
+      profile: revisionProfile,
+      reason: "Revision matches a tested public release, but resolved package metadata does not. Release evidence is not applied.",
+    };
+  }
+
+  if (revisionProfile) {
+    if (unityVersion === matrix.unityVersion) {
+      return {
+        status: "matched",
+        testedUnityVersion: matrix.unityVersion,
+        visualScriptingVersion: matrix.visualScriptingVersion,
+        testFrameworkVersion: matrix.testFrameworkVersion,
+        profile: revisionProfile,
+      };
+    }
+    return {
+      status: "unity-version-unverified",
+      projectUnityVersion: unityVersion,
+      testedUnityVersion: matrix.unityVersion,
+      profile: revisionProfile,
+      reason: "The exact public release revision is known, but this Unity editor version is not represented by the release matrix.",
+    };
+  }
+
+  const sameVersion = matrix.profiles.filter((profile) => profile.packageVersion === packageVersion);
+  if (sameVersion.length > 0) {
+    return {
+      status: "different-source",
+      projectRevision: revision,
+      packageVersion,
+      testedProfiles: sameVersion,
+      reason: "Package version matches a tested release, but source identity does not. Semantic version alone is not compatibility proof.",
+    };
+  }
+
+  return {
+    status: "unverified",
+    projectRevision: revision,
+    packageVersion,
+    testedUnityVersion: matrix.unityVersion,
+    reason: "No exact public release revision in the compatibility matrix matches the selected package.",
+  };
 }
 
 function readJson(filePath: string): unknown {

@@ -4,6 +4,7 @@ node_modules/
 # Build outputs
 dist/
 release/
+artifacts/
 *.exe
 
 # Rust/Tauri build artifacts

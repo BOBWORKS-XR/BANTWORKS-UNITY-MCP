@@ -29,7 +29,7 @@ The repository is intentionally generic. It contains no project-specific gamepla
 BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not just generic Unity graph syntax:
 
 - **Node catalogue:** 163 unique Banter node types are represented across the bundled references. This includes 162 exact custom node types extracted from a real Banter `AllCustomNodes.asset`, with categories, serialized defaults, sample GUIDs, event metadata, and source hashes.
-- **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, then compares its C# source classes with the embedded node and component catalogues. This matters because observed git and registry builds with nearby semantic versions contain different node sets.
+- **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, compares its C# source classes with the embedded catalogues, and matches exact public release and Unity evidence when available. It does not generalize evidence across different source revisions or editor versions.
 - **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 is preceded by source-observed compatibility errata. Canonical output uses `graph.elements`; referenced nodes use string `$id` values; Visual Scripting 1.9.x may omit `$version` on connections.
 - **Generation, validation, and writing:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split layouts, checks node-reference integrity, and avoids rejecting valid unreferenced nodes. `write_vs_graph` validates again before writing, emits the ScriptGraphAsset class identifier and `NativeFormatImporter`, and preserves an existing asset GUID while migrating old MCP metadata.
 - **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph. `validate_banter_visual_scripting` then invokes the installed SDK's public `CheckVsNodes()` validator across graph assets, embedded prefab graphs, and the active scene, returning the SDK's exact allow-list diagnostics.
@@ -41,7 +41,7 @@ This knowledge improves graph generation and review, but source-class coverage i
 - Node.js 18 or later.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
-- Unity 6000.3.10f1 is the latest editor version verified with the bridge. Disposable blank-project fixtures verify generic asset-reference assignment and, on Unity 6000.3.2f1, generated Banter Visual Scripting import, `ScriptMachine.nest.macro` persistence, and the SDK allow-list validator. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
+- Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
 
 ## Quick Start
 
@@ -304,13 +304,17 @@ npm ci
 npm test
 ./scripts/smoke-unity-asset-reference.ps1
 ./scripts/smoke-unity-banter-vs.ps1
+./scripts/smoke-unity-banter-matrix.ps1
 cd launcher/src-tauri
 cargo check
 ```
 
 The Banter smoke creates and removes a disposable blank Unity project. It pins
 the public SideQuestVR/BanterSDK Git package to a known revision and does not
-read or modify a user project.
+read or modify a user project. The matrix runs one isolated project per pinned
+public release and writes an ignored JSON evidence report under `artifacts/`.
+Expected incompatibilities only satisfy the matrix when their exact compiler
+diagnostics recur.
 
 The GitHub Actions workflow runs the Node test suite and standalone-bundle smoke on Node 18, 20, 22, and 24, plus the dependency audit and Tauri launcher tests. Version tags build draft NSIS/MSI releases and a standalone ZIP. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, [docs/compatibility.md](docs/compatibility.md) for the verified matrix, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
 

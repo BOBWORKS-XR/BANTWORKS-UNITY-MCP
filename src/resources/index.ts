@@ -144,7 +144,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://sdk-compatibility",
       name: "Banter SDK Compatibility",
-      description: "Banter node/component catalogue provenance and observed package source coverage",
+      description: "Banter catalogue provenance, observed package coverage, and pinned public release validation matrix",
       mimeType: "application/json",
     },
     {

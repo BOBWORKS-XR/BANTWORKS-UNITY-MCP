@@ -47,6 +47,39 @@ export const BANTER_SDK_COMPATIBILITY = {
       matchedCatalogNodes: 162,
     },
   ],
+  publicReleaseValidationMatrix: {
+    sourceRepository: "https://github.com/SideQuestVR/BanterSDK.git",
+    selectionPolicy: "Latest public patch tag from each Banter SDK 3.x minor line represented by a public release",
+    unityVersion: "6000.3.2f1",
+    visualScriptingVersion: "1.9.9",
+    testFrameworkVersion: "1.6.0",
+    profiles: [
+      {
+        releaseTag: "3.0.2",
+        packageVersion: "3.0.2",
+        revision: "a25b261db11d7ced12704a3a9ffc83778da3afd6",
+        result: "package compilation failed",
+        diagnosticCodes: ["CS0619", "CS0029", "CS0266"],
+        evidence: "Unity 6 rejects the SDK's legacy PhysicMaterial types and conversions before graph validation can run.",
+      },
+      {
+        releaseTag: "3.1.2",
+        packageVersion: "3.1.2",
+        revision: "c75593e029cfcb7aecca6a880082f6d5d6853883",
+        result: "package compilation failed",
+        diagnosticCodes: ["CS0619", "CS0029", "CS0266"],
+        evidence: "Unity 6 rejects the SDK's legacy PhysicMaterial types and conversions before graph validation can run.",
+      },
+      {
+        releaseTag: "3.2.2",
+        packageVersion: "3.2.2",
+        revision: "8cff56ed80a7f694d0de204a4fa7bfc660f6d503",
+        result: "passed",
+        diagnosticCodes: [],
+        evidence: "Generated OnGrab import, ScriptMachine attachment persistence, SDK allow-list acceptance, forbidden-unit rejection, and validator recovery passed.",
+      },
+    ],
+  },
   observedUnityValidationProfiles: [
     {
       packageVersion: "3.2.2",
@@ -76,6 +109,7 @@ export const BANTER_SDK_COMPATIBILITY = {
     "Counts describe C# class presence in observed package source trees, not proof that every node imports or executes in a specific Unity project.",
     "Semantic version alone is not sufficient: observed git and registry builds with nearby versions contain different node sets.",
     "Use get_banter_sdk_info for the selected project's requested source, resolved package metadata, revision, and live source coverage.",
+    "The public release matrix succeeds when every pinned release matches its observed outcome; a known package-compilation incompatibility is not a full integration pass.",
     "Use validate_vs_graph_in_unity after writing a graph, then validate_banter_visual_scripting for the SDK's project-wide allow-list decision.",
   ],
 } as const;

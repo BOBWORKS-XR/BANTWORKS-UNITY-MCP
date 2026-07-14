@@ -53,13 +53,15 @@ Strong today:
   networking, and WebRoot behavior, with catalogue/tool drift tests; and
 - captured Banter custom-node defaults, source hashes, selected-package
   provenance/coverage, fail-closed graph generation/validation/writes, and
-  correlated Unity import/deserialization diagnostics.
+  correlated Unity import/deserialization diagnostics; and
+- an expectation-based public Banter release matrix that distinguishes full
+  integration passes from exact, known package-compilation incompatibilities.
 
 Gaps that block a leadership claim:
 
 - Unity-side smoke testing is not yet automated in hosted CI; and
-- the repeatable Banter fixture currently pins one known SDK revision rather
-  than exercising a supported-version matrix.
+- the public release matrix currently covers one Unity editor and the latest
+  patch of three Banter SDK 3.x minor lines rather than a Unity-version matrix.
 
 Compatibility limit: Test Framework 1.1 supports discovery and execution but
 does not expose public cancellation. BANTWORKS fails with a capability error
@@ -108,7 +110,9 @@ its public cancellation API.
    Banter fixture generates `Banter.VisualScripting.OnGrab`, imports it in Unity
    6000.3.2f1 with Visual Scripting 1.9.9 and a pinned public Banter SDK, persists
    its `ScriptMachine` reference, and exercises allow, reject, and recovery
-   validation paths. Hosted Unity CI and a supported-version matrix remain.
+   validation paths. The release matrix also pins public 3.0.2, 3.1.2, and 3.2.2
+   tags: the first two reproduce exact Unity 6 material-API compiler diagnostics,
+   while 3.2.2 passes the full fixture. Hosted Unity CI remains.
 4. **Complete:** `validate_banter_visual_scripting` invokes the SDK's public
    validator reflectively and returns bounded structured diagnostics. Positive
    and deliberately forbidden custom-unit fixtures verified both paths.
@@ -127,8 +131,8 @@ its public cancellation API.
    fail-closed parsing, and Codex/Claude launcher profiles.
 4. **Complete (initial matrix):** document exercised Unity, Banter SDK, Visual
    Scripting, Test Framework, Node, client, and Windows distribution surfaces.
-   Generic asset-reference and pinned Banter rows now have repeatable local
-   fixtures; hosted Unity CI and a supported-version matrix remain.
+   Generic asset-reference and public Banter release rows now have repeatable
+   local fixtures; hosted Unity CI and a multi-editor matrix remain.
 
 ## Release Gate
 
