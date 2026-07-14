@@ -131,7 +131,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (34 focused actions available to MCP clients)
+### Tools (36 focused actions available to MCP clients)
 
 | Category | Tools |
 |----------|-------|
@@ -141,7 +141,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
 | Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot` |
 | Project and asset discovery | `get_unity_packages`, `search_unity_assets` |
-| Unity tests | `run_unity_tests`, `get_unity_test_run` |
+| Unity tests | `discover_unity_tests`, `run_unity_tests`, `cancel_unity_test_run`, `get_unity_test_run` |
 | Scene lifecycle and builds | `get_unity_scenes`, `save_unity_scene`, `open_unity_scene`, `set_unity_build_scenes` |
 | Scene object operations | `create_gameobject`, `delete_gameobject`, `modify_gameobject`, `get_object_bounds` |
 | Components and references | `add_component`, `remove_component`, `set_component_property`, `set_object_reference` |
@@ -151,7 +151,7 @@ Scene-mutating tools run through the Unity bridge and return an explicit Unity a
 
 Batch creation and prefab placement are preflighted and run as one Unity Undo transaction. They roll back on failure by default; partial progress requires the explicit `continueOnError` option.
 
-Unity Test Framework runs support Edit Mode, Play Mode, exact names, regex groups, categories, and assembly filters. Results survive Play Mode domain reloads, remain queryable by run ID, and distinguish a completed runner operation from failed tests or a zero-test filter.
+Unity Test Framework support includes bounded test discovery plus Edit Mode and Play Mode runs filtered by exact names, regex groups, categories, or assemblies. Results survive Play Mode domain reloads, remain queryable by run ID, and distinguish a completed runner operation from failed tests, cancellation, or a zero-test filter. Cancellation uses the public Test Framework API when available (1.6+) and returns an explicit capability error on older packages.
 
 Scene lifecycle tools expose open and build-scene state, save without dialogs, and support Single or Additive loading. Single-mode loads fail closed on dirty scenes unless saving is explicitly requested, and build settings are replaced only after every ordered scene entry passes preflight.
 

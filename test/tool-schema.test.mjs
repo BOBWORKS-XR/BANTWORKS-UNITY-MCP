@@ -98,11 +98,21 @@ test("project discovery exposes packages and bounded AssetDatabase search", () =
 });
 
 test("Unity Test Runner tools expose bounded filters and safe run IDs", () => {
+  const discover = tools.get("discover_unity_tests")?.inputSchema;
+  assert.deepEqual(discover?.properties.mode.enum, ["edit", "play", "all"]);
+  assert.equal(discover?.properties.search.maxLength, 512);
+  assert.equal(discover?.properties.maxResults.maximum, 5000);
+  assert.equal(discover?.properties.timeoutMs.maximum, 120000);
+
   const run = tools.get("run_unity_tests")?.inputSchema;
   assert.deepEqual(run?.properties.mode.enum, ["edit", "play", "all"]);
   assert.equal(run?.properties.timeoutMs.maximum, 600000);
   assert.equal(run?.properties.maxResults.maximum, 5000);
   assert.equal(run?.properties.testNames.maxItems, 200);
+
+  const cancel = tools.get("cancel_unity_test_run")?.inputSchema;
+  assert.deepEqual(cancel?.required, ["runId"]);
+  assert.equal(cancel?.properties.runId.maxLength, 128);
 
   const status = tools.get("get_unity_test_run")?.inputSchema;
   assert.deepEqual(status?.required, ["runId"]);

@@ -33,7 +33,9 @@ namespace BantworksMCP
         private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
         private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
         private static readonly string TestRunResultsFolder = Path.Combine(StateFolder, "test-runs");
+        private static readonly string TestDiscoveryResultsFolder = Path.Combine(StateFolder, "test-discovery");
         private static readonly string SceneResultsFolder = Path.Combine(StateFolder, "scene-results");
+        private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
 
         private static double lastCommandCheck = 0;
         private static double lastStateExport = 0;
@@ -127,6 +129,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(AssetSearchResultsFolder);
             if (!Directory.Exists(TestRunResultsFolder))
                 Directory.CreateDirectory(TestRunResultsFolder);
+            if (!Directory.Exists(TestDiscoveryResultsFolder))
+                Directory.CreateDirectory(TestDiscoveryResultsFolder);
             if (!Directory.Exists(SceneResultsFolder))
                 Directory.CreateDirectory(SceneResultsFolder);
 
@@ -359,6 +363,16 @@ namespace BantworksMCP
                     var runTestsCmd = JsonUtility.FromJson<RunTestsCommand>(json);
                     RunUnityTests(runTestsCmd);
                     return $"Started Unity {runTestsCmd.mode} tests";
+
+                case "discover_tests":
+                    var discoverTestsCmd = JsonUtility.FromJson<DiscoverTestsCommand>(json);
+                    DiscoverUnityTests(discoverTestsCmd);
+                    return $"Started Unity {discoverTestsCmd.mode} test discovery";
+
+                case "cancel_tests":
+                    var cancelTestsCmd = JsonUtility.FromJson<CancelTestsCommand>(json);
+                    CancelUnityTests(cancelTestsCmd);
+                    return $"Requested cancellation for Unity test run: {cancelTestsCmd.runId}";
 
                 case "get_scenes":
                     var getScenesCmd = JsonUtility.FromJson<GetScenesCommand>(json);
@@ -858,6 +872,235 @@ namespace BantworksMCP
             }
         }
 
+        private static void DiscoverUnityTests(DiscoverTestsCommand cmd)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Unity test discovery requires a safe command ID");
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating || EditorApplication.isPlayingOrWillChangePlaymode)
+                throw new InvalidOperationException("Stop Play Mode and wait for Unity compilation/import to finish before discovering tests.");
+            if (ActiveTestDiscoveryApis.Count > 0)
+                throw new InvalidOperationException("A Unity test discovery request is already active");
+
+            string mode = string.IsNullOrWhiteSpace(cmd.mode) ? "all" : cmd.mode.Trim().ToLowerInvariant();
+            if (mode != "edit" && mode != "play" && mode != "all")
+                throw new InvalidOperationException("Unity test discovery mode must be 'edit', 'play', or 'all'");
+
+            int maxResults = cmd.maxResults == 0 ? 1000 : cmd.maxResults;
+            if (maxResults < 1 || maxResults > 5000)
+                throw new InvalidOperationException("Unity test discovery maxResults must be between 1 and 5000");
+            string search = string.IsNullOrWhiteSpace(cmd.search) ? null : cmd.search.Trim();
+            if (search != null && search.Length > 512)
+                throw new InvalidOperationException("Unity test discovery search must not exceed 512 characters");
+
+            Type apiType = FindTestRunnerType("TestRunnerApi");
+            Type adaptorType = FindTestRunnerType("ITestAdaptor");
+            Type testModeType = FindTestRunnerType("TestMode");
+            if (apiType == null || adaptorType == null || testModeType == null)
+            {
+                throw new InvalidOperationException(
+                    "Unity Test Framework is not available. Add com.unity.test-framework to this project first.");
+            }
+
+            UnityEngine.Object api = ScriptableObject.CreateInstance(apiType);
+            ActiveTestDiscoveryApis[cmd.id] = api;
+            try
+            {
+                MethodInfo helper = typeof(BantworksMCPBridge).GetMethod(
+                    nameof(StartTypedTestDiscovery),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (helper == null)
+                    throw new MissingMethodException(typeof(BantworksMCPBridge).FullName, nameof(StartTypedTestDiscovery));
+                helper.MakeGenericMethod(adaptorType).Invoke(
+                    null,
+                    new object[] { api, ParseTestMode(testModeType, mode), cmd.id, mode, search, maxResults });
+            }
+            catch
+            {
+                ReleaseTestDiscoveryApi(cmd.id);
+                throw;
+            }
+        }
+
+        private static void StartTypedTestDiscovery<T>(
+            object api,
+            object testMode,
+            string commandId,
+            string mode,
+            string search,
+            int maxResults)
+        {
+            Type actionType = typeof(Action<T>);
+            MethodInfo retrieve = api.GetType().GetMethod(
+                "RetrieveTestList",
+                BindingFlags.Public | BindingFlags.Instance,
+                null,
+                new[] { testMode.GetType(), actionType },
+                null);
+            if (retrieve == null)
+                throw new MissingMethodException(api.GetType().FullName, "RetrieveTestList");
+
+            Action<T> callback = root => CompleteTestDiscovery(commandId, mode, search, maxResults, root);
+            retrieve.Invoke(api, new object[] { testMode, callback });
+        }
+
+        private static void CompleteTestDiscovery(
+            string commandId,
+            string mode,
+            string search,
+            int maxResults,
+            object root)
+        {
+            var result = new TestDiscoveryResult
+            {
+                commandId = commandId,
+                success = false,
+                mode = mode,
+                search = search,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                tests = new List<DiscoveredTestEntry>()
+            };
+
+            try
+            {
+                int visitedNodes = 0;
+                WalkDiscoveredTestTree(root, search, maxResults, result, 0, ref visitedNodes);
+                result.success = true;
+                result.returned = result.tests.Count;
+                result.truncated = result.matchingTests > result.returned;
+            }
+            catch (Exception exception)
+            {
+                result.error = exception.Message;
+            }
+            finally
+            {
+                WriteAtomicText(
+                    Path.Combine(TestDiscoveryResultsFolder, commandId + ".json"),
+                    JsonUtility.ToJson(result, true));
+                DeleteOldFiles(TestDiscoveryResultsFolder, "*.json", 50);
+                ReleaseTestDiscoveryApi(commandId);
+            }
+        }
+
+        private static void WalkDiscoveredTestTree(
+            object node,
+            string search,
+            int maxResults,
+            TestDiscoveryResult result,
+            int depth,
+            ref int visitedNodes)
+        {
+            if (node == null)
+                return;
+            if (depth > 64 || ++visitedNodes > 100000)
+                throw new InvalidOperationException("Unity returned an unexpectedly large or deep test tree");
+
+            bool isSuite = ReadReflectedValue(node, "IsSuite", false);
+            if (!isSuite)
+            {
+                result.totalTests++;
+                string name = ReadReflectedValue(node, "Name", "");
+                string fullName = ReadReflectedValue(node, "FullName", "");
+                string assemblyName = FindDiscoveredTestAssembly(node);
+                string[] categories = ReadReflectedObject(node, "Categories") as string[] ?? new string[0];
+                bool matches = string.IsNullOrWhiteSpace(search) ||
+                    name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    fullName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    assemblyName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    categories.Any(category => category.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                if (matches)
+                {
+                    result.matchingTests++;
+                    if (result.tests.Count < maxResults)
+                    {
+                        result.tests.Add(new DiscoveredTestEntry
+                        {
+                            id = ReadReflectedValue(node, "Id", ""),
+                            name = name,
+                            fullName = fullName,
+                            uniqueName = ReadReflectedValue(node, "UniqueName", ""),
+                            assemblyName = assemblyName,
+                            mode = ReadReflectedObject(node, "TestMode")?.ToString(),
+                            runState = ReadReflectedObject(node, "RunState")?.ToString(),
+                            description = ReadReflectedValue(node, "Description", ""),
+                            skipReason = ReadReflectedValue(node, "SkipReason", ""),
+                            categories = categories
+                        });
+                    }
+                }
+            }
+
+            var children = ReadReflectedObject(node, "Children") as System.Collections.IEnumerable;
+            if (children == null)
+                return;
+            foreach (object child in children)
+                WalkDiscoveredTestTree(child, search, maxResults, result, depth + 1, ref visitedNodes);
+        }
+
+        private static string FindDiscoveredTestAssembly(object node)
+        {
+            object current = node;
+            for (int depth = 0; current != null && depth < 64; depth++)
+            {
+                if (ReadReflectedValue(current, "IsTestAssembly", false))
+                {
+                    string assembly = ReadReflectedValue(current, "Name", "");
+                    return assembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                        ? assembly.Substring(0, assembly.Length - 4)
+                        : assembly;
+                }
+                current = ReadReflectedObject(current, "Parent");
+            }
+            return "";
+        }
+
+        private static void ReleaseTestDiscoveryApi(string commandId)
+        {
+            if (ActiveTestDiscoveryApis.TryGetValue(commandId, out UnityEngine.Object api))
+            {
+                ActiveTestDiscoveryApis.Remove(commandId);
+                if (api != null)
+                    UnityEngine.Object.DestroyImmediate(api);
+            }
+        }
+
+        private static void CancelUnityTests(CancelTestsCommand cmd)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id) || !IsSafeCorrelationId(cmd.runId))
+                throw new InvalidOperationException("Unity test cancellation requires safe command and run IDs");
+
+            UnityTestRunResult run = LoadTestRunResult(cmd.runId);
+            if (run == null)
+                throw new InvalidOperationException("Unity test run was not found: " + cmd.runId);
+            if (run.status != "starting" && run.status != "running")
+                throw new InvalidOperationException("Unity test run is not active: " + run.status);
+            if (string.IsNullOrWhiteSpace(run.jobId))
+                throw new InvalidOperationException("Unity test run has not published its Test Framework job ID yet");
+
+            Type apiType = FindTestRunnerType("TestRunnerApi");
+            MethodInfo cancel = apiType?.GetMethod(
+                "CancelTestRun",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(string) },
+                null);
+            if (cancel == null)
+            {
+                throw new NotSupportedException(
+                    "The installed Unity Test Framework does not expose public cancellation. CancelTestRun requires a newer package (available in 1.6+).");
+            }
+
+            bool accepted = cancel.Invoke(null, new object[] { run.jobId }) is bool value && value;
+            if (!accepted)
+                throw new InvalidOperationException("Unity Test Framework did not accept cancellation for job: " + run.jobId);
+
+            run.cancellationRequested = true;
+            run.cancellationRequestedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            run.updatedAt = run.cancellationRequestedAt;
+            SaveTestRunResult(run);
+        }
+
         private static Type FindTestRunnerType(string typeName)
         {
             string fullName = "UnityEditor.TestTools.TestRunner.Api." + typeName;
@@ -1028,6 +1271,12 @@ namespace BantworksMCP
 
         private static bool IsUnityTestRunActive()
         {
+            return TryGetUnityTestRunActive(out bool active) && active;
+        }
+
+        private static bool TryGetUnityTestRunActive(out bool active)
+        {
+            active = false;
             Type apiType = FindTestRunnerType("TestRunnerApi");
             MethodInfo method = apiType?.GetMethod("IsRunActive", BindingFlags.NonPublic | BindingFlags.Static);
             if (method == null)
@@ -1035,7 +1284,11 @@ namespace BantworksMCP
 
             try
             {
-                return method.Invoke(null, null) is bool active && active;
+                object result = method.Invoke(null, null);
+                if (!(result is bool value))
+                    return false;
+                active = value;
+                return true;
             }
             catch
             {
@@ -1056,6 +1309,23 @@ namespace BantworksMCP
             }
 
             long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (run.cancellationRequested && run.cancellationRequestedAt > 0 &&
+                now - run.cancellationRequestedAt >= 2000 &&
+                !EditorApplication.isPlayingOrWillChangePlaymode &&
+                TryGetUnityTestRunActive(out bool testRunActive) && !testRunActive)
+            {
+                // Play Mode cancellation can reload scripts after the framework's terminal callback.
+                run.status = "completed";
+                run.success = true;
+                run.testsPassed = false;
+                run.completionSource = "cancellation_cleanup_observed";
+                run.finishedAt = now;
+                run.updatedAt = now;
+                SaveTestRunResult(run);
+                UnregisterActiveTestRunnerCallback();
+                return;
+            }
+
             if (run.deadline > 0 && now > run.deadline)
             {
                 FailTestRun(run, "Unity Test Runner did not finish before the safety deadline.");
@@ -1111,6 +1381,7 @@ namespace BantworksMCP
                     case "RunFinished":
                         run.status = "completed";
                         run.success = true;
+                        run.completionSource = "run_finished";
                         run.passed = ReadReflectedValue(argument, "PassCount", 0);
                         run.failed = ReadReflectedValue(argument, "FailCount", 0);
                         run.skipped = ReadReflectedValue(argument, "SkipCount", 0);
@@ -1119,7 +1390,7 @@ namespace BantworksMCP
                         run.completedCount = run.total;
                         run.duration = ReadReflectedValue(argument, "Duration", 0d);
                         run.noTests = run.total == 0;
-                        run.testsPassed = !run.noTests && run.failed == 0;
+                        run.testsPassed = !run.cancellationRequested && !run.noTests && run.failed == 0;
                         run.finishedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                         break;
                 }
@@ -3380,6 +3651,55 @@ namespace BantworksMCP
         }
 
         [Serializable]
+        private class DiscoverTestsCommand
+        {
+            public string id;
+            public string type;
+            public string mode;
+            public string search;
+            public int maxResults;
+        }
+
+        [Serializable]
+        private class CancelTestsCommand
+        {
+            public string id;
+            public string type;
+            public string runId;
+        }
+
+        [Serializable]
+        private class TestDiscoveryResult
+        {
+            public string commandId;
+            public bool success;
+            public string mode;
+            public string search;
+            public string error;
+            public int totalTests;
+            public int matchingTests;
+            public int returned;
+            public bool truncated;
+            public long timestamp;
+            public List<DiscoveredTestEntry> tests;
+        }
+
+        [Serializable]
+        private class DiscoveredTestEntry
+        {
+            public string id;
+            public string name;
+            public string fullName;
+            public string uniqueName;
+            public string assemblyName;
+            public string mode;
+            public string runState;
+            public string description;
+            public string skipReason;
+            public string[] categories;
+        }
+
+        [Serializable]
         private class UnityTestRunResult
         {
             public string commandId;
@@ -3387,9 +3707,12 @@ namespace BantworksMCP
             public bool success;
             public bool testsPassed;
             public bool noTests;
+            public bool cancellationRequested;
+            public long cancellationRequestedAt;
             public string status;
             public string mode;
             public string error;
+            public string completionSource;
             public long startedAt;
             public long updatedAt;
             public long finishedAt;

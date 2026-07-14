@@ -40,7 +40,8 @@ Strong today:
 - stable Unity global IDs for GameObjects and components with path fallback;
 - typed, validated inspector writes with legacy command compatibility;
 - domain-reload-aware Play Mode control and correlated PNG capture;
-- filtered Edit Mode and Play Mode Test Runner execution with persisted results;
+- bounded Test Runner discovery plus filtered Edit Mode and Play Mode execution,
+  persisted results, and version-aware cancellation;
 - fail-closed scene save/load workflows and preflighted build settings;
 - session-local multi-project routing with live editor instance identity;
 - read-only package inventory and bounded AssetDatabase search;
@@ -52,9 +53,13 @@ Strong today:
 
 Gaps that block a leadership claim:
 
-- no first-class Test Runner discovery tree or cancellation workflow;
 - Banter graph output lacks a committed Unity import/open fixture suite; and
-- Unity-side smoke testing is still manual.
+- Unity-side smoke testing is not yet automated in CI.
+
+Compatibility limit: Test Framework 1.1 supports discovery and execution but
+does not expose public cancellation. BANTWORKS fails with a capability error
+instead of modifying internal runner state. Test Framework 1.6 and newer uses
+its public cancellation API.
 
 ## Ordered Delivery
 
@@ -71,8 +76,9 @@ Gaps that block a leadership claim:
 ### P1 - General Unity Workflows
 
 1. **Complete:** Play, pause, resume, stop, compilation, and domain-reload-aware readiness.
-2. **Partial:** filtered Unity Test Runner execution, reload recovery, bounded
-   case results, and status polling are complete; discovery and cancellation remain.
+2. **Complete:** bounded Test Runner discovery, filtered execution, reload
+   recovery, persisted progress/results, status polling, and public-API
+   cancellation when supported by the installed package.
 3. **Complete:** Game camera and Scene View screenshots with correlated result files and MCP image output.
 4. **Complete:** AssetDatabase search, package inventory, scene save/load, and
    ordered build settings with full preflight.

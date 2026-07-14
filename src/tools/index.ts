@@ -286,6 +286,42 @@ Examples: "t:Prefab chair", "t:Scene", or "l:environment". Returns GUIDs, asset 
     },
 
     {
+      name: "discover_unity_tests",
+      description: `Discover runnable Unity Test Framework test cases in Edit Mode, Play Mode, or both.
+Returns exact full names for run_unity_tests plus assembly, categories, run state, and stable Test Framework unique names. Requires com.unity.test-framework and a settled running Unity Editor.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["edit", "play", "all"],
+            default: "all",
+            description: "Test modes to discover",
+          },
+          search: {
+            type: "string",
+            maxLength: 512,
+            description: "Optional case-insensitive name, assembly, or category filter",
+          },
+          maxResults: {
+            type: "number",
+            minimum: 1,
+            maximum: 5000,
+            default: 1000,
+            description: "Maximum matching test cases to return",
+          },
+          timeoutMs: {
+            type: "number",
+            minimum: 1000,
+            maximum: 120000,
+            default: 30000,
+            description: "Maximum time to wait for Unity test discovery",
+          },
+        },
+      },
+    },
+
+    {
       name: "run_unity_tests",
       description: `Run Unity Test Framework tests in Edit Mode, Play Mode, or both.
 Supports exact test names, regex group names, categories, and assembly filters. Results are persisted across Play Mode domain reloads and include bounded per-test failures and output. Test failures are reported with testsPassed=false; they do not make a completed runner operation fail.
@@ -338,6 +374,24 @@ Requires com.unity.test-framework and a running Unity Editor with BanterMCPBridg
             description: "Maximum individual test-case results to retain",
           },
         },
+      },
+    },
+
+    {
+      name: "cancel_unity_test_run",
+      description: `Request cancellation of an active Unity Test Framework run.
+Uses the public CancelTestRun API when the installed Test Framework exposes it (1.6+). Older packages return an explicit unsupported-capability error.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          runId: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            description: "Active run ID returned by run_unity_tests",
+          },
+        },
+        required: ["runId"],
       },
     },
 
@@ -1149,6 +1203,20 @@ export async function handleToolCall(
       );
       break;
 
+    case "discover_unity_tests":
+      result = await discoverUnityTests(
+        args.mode as UnityTestMode | undefined,
+        args.search as string | undefined,
+        args.maxResults as number | undefined,
+        args.timeoutMs as number | undefined,
+        config
+      );
+      break;
+
+    case "cancel_unity_test_run":
+      result = await cancelUnityTestRun(args.runId as string, config);
+      break;
+
     case "get_unity_test_run":
       result = getUnityTestRun(args.runId as string, config);
       break;
@@ -1705,6 +1773,101 @@ async function searchUnityAssets(
 }
 
 type UnityTestMode = "edit" | "play" | "all";
+
+async function discoverUnityTests(
+  requestedMode: UnityTestMode | undefined,
+  requestedSearch: string | undefined,
+  requestedMaxResults: number | undefined,
+  requestedTimeoutMs: number | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const mode = requestedMode ?? "all";
+  const search = requestedSearch?.trim() || "";
+  const maxResults = requestedMaxResults ?? 1000;
+  const timeoutMs = requestedTimeoutMs ?? 30000;
+  if (!["edit", "play", "all"].includes(mode)) {
+    return { success: false, error: `Unknown Unity test discovery mode: ${mode}` };
+  }
+  if (search.length > 512) {
+    return { success: false, error: "Unity test discovery search must not exceed 512 characters." };
+  }
+  if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 5000) {
+    return { success: false, error: "Unity test discovery maxResults must be a whole number between 1 and 5000." };
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) {
+    return { success: false, error: "Unity test discovery timeoutMs must be a whole number between 1000 and 120000." };
+  }
+
+  const command = await sendUnityCommand({
+    type: "discover_tests",
+    mode,
+    search,
+    maxResults,
+  }, config);
+  if (!command.success || !command.commandId) {
+    return command;
+  }
+
+  const resultPath = path.join(config.mcpStatePath, "test-discovery", `${command.commandId}.json`);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const discovery = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
+        if (discovery.commandId === command.commandId) {
+          fs.unlinkSync(resultPath);
+          return discovery;
+        }
+      } catch {
+        // The bridge may still be atomically publishing the result.
+      }
+    }
+
+    if (!command.completed) {
+      const bridgeFailure = consumeLateBridgeAcknowledgement(command.commandId, config);
+      if (bridgeFailure) {
+        return bridgeFailure;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (!command.completed && fs.existsSync(path.join(config.mcpCommandsPath, `${command.commandId}.json`))) {
+    return {
+      success: true,
+      commandId: command.commandId,
+      status: "queued",
+      message: "Unity has not processed this test discovery command yet.",
+    };
+  }
+  return {
+    success: false,
+    commandId: command.commandId,
+    status: "result_timeout",
+    error: `Timed out after ${timeoutMs}ms waiting for Unity test discovery.`,
+  };
+}
+
+async function cancelUnityTestRun(runId: string, config: BanterMCPConfig): Promise<unknown> {
+  if (!isValidUnityTestRunId(runId)) {
+    return { success: false, error: "runId must contain only letters, numbers, and hyphens." };
+  }
+
+  const result = await sendUnityCommand({ type: "cancel_tests", runId }, config);
+  if (!result.success) {
+    return { ...result, runId };
+  }
+  return {
+    success: true,
+    runId,
+    commandId: result.commandId,
+    status: result.completed ? "cancellation_requested" : "queued",
+    cancellationRequested: result.completed === true,
+    message: result.completed
+      ? "Unity Test Framework accepted the cancellation request. Poll get_unity_test_run for cleanup completion."
+      : "Cancellation is queued in Unity and has not been acknowledged yet.",
+  };
+}
 
 interface UnityTestRunSnapshot extends Record<string, unknown> {
   commandId?: string;

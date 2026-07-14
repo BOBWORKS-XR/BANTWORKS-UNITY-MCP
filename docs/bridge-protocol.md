@@ -15,6 +15,7 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
 | `.bantworks-mcp/state/asset-search-results/*.json` | Unity to MCP | Correlated AssetDatabase query results |
+| `.bantworks-mcp/state/test-discovery/*.json` | Unity to MCP | Correlated, bounded Test Runner discovery results |
 | `.bantworks-mcp/state/test-runs/*.json` | Unity to MCP | Persisted Test Runner state and bounded case results |
 | `.bantworks-mcp/state/scene-results/*.json` | Unity to MCP | Correlated open-scene and build-settings results |
 
@@ -130,10 +131,13 @@ package manifest, lock file, and Unity version without requiring a running Edito
 
 ## Unity Test Runner
 
-`run_unity_tests` uses the optional `com.unity.test-framework` package through
-reflection, so projects without that package still compile the bridge. It supports
-Edit Mode, Play Mode, exact test names, regex group names, categories, and assembly
-filters. The Editor must be out of Play Mode and finished compiling/importing.
+The test tools use the optional `com.unity.test-framework` package through
+reflection, so projects without that package still compile the bridge.
+`discover_unity_tests` returns bounded leaf test cases with exact full and unique
+names, assemblies, categories, modes, and run states. `run_unity_tests` supports
+Edit Mode, Play Mode, exact test names, regex group names, categories, and
+assembly filters. The Editor must be out of Play Mode and finished
+compiling/importing before discovery or execution starts.
 
 The bridge writes each run to `state/test-runs/<runId>.json`, updates the file as
 individual cases finish, and re-registers its callback after a Play Mode domain
@@ -141,6 +145,16 @@ reload. A call may stop waiting while the Unity job continues; use
 `get_unity_test_run` with the returned run ID. Per-case retention is bounded, old
 runs are pruned, and a zero-test run reports `noTests: true` and
 `testsPassed: false` rather than silently passing.
+
+`cancel_unity_test_run` is exposed only through the Test Framework's public
+`CancelTestRun` contract, available in package 1.6 and newer. Older packages
+return an explicit unsupported-capability error. A cancellation may trigger a
+Play Mode domain reload after the terminal callback. In that case the bridge
+marks cleanup complete only after the accepted cancellation is at least two
+seconds old, the Editor has left Play Mode, and the framework reports no active
+test job. The persisted result remains `testsPassed: false` and identifies
+`completionSource` as either `run_finished` or
+`cancellation_cleanup_observed`.
 
 ## Scene Lifecycle and Build Settings
 

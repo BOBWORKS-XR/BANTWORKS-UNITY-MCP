@@ -63,3 +63,17 @@ test("test status surfaces a late bridge rejection", async () => {
     await rm(projectPath, { recursive: true, force: true });
   }
 });
+
+test("test cancellation rejects unsafe run IDs before writing a Unity command", async () => {
+  const projectPath = await mkdtemp(path.join(os.tmpdir(), "bantworks-test-cancel-"));
+  const config = createConfig(projectPath);
+
+  try {
+    const response = await handleToolCall("cancel_unity_test_run", { runId: "../outside" }, config);
+    const result = JSON.parse(response.content[0].text);
+    assert.equal(result.success, false);
+    assert.match(result.error, /letters, numbers, and hyphens/);
+  } finally {
+    await rm(projectPath, { recursive: true, force: true });
+  }
+});
