@@ -49,7 +49,8 @@ Strong today:
 - focused scene, component, prefab, bounds, console, and import tools;
 - read-only bridge health diagnostics;
 - Banter component, JavaScript, and Visual Scripting resources; and
-- captured Banter custom-node defaults plus graph generation and validation.
+- captured Banter custom-node defaults, source hashes, selected-package
+  provenance/coverage, and fail-closed graph generation, validation, and writes.
 
 Gaps that block a leadership claim:
 
@@ -87,8 +88,12 @@ its public cancellation API.
 
 ### P1 - Banter Advantage
 
-1. Version the Banter node/component catalogue by SDK version.
-2. Maintain known-good Visual Scripting graph fixtures.
+1. **Complete:** record catalogue source hashes and observed SDK source profiles,
+   then dynamically compare the selected package version/revision and source
+   classes through `get_banter_sdk_info`.
+2. **Complete (server-side):** maintain known-good Visual Scripting graph
+   fixtures for canonical generation, Unity 1.9 serialization compatibility,
+   referential integrity, native metadata, and old-MCP metadata migration.
 3. Import, open, and validate fixtures in Unity during release testing.
 4. Surface Banter build validation errors as structured MCP diagnostics.
 5. Add focused Banter workflows for synced objects, interaction, UI, audio,

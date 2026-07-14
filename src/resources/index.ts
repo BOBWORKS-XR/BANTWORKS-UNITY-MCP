@@ -5,13 +5,15 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { BanterMCPConfig } from "../lib/config.js";
-import { BANTER_COMPONENTS } from "./banter-components.js";
+import { BANTER_COMPONENTS, BANTER_COMPONENT_CATALOG_METADATA } from "./banter-components.js";
 import { BANTER_VS_NODES } from "./banter-vs-nodes.js";
 import { BANTER_CUSTOM_VS_NODES, BANTER_CUSTOM_VS_NODE_LOG } from "./banter-custom-vs-nodes.js";
 import { BANTER_JS_API } from "./banter-js-api.js";
 import { UNITY_TYPES } from "./unity-types.js";
 import { VS_GRAPH_INSTRUCTIONS } from "./vs-graph-instructions.js";
 import { UNITY_VS_JSON_MANUAL } from "./unity-vs-json-manual.js";
+import { UNITY_VS_JSON_ERRATA } from "./unity-vs-json-errata.js";
+import { BANTER_SDK_COMPATIBILITY } from "./banter-sdk-compatibility.js";
 
 /**
  * System prompt that guides connected MCP clients during Banter development
@@ -55,8 +57,9 @@ When the user asks for something in their scene:
 - \`generate_vs_graph\` - Create interaction logic
 - \`validate_vs_graph\` - Check for errors
 - \`write_vs_graph\` - Save to the project
-- Before creating Visual Scripting graphs, read \`banter://custom-vs-nodes\` for exact Banter custom \`$type\` names/default values and \`banter://unity-vs-json-manual\` for JSON structure rules.
-- Use real random GUIDs, string \`$id\` values, and \`"$version": "A"\` on graph elements/connections.
+- Before creating Visual Scripting graphs, read \`banter://sdk-compatibility\`, \`banter://custom-vs-nodes\`, and \`banter://unity-vs-json-manual\`.
+- Use real random GUIDs and canonical \`graph.elements\`. Referenced nodes need string \`$id\` values; connection \`$version\` may be omitted by Visual Scripting 1.9.x.
+- Run \`get_banter_sdk_info\` before relying on the full node catalogue because git revisions and registry packages with nearby versions can contain different node sets.
 
 ### Project Info
 - \`query_project_state\` - See scene hierarchy
@@ -120,7 +123,13 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://components",
       name: "Banter Components",
-      description: "All 68 Banter SDK components with properties, methods, and usage",
+      description: "Source-checked Banter SDK component catalogue with coverage metadata",
+      mimeType: "application/json",
+    },
+    {
+      uri: "banter://sdk-compatibility",
+      name: "Banter SDK Compatibility",
+      description: "Banter node/component catalogue provenance and observed package source coverage",
       mimeType: "application/json",
     },
     {
@@ -225,7 +234,11 @@ export function handleResourceRead(
 
     // Static Banter knowledge
     case "banter://components":
-      content = JSON.stringify(BANTER_COMPONENTS, null, 2);
+      content = JSON.stringify({ metadata: BANTER_COMPONENT_CATALOG_METADATA, components: BANTER_COMPONENTS }, null, 2);
+      break;
+
+    case "banter://sdk-compatibility":
+      content = JSON.stringify(BANTER_SDK_COMPATIBILITY, null, 2);
       break;
 
     case "banter://vs-nodes":
@@ -237,7 +250,10 @@ export function handleResourceRead(
       break;
 
     case "banter://custom-vs-node-log":
-      content = BANTER_CUSTOM_VS_NODE_LOG;
+      content = BANTER_CUSTOM_VS_NODE_LOG.replace(
+        "Generated from: C:/Users/bobman/Downloads/AllCustomNodes (1).asset",
+        "Generated from: AllCustomNodes (1).asset\nSource SHA256: 5F26A646B71FCC0C6215B880476F4F7623DD9B11F64208254A538B10998C0C94"
+      );
       mimeType = "text/markdown";
       break;
 
@@ -251,7 +267,7 @@ export function handleResourceRead(
       break;
 
     case "banter://unity-vs-json-manual":
-      content = UNITY_VS_JSON_MANUAL;
+      content = `${UNITY_VS_JSON_ERRATA}\n\n---\n\n${UNITY_VS_JSON_MANUAL}`;
       mimeType = "text/markdown";
       break;
 

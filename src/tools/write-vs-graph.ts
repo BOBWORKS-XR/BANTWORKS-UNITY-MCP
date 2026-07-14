@@ -6,14 +6,18 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { randomBytes } from "crypto";
 import type { BanterMCPConfig } from "../lib/config.js";
 import { atomicWriteFileSync, resolvePathWithin } from "../lib/files.js";
+import { validateVSGraph } from "./validate-vs-graph.js";
 
 export interface WriteVSGraphResult {
   success: boolean;
   assetPath?: string;
   error?: string;
   message?: string;
+  errors?: string[];
+  warnings?: string[];
 }
 
 /**
@@ -41,29 +45,20 @@ export async function writeVSGraph(
   }
 
   try {
-    // Parse and validate the JSON
-    let graphData: unknown;
-    try {
-      graphData = JSON.parse(graphJson);
-    } catch {
+    const validation = validateVSGraph(graphJson);
+    if (!validation.valid) {
       return {
         success: false,
-        error: "Invalid JSON provided for graph",
+        error: "Visual Scripting graph validation failed",
+        errors: validation.errors,
+        warnings: validation.warnings,
       };
     }
 
-    // Ensure the graph has the expected structure
-    if (!graphData || typeof graphData !== "object" || !("graph" in graphData)) {
+    if (!isValidGraphName(graphName)) {
       return {
         success: false,
-        error: "Graph JSON must have a 'graph' root object",
-      };
-    }
-
-    if (path.basename(graphName) !== graphName || graphName === "." || graphName === "..") {
-      return {
-        success: false,
-        error: "graphName must be a file name without path separators",
+        error: "graphName must be 1-128 ASCII letters, numbers, spaces, dots, underscores, or hyphens; it cannot end with a space or dot",
       };
     }
 
@@ -83,8 +78,14 @@ export async function writeVSGraph(
     // Write a .meta file hint for Unity (helps with import)
     const metaPath = `${assetPath}.meta`;
     if (!fs.existsSync(metaPath)) {
-      const metaContent = generateMetaFile();
+      const metaContent = generateMetaFile(generateUnityGuid());
       atomicWriteFileSync(metaPath, metaContent);
+    } else {
+      const existingMeta = fs.readFileSync(metaPath, "utf-8");
+      if (/^MonoImporter:\s*$/m.test(existingMeta)) {
+        const existingGuid = existingMeta.match(/^guid:\s*([0-9a-f]{32})\s*$/im)?.[1]?.toLowerCase();
+        atomicWriteFileSync(metaPath, generateMetaFile(existingGuid ?? generateUnityGuid()));
+      }
     }
 
     // Trigger Unity refresh if extension is installed
@@ -98,6 +99,7 @@ export async function writeVSGraph(
       success: true,
       assetPath: relativePath,
       message: `Graph written successfully to ${relativePath}`,
+      warnings: validation.warnings,
     };
   } catch (error) {
     return {
@@ -124,25 +126,19 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 95e66c6366d904e98bc83428217d4fd7, type: 3}
   m_Name: ${graphName}
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: Unity.VisualScripting.Flow::Unity.VisualScripting.ScriptGraphAsset
   _data:
     _json: '${escapedJson}'
     _objectReferences: []
 `;
 }
 
-function generateMetaFile(): string {
-  // Generate a random GUID for the meta file
-  const guid = generateUnityGuid();
-
+function generateMetaFile(guid: string): string {
   return `fileFormatVersion: 2
 guid: ${guid}
-MonoImporter:
+NativeFormatImporter:
   externalObjects: {}
-  serializedVersion: 2
-  defaultReferences: []
-  executionOrder: 0
-  icon: {instanceID: 0}
+  mainObjectFileID: 11400000
   userData:
   assetBundleName:
   assetBundleVariant:
@@ -150,13 +146,16 @@ MonoImporter:
 }
 
 function generateUnityGuid(): string {
-  // Unity uses 32-character lowercase hex GUIDs (no dashes)
-  const chars = "0123456789abcdef";
-  let guid = "";
-  for (let i = 0; i < 32; i++) {
-    guid += chars[Math.floor(Math.random() * 16)];
+  return randomBytes(16).toString("hex");
+}
+
+function isValidGraphName(graphName: string): boolean {
+  if (path.basename(graphName) !== graphName || graphName.length > 128) {
+    return false;
   }
-  return guid;
+
+  return /^[A-Za-z0-9](?:[A-Za-z0-9._ -]*[A-Za-z0-9_-])?$/.test(graphName) &&
+    !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(graphName);
 }
 
 async function triggerUnityRefresh(config: BanterMCPConfig, assetPath: string): Promise<void> {

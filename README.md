@@ -15,8 +15,8 @@ The repository is intentionally generic. It contains no project-specific gamepla
 
 ## Features
 
-- **Banter SDK Knowledge**: 68 SDK components, 163 unique captured Banter Visual Scripting node types, and the BS.* JavaScript API
-- **Visual Scripting Authoring**: Create and validate VS graph `.asset` files using the bundled Unity Visual Scripting JSON manual
+- **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
+- **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files using the bundled Unity Visual Scripting JSON manual and source-observed errata
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
 - **Unity Integration**: Query project state, check import status, refresh assets
 - **Closed-Loop Workflow**: Validate → Write → Verify
@@ -25,11 +25,12 @@ The repository is intentionally generic. It contains no project-specific gamepla
 
 BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not just generic Unity graph syntax:
 
-- **Node catalogue:** 163 unique Banter node types are represented across the bundled references. This includes 162 exact custom node types extracted from a real Banter `AllCustomNodes.asset`, with categories, serialized defaults, sample GUIDs, and event metadata.
-- **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 covers the YAML wrapper, graph structure, node IDs, real GUID generation, `$version: "A"`, control/value connections, variables, port names, Banter sandbox restrictions, troubleshooting, and complete examples.
-- **Generation and validation:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split-connection graph shapes, and checks the structural rules required for Unity to import the graph.
+- **Node catalogue:** 163 unique Banter node types are represented across the bundled references. This includes 162 exact custom node types extracted from a real Banter `AllCustomNodes.asset`, with categories, serialized defaults, sample GUIDs, event metadata, and source hashes.
+- **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, then compares its C# source classes with the embedded node and component catalogues. This matters because observed git and registry builds with nearby semantic versions contain different node sets.
+- **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 is preceded by source-observed compatibility errata. Canonical output uses `graph.elements`; referenced nodes use string `$id` values; Visual Scripting 1.9.x may omit `$version` on connections.
+- **Generation, validation, and writing:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split layouts, checks node-reference integrity, and avoids rejecting valid unreferenced nodes. `write_vs_graph` validates again before writing, emits the ScriptGraphAsset class identifier and `NativeFormatImporter`, and preserves an existing asset GUID while migrating old MCP metadata.
 
-This knowledge improves graph generation and review, but a generated graph should still be imported and tested in the target Unity and Banter SDK version.
+This knowledge improves graph generation and review, but source-class coverage is not proof of Unity import or runtime behavior. Generated graphs should still be imported and tested in the target Unity and Banter SDK version.
 
 ## Requirements
 
@@ -120,18 +121,19 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 
 | Resource | Description |
 |----------|-------------|
-| `banter://components` | All 68 Banter components with properties |
+| `banter://components` | 63 source-checked public scene components plus the `BanterObjectId` runtime helper |
+| `banter://sdk-compatibility` | Catalogue hashes, observed package profiles, and interpretation limits |
 | `banter://vs-nodes` | Hand-authored Banter node reference with port notes |
 | `banter://custom-vs-nodes` | Exact catalogue of 162 custom Banter node types extracted from a real graph asset |
 | `banter://custom-vs-node-log` | Markdown log with every captured custom node, category, and serialized default |
 | `banter://js-api` | Complete BS.* JavaScript API |
 | `banter://vs-instructions` | How to create Banter Visual Scripting graph files |
-| `banter://unity-vs-json-manual` | Unity Visual Scripting JSON manual v2.2 with patterns, restrictions, and troubleshooting |
+| `banter://unity-vs-json-manual` | Unity Visual Scripting JSON manual v2.2 with higher-priority BANTWORKS compatibility errata |
 | `unity://types` | Unity fundamentals (Vector3, Quaternion, etc.) |
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (36 focused actions available to MCP clients)
+### Tools (37 focused actions available to MCP clients)
 
 | Category | Tools |
 |----------|-------|
@@ -140,7 +142,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | Project routing | `list_unity_projects`, `select_unity_project` |
 | Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
 | Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot` |
-| Project and asset discovery | `get_unity_packages`, `search_unity_assets` |
+| Project and asset discovery | `get_unity_packages`, `get_banter_sdk_info`, `search_unity_assets` |
 | Unity tests | `discover_unity_tests`, `run_unity_tests`, `cancel_unity_test_run`, `get_unity_test_run` |
 | Scene lifecycle and builds | `get_unity_scenes`, `save_unity_scene`, `open_unity_scene`, `set_unity_build_scenes` |
 | Scene object operations | `create_gameobject`, `delete_gameobject`, `modify_gameobject`, `get_object_bounds` |
@@ -175,12 +177,13 @@ The complete command transport, identity, and inspector-value contract is docume
 You: "Create a grabbable ball that changes color when grabbed"
 
 Codex or Claude Code:
-1. Reads banter://components for component info
-2. Uses generate_vs_graph to create the logic
-3. Uses validate_vs_graph to check for errors
-4. Uses write_vs_graph to save to Unity
-5. Uses check_import_status to verify it worked
-6. Reports success with the asset path
+1. Uses get_banter_sdk_info to verify the selected SDK source and node coverage
+2. Reads banter://components for component info
+3. Uses generate_vs_graph to create the logic
+4. Uses validate_vs_graph to check for errors
+5. Uses write_vs_graph to validate again and save to Unity
+6. Uses check_import_status to verify it worked
+7. Reports success with the asset path
 ```
 
 ## Project Structure
@@ -195,14 +198,17 @@ banter-mcp/
 │   ├── resources/            # Static knowledge
 │   │   ├── banter-components.ts
 │   │   ├── banter-custom-vs-nodes.ts
+│   │   ├── banter-sdk-compatibility.ts
 │   │   ├── banter-vs-nodes.ts
 │   │   ├── banter-js-api.ts
 │   │   ├── unity-types.ts
 │   │   ├── unity-vs-json-manual.ts
+│   │   ├── unity-vs-json-errata.ts
 │   │   └── vs-graph-instructions.ts
 │   ├── tools/                # MCP tools
 │   │   ├── validate-vs-graph.ts
 │   │   ├── generate-vs-graph.ts
+│   │   ├── get-banter-sdk-info.ts
 │   │   ├── write-vs-graph.ts
 │   │   ├── write-webroot-js.ts
 │   │   ├── query-project.ts

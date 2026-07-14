@@ -12,6 +12,7 @@ interface LockedPackage {
   depth?: number;
   source?: string;
   url?: string;
+  hash?: string;
   dependencies?: Record<string, string>;
 }
 
@@ -57,6 +58,7 @@ export function getUnityPackages(
           depth: locked?.depth,
           source: locked?.source,
           url: locked?.url,
+          hash: locked?.hash,
           dependencies: locked?.dependencies ?? {},
         };
       })

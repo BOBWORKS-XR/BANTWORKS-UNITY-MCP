@@ -14,6 +14,7 @@ import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
 import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
 import { getUnityPackages } from "./get-unity-packages.js";
+import { getBanterSDKInfo } from "./get-banter-sdk-info.js";
 import { atomicWriteFileSync } from "../lib/files.js";
 import type { UnityProjectRouter } from "../lib/project-router.js";
 
@@ -52,8 +53,8 @@ export function registerTools(): Tool[] {
       name: "validate_vs_graph",
       description: `Validate a Visual Scripting graph JSON before writing to Unity.
 Checks:
-- All node types exist in Banter/Unity
-- Connections reference valid ports
+- Banter node types use known flat namespaces
+- Connections reference node IDs that exist
 - GUIDs are properly formatted
 - Required properties are set
 - No common mistakes (wrong namespaces, missing coroutine flags, etc.)
@@ -90,6 +91,9 @@ Returns the graph JSON which you should validate before writing.`,
           },
           graphName: {
             type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._ -]*[A-Za-z0-9_-])?$",
             description: "Name for the graph asset",
           },
           nodes: {
@@ -141,10 +145,8 @@ Returns the graph JSON which you should validate before writing.`,
 
     {
       name: "write_vs_graph",
-      description: `Write a validated Visual Scripting graph to the Unity project.
-Creates a .asset file that Unity will import.
-
-IMPORTANT: Always validate with validate_vs_graph first!
+      description: `Validate and write a Visual Scripting graph to the Unity project.
+Creates a native .asset file and Unity-compatible .meta file. Invalid graphs are rejected before any file is written.
 
 After writing, use check_import_status to verify Unity imported it correctly.`,
       inputSchema: {
@@ -156,6 +158,9 @@ After writing, use check_import_status to verify Unity imported it correctly.`,
           },
           graphName: {
             type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._ -]*[A-Za-z0-9_-])?$",
             description: "Name for the .asset file (without extension)",
           },
           folder: {
@@ -234,7 +239,7 @@ Use this first after configuring a new Unity project or when Unity tools appear 
     {
       name: "get_unity_packages",
       description: `Read the Unity project's direct and resolved package inventory.
-Returns requested and resolved versions, package source, dependency depth, and the project Unity version. This tool is read-only and does not require the Editor to be running.`,
+Returns requested and resolved versions, package source, revision hash, dependency depth, and the project Unity version. This tool is read-only and does not require the Editor to be running.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -248,6 +253,16 @@ Returns requested and resolved versions, package source, dependency depth, and t
             description: "Return only packages declared directly in Packages/manifest.json",
           },
         },
+      },
+    },
+
+    {
+      name: "get_banter_sdk_info",
+      description: `Inspect the selected project's Banter SDK package provenance and source coverage.
+Returns the requested package source, resolved metadata, git revision or package-cache identity, Unity version, and compares source classes against the embedded Banter Visual Scripting node and component catalogues. This tool is read-only and does not require the Editor to be running.`,
+      inputSchema: {
+        type: "object",
+        properties: {},
       },
     },
 
@@ -1178,6 +1193,10 @@ export async function handleToolCall(
         args.directOnly as boolean | undefined,
         config
       );
+      break;
+
+    case "get_banter_sdk_info":
+      result = getBanterSDKInfo(config);
       break;
 
     case "search_unity_assets":

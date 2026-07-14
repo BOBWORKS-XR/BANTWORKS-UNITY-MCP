@@ -1,6 +1,7 @@
 /**
  * Unity Visual Scripting JSON manual supplied by the user.
- * Source: C:/Users/bobman/Downloads/COMPLETE_UNITY_VISUAL_SCRIPTING_MANUAL_v2.2.md
+ * Source: COMPLETE_UNITY_VISUAL_SCRIPTING_MANUAL_v2.2 (1).md
+ * Source SHA256: E8D358EC2D010377DB24FD0B281818DAD19BAFFC64E61F61CA46166CD64A4F6E
  * Generated at: 2026-07-01T08:47:02.845Z
  */
 

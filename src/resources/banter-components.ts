@@ -1,8 +1,8 @@
 /**
  * Complete Banter SDK Component Definitions
  *
- * All 68 components with their properties, methods, and usage patterns.
- * This is the authoritative reference for Claude when working with Banter.
+ * Curated component reference for Codex, Claude, and other MCP clients.
+ * Coverage metadata below is checked against the Banter SDK 3.2.2 source tree.
  */
 
 export interface BanterProperty {
@@ -21,6 +21,7 @@ export interface BanterMethod {
 
 export interface BanterComponent {
   name: string;
+  kind?: "component" | "runtime-helper";
   category: "main" | "collider" | "geometry" | "joint" | "ui";
   description: string;
   properties: BanterProperty[];
@@ -34,6 +35,66 @@ export const BANTER_COMPONENTS: Record<string, BanterComponent> = {
   // ============================================
   // MAIN COMPONENTS
   // ============================================
+
+  BanterAOBaking: {
+    name: "BanterAOBaking",
+    category: "main",
+    description: "Merges child meshes and bakes ambient occlusion into vertex colors.",
+    properties: [
+      { name: "subdivisionLevel", type: "int", description: "Subdivision level from 0 (none) to 3 (64x triangles)", default: 1 },
+      { name: "sampleCount", type: "int", description: "Ray samples per vertex, clamped from 16 to 256", default: 64 },
+      { name: "aoIntensity", type: "float", description: "Ambient occlusion intensity, clamped from 0 to 2", default: 1 },
+      { name: "aoBias", type: "float", description: "Self-intersection avoidance bias", default: 0.005 },
+      { name: "aoRadius", type: "float", description: "Occlusion radius; zero selects an automatic radius", default: 0 },
+      { name: "hideSourceObjects", type: "bool", description: "Hide source objects after merging", default: true },
+      { name: "targetShaderName", type: "string", description: "Shader applied to the generated mesh", default: "Mobile/StylizedFakeLit" },
+      { name: "isProcessing", type: "bool", description: "Whether an AO bake is running (read-only in normal use)", default: false },
+      { name: "progress", type: "float", description: "Current bake progress from 0 to 1 (read-only in normal use)", default: 0 },
+    ],
+    methods: [
+      { name: "BakeAO", parameters: [], returnType: "void", description: "Merge, subdivide, and asynchronously bake ambient occlusion" },
+      { name: "Preview", parameters: [], returnType: "void", description: "Preview the merged mesh without AO baking" },
+      { name: "Clear", parameters: [], returnType: "void", description: "Remove the generated mesh and show source objects" },
+    ],
+  },
+
+  BanterMonoBehaviour: {
+    name: "BanterMonoBehaviour",
+    category: "main",
+    description: "Declares named runtime lifecycle functions for a Banter object.",
+    properties: [
+      { name: "fps", type: "int", description: "Requested update frequency", default: 20 },
+      { name: "startFunction", type: "string", description: "Runtime function invoked for Start", default: "" },
+      { name: "updateFunction", type: "string", description: "Runtime function invoked for Update", default: "" },
+      { name: "destroyFunction", type: "string", description: "Runtime function invoked for destruction", default: "" },
+    ],
+  },
+
+  BanterPhysicsMaterial: {
+    name: "BanterPhysicsMaterial",
+    category: "main",
+    description: "Creates and applies a Unity PhysicsMaterial to the object's collider.",
+    properties: [
+      { name: "dynamicFriction", type: "float", description: "Friction while surfaces are moving", default: 1 },
+      { name: "staticFriction", type: "float", description: "Resistance before surfaces begin moving", default: 1 },
+      { name: "bounciness", type: "float", description: "Collision restitution", default: 1 },
+      { name: "frictionCombine", type: "PhysicsMaterialCombine", description: "How friction combines with another material", default: "Average" },
+      { name: "bounceCombine", type: "PhysicsMaterialCombine", description: "How bounciness combines with another material", default: "Average" },
+    ],
+  },
+
+  BanterQuestHome: {
+    name: "BanterQuestHome",
+    category: "main",
+    description: "Loads a Quest Home APK environment and optionally creates colliders and climbable surfaces.",
+    properties: [
+      { name: "url", type: "string", description: "Quest Home APK URL", default: "" },
+      { name: "addColliders", type: "bool", description: "Add colliders to opaque meshes", default: true },
+      { name: "climbable", type: "bool", description: "Put generated collision meshes on the Grabbable layer", default: false },
+      { name: "loadingStatus", type: "string", description: "Current loading status (read-only in normal use)", default: "" },
+      { name: "loadingProgress", type: "float", description: "Current loading progress from 0 to 1 (read-only in normal use)", default: 0 },
+    ],
+  },
 
   BanterRigidbody: {
     name: "BanterRigidbody",
@@ -318,6 +379,7 @@ browser.On("browser-message", e => console.log(e.detail));`,
 
   BanterObjectId: {
     name: "BanterObjectId",
+    kind: "runtime-helper",
     category: "main",
     description: "Unique identifier for JavaScript access. Required for JS to reference this object.",
     properties: [
@@ -574,6 +636,45 @@ obj.On("collision-enter", e => {
   // GEOMETRY COMPONENTS (Primitives)
   // ============================================
 
+  BanterGeometry: {
+    name: "BanterGeometry",
+    category: "geometry",
+    description: "General Banter primitive and parametric geometry generator.",
+    properties: [
+      { name: "geometryType", type: "GeometryType", description: "Primitive geometry type", default: 0 },
+      { name: "parametricType", type: "ParametricGeometryType", description: "Parametric type when using parametric geometry", default: 0 },
+      { name: "width", type: "float", description: "Shape width", default: 1 },
+      { name: "height", type: "float", description: "Shape height", default: 1 },
+      { name: "depth", type: "float", description: "Shape depth", default: 1 },
+      { name: "widthSegments", type: "int", description: "Width subdivisions", default: 1 },
+      { name: "heightSegments", type: "int", description: "Height subdivisions", default: 1 },
+      { name: "depthSegments", type: "int", description: "Depth subdivisions", default: 1 },
+      { name: "radius", type: "float", description: "Shape radius", default: 1 },
+      { name: "segments", type: "int", description: "Segment count", default: 24 },
+      { name: "thetaStart", type: "float", description: "Starting theta angle in radians", default: 0 },
+      { name: "thetaLength", type: "float", description: "Theta sweep in radians", default: 6.283185 },
+      { name: "phiStart", type: "float", description: "Starting phi angle in radians", default: 0 },
+      { name: "phiLength", type: "float", description: "Phi sweep in radians", default: 6.283185 },
+      { name: "radialSegments", type: "int", description: "Radial subdivisions", default: 8 },
+      { name: "openEnded", type: "bool", description: "Leave shape ends open", default: false },
+      { name: "radiusTop", type: "float", description: "Top radius", default: 1 },
+      { name: "radiusBottom", type: "float", description: "Bottom radius", default: 1 },
+      { name: "innerRadius", type: "float", description: "Inner ring radius", default: 0.3 },
+      { name: "outerRadius", type: "float", description: "Outer ring radius", default: 1 },
+      { name: "thetaSegments", type: "int", description: "Theta subdivisions", default: 24 },
+      { name: "phiSegments", type: "int", description: "Phi subdivisions", default: 8 },
+      { name: "tube", type: "float", description: "Tube radius", default: 0.4 },
+      { name: "tubularSegments", type: "int", description: "Tube subdivisions", default: 16 },
+      { name: "arc", type: "float", description: "Arc sweep in radians", default: 6.283185 },
+      { name: "p", type: "int", description: "Torus-knot p value", default: 2 },
+      { name: "q", type: "int", description: "Torus-knot q value", default: 3 },
+      { name: "stacks", type: "int", description: "Parametric stack count", default: 5 },
+      { name: "slices", type: "int", description: "Parametric slice count", default: 5 },
+      { name: "detail", type: "float", description: "Parametric detail setting", default: 0 },
+      { name: "parametricPoints", type: "string", description: "Serialized custom parametric points", default: "" },
+    ],
+  },
+
   BanterBox: {
     name: "BanterBox",
     category: "geometry",
@@ -720,3 +821,16 @@ export const COMPONENT_CATEGORIES = {
   joint: Object.values(BANTER_COMPONENTS).filter((c) => c.category === "joint").map((c) => c.name),
   ui: Object.values(BANTER_COMPONENTS).filter((c) => c.category === "ui").map((c) => c.name),
 };
+
+export const BANTER_COMPONENT_CATALOG_METADATA = {
+  catalogEntryCount: Object.keys(BANTER_COMPONENTS).length,
+  publicSceneComponentCount: Object.values(BANTER_COMPONENTS)
+    .filter((component) => component.kind !== "runtime-helper").length,
+  runtimeHelperCount: Object.values(BANTER_COMPONENTS)
+    .filter((component) => component.kind === "runtime-helper").length,
+  verifiedAgainst: {
+    packageId: "com.sidequest.banter",
+    packageVersion: "3.2.2",
+    packageCacheFingerprint: "c893607975bb44f319445b533b421d184f6a5285",
+  },
+} as const;

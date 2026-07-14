@@ -13,6 +13,11 @@ This guide explains how to programmatically create Unity Visual Scripting \`.ass
 
 ## Critical Rules
 
+### 0. Inspect the Selected Banter SDK
+- Run \`get_banter_sdk_info\` before using Banter custom nodes.
+- Match the package source and revision, not only its semantic version.
+- The 162-node captured catalogue is complete for observed SDK 3.2.2 and selected git revisions, but older registry packages contain fewer nodes.
+
 ### 1. GUID Format
 - **NEVER** use fake/pattern GUIDs like \`"a1a1a1a1-1a1a-1a1a-1a1a-a1a1a1a1a1a1"\`
 - **ALWAYS** generate real random hex GUIDs
@@ -84,7 +89,7 @@ Don't use \`Unity.VisualScripting.GetComponent\` - it doesn't exist as a node ty
 3. Without a value connection, you'll get "New Value is missing" error!
 
 ### 5. GetMember Structure
-**ALWAYS** include \`defaultValues\` with \`target: null\`:
+Include \`defaultValues.target: null\` when an instance target is not connected. Unity may omit it for static members or connected targets:
 
 \`\`\`json
 {
@@ -105,7 +110,7 @@ Don't use \`Unity.VisualScripting.GetComponent\` - it doesn't exist as a node ty
 \`\`\`
 
 ### 6. InvokeMember Structure
-**ALWAYS** include \`defaultValues\` with \`target: null\`:
+Include \`defaultValues.target: null\` when an instance target is not connected. Static calls and connected targets can omit it:
 
 \`\`\`json
 {
@@ -166,7 +171,12 @@ For **Script Graphs** (run on GameObjects):
 \`\`\`
 All are EMPTY arrays!
 
-### 10. Variables Collection Structure
+### 10. Elements, IDs, and Connection Versions
+- Put nodes, graph groups, and connections together in the canonical \`graph.elements\` array.
+- A node needs a unique string \`$id\` when another element references it. Unity may omit \`$id\` on an unreferenced node.
+- Nodes use \`\"$version\": \"A\"\`. Visual Scripting 1.9.4 and 1.9.9 normally omit \`$version\` on connection elements; an explicit \`\"A\"\` is also accepted.
+
+### 11. Variables Collection Structure
 \`\`\`json
 "variables": {
   "Kind": "Flow",
@@ -204,10 +214,23 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 95e66c6366d904e98bc83428217d4fd7, type: 3}
   m_Name: YourGraphName
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: Unity.VisualScripting.Flow::Unity.VisualScripting.ScriptGraphAsset
   _data:
     _json: '{"graph":{...YOUR JSON HERE...}}'
     _objectReferences: []
+\`\`\`
+
+The companion \`.asset.meta\` file is a native asset importer, not a script importer:
+
+\`\`\`yaml
+fileFormatVersion: 2
+guid: 0123456789abcdef0123456789abcdef
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData:
+  assetBundleName:
+  assetBundleVariant:
 \`\`\`
 
 ## Connection Structure

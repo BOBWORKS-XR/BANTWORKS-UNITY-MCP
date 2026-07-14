@@ -16,62 +16,6 @@ export interface VSValidationResult {
   connectionCount: number;
 }
 
-// Known Unity Visual Scripting node types
-const UNITY_NODE_TYPES = new Set([
-  "Unity.VisualScripting.Start",
-  "Unity.VisualScripting.Update",
-  "Unity.VisualScripting.FixedUpdate",
-  "Unity.VisualScripting.OnCollisionEnter",
-  "Unity.VisualScripting.OnCollisionExit",
-  "Unity.VisualScripting.OnTriggerEnter",
-  "Unity.VisualScripting.OnTriggerExit",
-  "Unity.VisualScripting.If",
-  "Unity.VisualScripting.Branch",
-  "Unity.VisualScripting.While",
-  "Unity.VisualScripting.For",
-  "Unity.VisualScripting.ForEach",
-  "Unity.VisualScripting.Sequence",
-  "Unity.VisualScripting.Select",
-  "Unity.VisualScripting.Switch",
-  "Unity.VisualScripting.SetVariable",
-  "Unity.VisualScripting.GetVariable",
-  "Unity.VisualScripting.IsVariableDefined",
-  "Unity.VisualScripting.Literal",
-  "Unity.VisualScripting.This",
-  "Unity.VisualScripting.Self",
-  "Unity.VisualScripting.Null",
-  "Unity.VisualScripting.GetMember",
-  "Unity.VisualScripting.SetMember",
-  "Unity.VisualScripting.InvokeMember",
-  "Unity.VisualScripting.CreateStruct",
-  "Unity.VisualScripting.Expose",
-  "Unity.VisualScripting.Add",
-  "Unity.VisualScripting.Subtract",
-  "Unity.VisualScripting.Multiply",
-  "Unity.VisualScripting.Divide",
-  "Unity.VisualScripting.Modulo",
-  "Unity.VisualScripting.Negate",
-  "Unity.VisualScripting.Equal",
-  "Unity.VisualScripting.NotEqual",
-  "Unity.VisualScripting.Greater",
-  "Unity.VisualScripting.GreaterOrEqual",
-  "Unity.VisualScripting.Less",
-  "Unity.VisualScripting.LessOrEqual",
-  "Unity.VisualScripting.And",
-  "Unity.VisualScripting.Or",
-  "Unity.VisualScripting.Not",
-  "Unity.VisualScripting.ExclusiveOr",
-  "Unity.VisualScripting.ControlConnection",
-  "Unity.VisualScripting.ValueConnection",
-  "Unity.VisualScripting.Timer",
-  "Unity.VisualScripting.Cooldown",
-  "Unity.VisualScripting.WaitForSeconds",
-  "Unity.VisualScripting.WaitUntil",
-  "Unity.VisualScripting.WaitWhile",
-  "Unity.VisualScripting.Debug",
-  "Unity.VisualScripting.Log",
-]);
-
 // Known Banter node types
 const BANTER_NODE_TYPES = new Set(
   [
@@ -141,6 +85,18 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
       errors.push(`Graph root missing required "$version": "A"`);
     }
 
+    const connections = collectConnections(graphData);
+    connectionCount = connections.length;
+    const connectedInputs = new Set(
+      connections.flatMap(({ conn }) => {
+        const destinationRef = (conn.destinationUnit as Record<string, unknown> | undefined)?.$ref;
+        const destinationKey = conn.destinationKey;
+        return typeof destinationRef === "string" && typeof destinationKey === "string"
+          ? [`${destinationRef}:${destinationKey}`]
+          : [];
+      })
+    );
+
     // Validate nodes
     const nodes = collectNodes(graphData);
     nodeCount = nodes.length;
@@ -148,17 +104,15 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
 
     if (nodes.length > 0) {
       for (const node of nodes) {
-        validateNode(node, errors, warnings, nodeIds);
+        validateNode(node, connectedInputs, errors, warnings, nodeIds);
       }
     } else {
       warnings.push("No nodes found in graph (expected graph.elements or units.$content)");
     }
 
     // Validate connections
-    const connections = collectConnections(graphData);
-    connectionCount = connections.length;
     for (const { conn, type } of connections) {
-      validateConnection(conn, type, errors, warnings);
+      validateConnection(conn, type, nodeIds, errors, warnings);
     }
 
     // Validate variables
@@ -190,11 +144,6 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
 function collectNodes(graphData: Record<string, unknown>): Array<Record<string, unknown>> {
   const nodes: Array<Record<string, unknown>> = [];
 
-  const units = graphData.units as Record<string, unknown> | undefined;
-  if (Array.isArray(units?.$content)) {
-    nodes.push(...(units.$content as Array<Record<string, unknown>>));
-  }
-
   if (Array.isArray(graphData.elements)) {
     nodes.push(
       ...(graphData.elements as Array<Record<string, unknown>>).filter((element) => {
@@ -205,6 +154,12 @@ function collectNodes(graphData: Record<string, unknown>): Array<Record<string, 
           type !== "Unity.VisualScripting.ValueConnection";
       })
     );
+    return nodes;
+  }
+
+  const units = graphData.units as Record<string, unknown> | undefined;
+  if (Array.isArray(units?.$content)) {
+    nodes.push(...(units.$content as Array<Record<string, unknown>>));
   }
 
   return nodes;
@@ -214,6 +169,17 @@ function collectConnections(
   graphData: Record<string, unknown>
 ): Array<{ conn: Record<string, unknown>; type: "control" | "value" }> {
   const connections: Array<{ conn: Record<string, unknown>; type: "control" | "value" }> = [];
+
+  if (Array.isArray(graphData.elements)) {
+    for (const element of graphData.elements as Array<Record<string, unknown>>) {
+      if (element.$type === "Unity.VisualScripting.ControlConnection") {
+        connections.push({ conn: element, type: "control" });
+      } else if (element.$type === "Unity.VisualScripting.ValueConnection") {
+        connections.push({ conn: element, type: "value" });
+      }
+    }
+    return connections;
+  }
 
   const controlConnections = graphData.controlConnections as Record<string, unknown> | undefined;
   if (Array.isArray(controlConnections?.$content)) {
@@ -229,21 +195,12 @@ function collectConnections(
     }
   }
 
-  if (Array.isArray(graphData.elements)) {
-    for (const element of graphData.elements as Array<Record<string, unknown>>) {
-      if (element.$type === "Unity.VisualScripting.ControlConnection") {
-        connections.push({ conn: element, type: "control" });
-      } else if (element.$type === "Unity.VisualScripting.ValueConnection") {
-        connections.push({ conn: element, type: "value" });
-      }
-    }
-  }
-
   return connections;
 }
 
 function validateNode(
   node: Record<string, unknown>,
+  connectedInputs: Set<string>,
   errors: string[],
   warnings: string[],
   nodeIds: Map<string, unknown>
@@ -256,12 +213,12 @@ function validateNode(
     errors.push(`Node ${nodeId ?? "(missing id)"} (${nodeType ?? "missing type"}) missing required "$version": "A"`);
   }
 
-  // Check $id format
-  if (typeof nodeId !== "string") {
+  // Unity omits $id on elements that are not referenced by another element.
+  if (node.$id !== undefined && typeof nodeId !== "string") {
     errors.push(`Node has invalid $id: ${JSON.stringify(nodeId)} (must be string)`);
-  } else if (nodeIds.has(nodeId)) {
+  } else if (typeof nodeId === "string" && nodeIds.has(nodeId)) {
     errors.push(`Duplicate node $id: ${nodeId}`);
-  } else {
+  } else if (typeof nodeId === "string") {
     nodeIds.set(nodeId, node);
   }
 
@@ -304,24 +261,14 @@ function validateNode(
     }
   }
 
-  // Check InvokeMember/GetMember for defaultValues
-  if (nodeType === "Unity.VisualScripting.InvokeMember" ||
-      nodeType === "Unity.VisualScripting.GetMember") {
-    if (!node.defaultValues) {
-      warnings.push(`Node ${nodeId} (${nodeType}) missing defaultValues`);
-    } else {
-      const defaults = node.defaultValues as Record<string, unknown>;
-      if (!("target" in defaults)) {
-        warnings.push(`Node ${nodeId} (${nodeType}) defaultValues missing 'target: null'`);
-      }
-    }
-  }
-
   // Check SetVariable for required structure
   if (nodeType === "Unity.VisualScripting.SetVariable") {
     const defaults = node.defaultValues as Record<string, unknown> | undefined;
     if (!defaults?.name) {
       errors.push(`SetVariable node ${nodeId} missing variable name in defaultValues.name`);
+    }
+    if (typeof nodeId !== "string" || !connectedInputs.has(`${nodeId}:input`)) {
+      errors.push(`SetVariable node ${nodeId ?? "(missing id)"} has no value connection to its 'input' port`);
     }
   }
 
@@ -339,14 +286,16 @@ function validateNode(
 function validateConnection(
   conn: Record<string, unknown>,
   type: "control" | "value",
+  nodeIds: Map<string, unknown>,
   errors: string[],
   warnings: string[]
 ): void {
   const guid = conn.guid as string;
   const connType = conn.$type as string;
 
-  if (conn.$version !== "A") {
-    errors.push(`Connection ${guid ?? "(missing guid)"} missing required "$version": "A"`);
+  // Visual Scripting 1.9.x omits $version on connection elements.
+  if (conn.$version !== undefined && conn.$version !== "A") {
+    errors.push(`Connection ${guid ?? "(missing guid)"} has unsupported "$version": ${JSON.stringify(conn.$version)}`);
   }
 
   // Validate GUID
@@ -369,11 +318,17 @@ function validateConnection(
 
   const sourceUnit = conn.sourceUnit as Record<string, unknown> | undefined;
   const destUnit = conn.destinationUnit as Record<string, unknown> | undefined;
-  if (!sourceUnit?.$ref) {
+  const sourceRef = sourceUnit?.$ref;
+  const destinationRef = destUnit?.$ref;
+  if (typeof sourceRef !== "string" || sourceRef.length === 0) {
     errors.push(`Connection missing sourceUnit.$ref`);
+  } else if (!nodeIds.has(sourceRef)) {
+    errors.push(`Connection references missing source node $id: ${sourceRef}`);
   }
-  if (!destUnit?.$ref) {
+  if (typeof destinationRef !== "string" || destinationRef.length === 0) {
     errors.push(`Connection missing destinationUnit.$ref`);
+  } else if (!nodeIds.has(destinationRef)) {
+    errors.push(`Connection references missing destination node $id: ${destinationRef}`);
   }
   if (!conn.sourceKey) {
     errors.push(`Connection missing sourceKey`);

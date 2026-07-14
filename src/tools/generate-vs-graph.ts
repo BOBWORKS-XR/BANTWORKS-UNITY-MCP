@@ -186,8 +186,7 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
     }
 
     // Generate connections
-    const controlConnections: unknown[] = [];
-    const valueConnections: unknown[] = [];
+    const connectionObjects: unknown[] = [];
 
     for (const conn of connections) {
       const sourceId = nodeIdMap.get(conn.from);
@@ -203,17 +202,12 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
         destinationUnit: { $ref: destId },
         destinationKey: conn.toPort,
         guid: randomUUID(),
-        $version: "A",
         $type: conn.type === "control"
           ? "Unity.VisualScripting.ControlConnection"
           : "Unity.VisualScripting.ValueConnection",
       };
 
-      if (conn.type === "control") {
-        controlConnections.push(connObj);
-      } else {
-        valueConnections.push(connObj);
-      }
+      connectionObjects.push(connObj);
     }
 
     // Generate variables
@@ -234,18 +228,7 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
         controlOutputDefinitions: [],
         valueInputDefinitions: [],
         valueOutputDefinitions: [],
-        units: {
-          $content: nodeObjects,
-          $version: "A",
-        },
-        controlConnections: {
-          $content: controlConnections,
-          $version: "A",
-        },
-        valueConnections: {
-          $content: valueConnections,
-          $version: "A",
-        },
+        elements: [...nodeObjects, ...connectionObjects],
         $version: "A",
       },
     };
@@ -429,7 +412,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 95e66c6366d904e98bc83428217d4fd7, type: 3}
   m_Name: ${graphName}
-  m_EditorClassIdentifier:
+  m_EditorClassIdentifier: Unity.VisualScripting.Flow::Unity.VisualScripting.ScriptGraphAsset
   _data:
     _json: '${escapedJson}'
     _objectReferences: []

@@ -1,6 +1,7 @@
 /**
  * Generated Banter custom Visual Scripting node catalog.
- * Source: C:/Users/bobman/Downloads/AllCustomNodes (1).asset
+ * Source: AllCustomNodes (1).asset
+ * Source SHA256: 5F26A646B71FCC0C6215B880476F4F7623DD9B11F64208254A538B10998C0C94
  * Generated at: 2026-07-01T08:47:02.845Z
  */
 

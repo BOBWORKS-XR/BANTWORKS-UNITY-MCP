@@ -16,7 +16,7 @@ test("returns direct and resolved Unity package metadata", () => {
     }));
     fs.writeFileSync(path.join(project, "Packages", "packages-lock.json"), JSON.stringify({
       dependencies: {
-        "com.unity.inputsystem": { version: "1.7.0", depth: 0, source: "registry" },
+        "com.unity.inputsystem": { version: "1.7.0", depth: 0, source: "registry", hash: "revision-123" },
         "com.unity.modules.ui": { version: "1.0.0", depth: 1, source: "builtin" },
       },
     }));
@@ -31,6 +31,7 @@ test("returns direct and resolved Unity package metadata", () => {
     const direct = getUnityPackages("input", true, config);
     assert.equal(direct.returnedPackageCount, 1);
     assert.equal(direct.packages[0].direct, true);
+    assert.equal(direct.packages[0].hash, "revision-123");
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }

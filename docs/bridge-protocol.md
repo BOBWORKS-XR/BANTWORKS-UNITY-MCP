@@ -127,7 +127,12 @@ recent screenshot files.
 JSON result containing GUIDs, paths, names, and main asset types. Searches are
 bounded to 500 results and default to the `Assets` tree; package search requires
 an explicit option. `get_unity_packages` is read-only and parses the project's
-package manifest, lock file, and Unity version without requiring a running Editor.
+package manifest, lock file, revision hash, and Unity version without requiring
+a running Editor. `get_banter_sdk_info` adds Banter-specific provenance: it
+locates the selected package source, reports git revision or package-cache
+identity, and compares Visual Scripting and scene-component C# classes with the
+embedded source-hashed catalogues. These counts prove source presence only;
+Unity import and Banter build validation remain authoritative.
 
 ## Unity Test Runner
 

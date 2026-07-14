@@ -90,11 +90,21 @@ test("screenshot tool exposes bounded Game and Scene capture", () => {
 test("project discovery exposes packages and bounded AssetDatabase search", () => {
   const packages = tools.get("get_unity_packages")?.inputSchema;
   assert.equal(packages?.properties.directOnly.default, false);
+  assert.ok(tools.get("get_banter_sdk_info"));
 
   const assets = tools.get("search_unity_assets")?.inputSchema;
   assert.deepEqual(assets?.required, ["query"]);
   assert.equal(assets?.properties.limit.maximum, 500);
   assert.equal(assets?.properties.includePackages.default, false);
+});
+
+test("Visual Scripting write tools constrain asset names", () => {
+  for (const name of ["generate_vs_graph", "write_vs_graph"]) {
+    const graphName = tools.get(name)?.inputSchema.properties.graphName;
+    assert.equal(graphName.minLength, 1);
+    assert.equal(graphName.maxLength, 128);
+    assert.ok(graphName.pattern);
+  }
 });
 
 test("Unity Test Runner tools expose bounded filters and safe run IDs", () => {
