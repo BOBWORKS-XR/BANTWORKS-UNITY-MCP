@@ -11,8 +11,28 @@ permissions:
 
 jobs:
   server:
-    name: Node MCP server
+    name: Node ${{ matrix.node }} MCP server
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run release:server
+      - run: npm run check:version
+      - if: matrix.node == 20
+        run: npm audit --audit-level=low
+
+  launcher:
+    name: Tauri launcher
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,15 +40,11 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm test
-      - run: npm audit --omit=dev --audit-level=high
-
-  launcher:
-    name: Tauri launcher
-    runs-on: windows-latest
-    defaults:
-      run:
+      - run: npm run release:server
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-standalone.ps1
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-setup.ps1
+      - run: cargo fmt --check
         working-directory: launcher/src-tauri
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo check
+      - run: cargo test
+        working-directory: launcher/src-tauri
+      - run: powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Help

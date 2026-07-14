@@ -24,12 +24,15 @@ The Tauri launcher provides a native Windows GUI for managing Unity scene channe
 ## Building the App
 
 ```powershell
-cd C:\tools\banter-mcp\launcher
+Set-Location <path-to-bantworks-mcp>
+npm ci
+npm run release:server
 
 # Install Tauri CLI
-cargo install tauri-cli
+cargo install tauri-cli --version "^2"
 
 # Build release version
+Set-Location launcher
 cargo tauri build
 ```
 
@@ -38,7 +41,11 @@ The built executable will be at:
 launcher\src-tauri\target\release\bantworks-mcp-launcher.exe
 ```
 
-Run `cargo check` before creating a release build. Building the launcher does not update an already installed copy under `%LOCALAPPDATA%`; distribute or install the newly built artifact deliberately.
+The build runs the standalone server bundle and smoke test again, then packages that server, the Unity bridge, `LICENSE`, and `THIRD_PARTY_NOTICES.md` as Tauri resources. The launcher resolves those installed resources dynamically and does not require a `C:/tools/banter-mcp` checkout.
+
+Run `cargo fmt --check` and `cargo test` in `launcher/src-tauri` before creating a release build. Building the launcher does not update an already installed copy under `%LOCALAPPDATA%`; distribute or install the newly built artifact deliberately.
+
+Version tags matching `v<package version>` run the release workflow. It creates draft NSIS/MSI installers and a standalone Node 18+ ZIP. Version metadata must agree across `package.json`, the MCP handshake, Cargo, and Tauri configuration; verify it with `npm run check:version`.
 
 ## Development Mode
 

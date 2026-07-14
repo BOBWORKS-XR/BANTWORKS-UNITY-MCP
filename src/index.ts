@@ -32,7 +32,7 @@ const projectRouter = new UnityProjectRouter(getConfig());
 const server = new Server(
   {
     name: "banter-mcp",
-    version: "1.4.0",
+    version: "1.5.0",
   },
   {
     capabilities: {

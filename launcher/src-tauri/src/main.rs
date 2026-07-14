@@ -3,7 +3,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tauri::path::BaseDirectory;
+use tauri::Manager;
+
+const LEGACY_SERVER_PATH: &str = "C:/tools/banter-mcp/dist/index.js";
 
 /// A scene channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,10 +24,119 @@ struct ProjectChannel {
 struct LauncherConfig {
     channels: Vec<ProjectChannel>,
     active_channel_id: Option<String>,
+    #[serde(default)]
     mcp_server_path: String,
     auto_start: bool,
     #[serde(default)]
     enable_custom_scripts: bool,
+}
+
+fn find_mcp_server_path(root: &Path) -> Option<PathBuf> {
+    [
+        root.join("banter-mcp.mjs"),
+        root.join("release").join("banter-mcp.mjs"),
+        root.join("dist").join("index.js"),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+}
+
+fn unity_bridge_path(root: &Path) -> PathBuf {
+    root.join("unity-extension")
+        .join("Editor")
+        .join("BanterMCPBridge.cs")
+}
+
+fn is_valid_mcp_root(root: &Path) -> bool {
+    find_mcp_server_path(root).is_some() && unity_bridge_path(root).is_file()
+}
+
+fn normalized_existing_path(path: PathBuf) -> PathBuf {
+    fs::canonicalize(&path).unwrap_or(path)
+}
+
+fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Some(configured_root) = std::env::var_os("BANTWORKS_MCP_ROOT") {
+        let root = PathBuf::from(configured_root);
+        if !is_valid_mcp_root(&root) {
+            return Err(format!(
+                "BANTWORKS_MCP_ROOT does not contain the MCP server and Unity bridge: {}",
+                root.display()
+            ));
+        }
+        return Ok(normalized_existing_path(root));
+    }
+
+    if let Ok(resource_server) = app
+        .path()
+        .resolve("server/banter-mcp.mjs", BaseDirectory::Resource)
+    {
+        if let Some(root) = resource_server.parent() {
+            if is_valid_mcp_root(root) {
+                return Ok(normalized_existing_path(root.to_path_buf()));
+            }
+        }
+    }
+
+    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    if is_valid_mcp_root(&source_root) {
+        return Ok(normalized_existing_path(source_root));
+    }
+
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(executable_dir) = executable.parent() {
+            for candidate in [executable_dir.join("server"), executable_dir.to_path_buf()] {
+                if is_valid_mcp_root(&candidate) {
+                    return Ok(normalized_existing_path(candidate));
+                }
+            }
+        }
+    }
+
+    Err("Could not locate the bundled MCP server and Unity bridge. Reinstall BANTWORKS MCP or set BANTWORKS_MCP_ROOT to a valid distribution root.".to_string())
+}
+
+fn default_mcp_server_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let root = resolve_mcp_root(app)?;
+    find_mcp_server_path(&root).ok_or_else(|| {
+        format!(
+            "MCP server bundle was not found under resolved root: {}",
+            root.display()
+        )
+    })
+}
+
+fn is_legacy_server_path(value: &str) -> bool {
+    value
+        .replace('\\', "/")
+        .eq_ignore_ascii_case(LEGACY_SERVER_PATH)
+}
+
+fn validate_mcp_server_path(value: &str) -> Result<PathBuf, String> {
+    if value.trim().is_empty() {
+        return Err("MCP server path is required".to_string());
+    }
+
+    let path = PathBuf::from(value);
+    if !path.is_file() {
+        return Err(format!(
+            "MCP server file does not exist: {}",
+            path.display()
+        ));
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if !matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "js" | "mjs" | "cjs"
+    ) {
+        return Err("MCP server path must point to a .js, .mjs, or .cjs file".to_string());
+    }
+
+    Ok(normalized_existing_path(path))
 }
 
 /// Get the config file path
@@ -38,7 +151,56 @@ fn get_config_path() -> PathBuf {
 
 /// Write a text file by publishing a complete temporary file in the same directory.
 /// This prevents launcher/config readers from observing truncated JSON or TOML.
-fn atomic_write(path: &PathBuf, content: &str) -> Result<(), String> {
+fn publish_temporary_file(temporary_path: &Path, destination: &Path) -> std::io::Result<()> {
+    if !destination.exists() {
+        return fs::rename(temporary_path, destination);
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{ReplaceFileW, REPLACEFILE_WRITE_THROUGH};
+
+        let destination_wide: Vec<u16> = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let temporary_wide: Vec<u16> = temporary_path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // Both paths remain valid, null-terminated UTF-16 buffers for the duration of the call.
+        let replaced = unsafe {
+            ReplaceFileW(
+                destination_wide.as_ptr(),
+                temporary_wide.as_ptr(),
+                std::ptr::null(),
+                REPLACEFILE_WRITE_THROUGH,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        if replaced != 0 {
+            return Ok(());
+        }
+
+        let replace_error = std::io::Error::last_os_error();
+        if !destination.exists() {
+            return fs::rename(temporary_path, destination);
+        }
+        Err(replace_error)
+    }
+
+    #[cfg(not(windows))]
+    {
+        fs::rename(temporary_path, destination)
+    }
+}
+
+fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("Path has no parent directory: {}", path.display()))?;
@@ -51,10 +213,15 @@ fn atomic_write(path: &PathBuf, content: &str) -> Result<(), String> {
         .ok_or_else(|| format!("Path has no file name: {}", path.display()))?;
     let temporary_path = parent.join(format!(".{}.{}.tmp", file_name, uuid::Uuid::new_v4()));
 
-    fs::write(&temporary_path, content)
-        .map_err(|e| format!("Failed to write temporary file {}: {}", temporary_path.display(), e))?;
+    fs::write(&temporary_path, content).map_err(|e| {
+        format!(
+            "Failed to write temporary file {}: {}",
+            temporary_path.display(),
+            e
+        )
+    })?;
 
-    match fs::rename(&temporary_path, path) {
+    match publish_temporary_file(&temporary_path, path) {
         Ok(()) => Ok(()),
         Err(error) => {
             let _ = fs::remove_file(&temporary_path);
@@ -65,18 +232,26 @@ fn atomic_write(path: &PathBuf, content: &str) -> Result<(), String> {
 
 /// Load configuration from disk
 #[tauri::command]
-fn load_config() -> Result<LauncherConfig, String> {
+fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
     let config_path = get_config_path();
 
     if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))
+        let mut config: LauncherConfig =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
+        if config.mcp_server_path.trim().is_empty()
+            || (is_legacy_server_path(&config.mcp_server_path)
+                && !Path::new(&config.mcp_server_path).is_file())
+        {
+            config.mcp_server_path = default_mcp_server_path(&app)?.to_string_lossy().to_string();
+        }
+        Ok(config)
     } else {
         Ok(LauncherConfig {
             channels: vec![],
             active_channel_id: None,
-            mcp_server_path: "C:/tools/banter-mcp/dist/index.js".to_string(),
+            mcp_server_path: default_mcp_server_path(&app)?.to_string_lossy().to_string(),
             auto_start: false,
             enable_custom_scripts: false,
         })
@@ -85,8 +260,11 @@ fn load_config() -> Result<LauncherConfig, String> {
 
 /// Save configuration to disk
 #[tauri::command]
-fn save_config(config: LauncherConfig) -> Result<(), String> {
+fn save_config(mut config: LauncherConfig) -> Result<(), String> {
     let config_path = get_config_path();
+    config.mcp_server_path = validate_mcp_server_path(&config.mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
@@ -190,12 +368,19 @@ fn update_claude_mcp_config(
     mcp_server_path: String,
 ) -> Result<(), String> {
     let config_path = get_claude_config_path();
+    let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
 
     let mut config: serde_json::Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read Claude config: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse Claude config; refusing to overwrite it: {}", e))?
+        serde_json::from_str(&content).map_err(|e| {
+            format!(
+                "Failed to parse Claude config; refusing to overwrite it: {}",
+                e
+            )
+        })?
     } else {
         serde_json::json!({})
     };
@@ -255,6 +440,9 @@ fn remove_claude_mcp_config() -> Result<(), String> {
 #[tauri::command]
 fn update_codex_mcp_config(channel: ProjectChannel, mcp_server_path: String) -> Result<(), String> {
     let config_path = get_codex_config_path();
+    let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
 
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
@@ -282,7 +470,7 @@ fn update_codex_mcp_config(channel: ProjectChannel, mcp_server_path: String) -> 
         escape_toml_string(&mcp_server_path)
     ));
     content.push_str("startup_timeout_sec = 20\n");
-    content.push_str("tool_timeout_sec = 60\n");
+    content.push_str("tool_timeout_sec = 600\n");
     content.push_str("\n[mcp_servers.banter.env]\n");
     content.push_str(&format!(
         "UNITY_PROJECT_PATH = \"{}\"\n",
@@ -363,11 +551,11 @@ fn check_unity_extension(unity_project_path: String) -> Result<bool, String> {
 
 /// Install Unity extension to a project
 #[tauri::command]
-fn install_unity_extension(unity_project_path: String, mcp_root: String) -> Result<(), String> {
-    let source = PathBuf::from(&mcp_root)
-        .join("unity-extension")
-        .join("Editor")
-        .join("BanterMCPBridge.cs");
+fn install_unity_extension(
+    app: tauri::AppHandle,
+    unity_project_path: String,
+) -> Result<(), String> {
+    let source = unity_bridge_path(&resolve_mcp_root(&app)?);
 
     let dest_dir = PathBuf::from(&unity_project_path)
         .join("Assets")
@@ -376,11 +564,17 @@ fn install_unity_extension(unity_project_path: String, mcp_root: String) -> Resu
     let dest = dest_dir.join("BanterMCPBridge.cs");
 
     if !source.exists() {
-        return Err(format!("Unity bridge source was not found: {}", source.display()));
+        return Err(format!(
+            "Unity bridge source was not found: {}",
+            source.display()
+        ));
     }
 
     if !PathBuf::from(&unity_project_path).join("Assets").is_dir() {
-        return Err(format!("Not a Unity project (Assets folder not found): {}", unity_project_path));
+        return Err(format!(
+            "Not a Unity project (Assets folder not found): {}",
+            unity_project_path
+        ));
     }
 
     fs::create_dir_all(&dest_dir)
@@ -400,7 +594,7 @@ fn install_unity_extension(unity_project_path: String, mcp_root: String) -> Resu
     let temporary_dest = dest_dir.join(format!(".BanterMCPBridge-{}.tmp", uuid::Uuid::new_v4()));
     fs::copy(&source, &temporary_dest)
         .map_err(|e| format!("Failed to stage Unity bridge: {}", e))?;
-    fs::rename(&temporary_dest, &dest).map_err(|e| {
+    publish_temporary_file(&temporary_dest, &dest).map_err(|e| {
         let _ = fs::remove_file(&temporary_dest);
         format!("Failed to install Unity bridge: {}", e)
     })?;
@@ -410,8 +604,8 @@ fn install_unity_extension(unity_project_path: String, mcp_root: String) -> Resu
 
 /// Get the MCP root directory
 #[tauri::command]
-fn get_mcp_root() -> Result<String, String> {
-    Ok("C:/tools/banter-mcp".to_string())
+fn get_mcp_root(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(resolve_mcp_root(&app)?.to_string_lossy().to_string())
 }
 
 fn main() {
@@ -461,4 +655,64 @@ fn set_unity_custom_scripts(unity_project_path: String, enabled: bool) -> Result
     atomic_write(&settings_path, &content)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temporary_root() -> PathBuf {
+        std::env::temp_dir().join(format!("bantworks-launcher-test-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn finds_release_bundle_and_bridge_without_a_machine_specific_root() {
+        let root = temporary_root();
+        let server = root.join("release").join("banter-mcp.mjs");
+        let bridge = unity_bridge_path(&root);
+        fs::create_dir_all(server.parent().unwrap()).unwrap();
+        fs::create_dir_all(bridge.parent().unwrap()).unwrap();
+        fs::write(&server, "// fixture").unwrap();
+        fs::write(&bridge, "// fixture").unwrap();
+
+        assert_eq!(find_mcp_server_path(&root), Some(server));
+        assert!(is_valid_mcp_root(&root));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recognizes_both_legacy_windows_path_forms() {
+        assert!(is_legacy_server_path("C:/tools/banter-mcp/dist/index.js"));
+        assert!(is_legacy_server_path(
+            "c:\\tools\\banter-mcp\\dist\\index.js"
+        ));
+        assert!(!is_legacy_server_path("D:/custom/banter-mcp.mjs"));
+    }
+
+    #[test]
+    fn removes_only_the_target_codex_tables() {
+        let input = "model = \"gpt\"\n\n[mcp_servers.banter]\ncommand = \"node\"\n\n[mcp_servers.banter.env]\nUNITY_PROJECT_PATH = \"X\"\n\n[other]\nkeep = true\n";
+        let without_server = remove_toml_table_block(input, "mcp_servers.banter");
+        let result = remove_toml_table_block(&without_server, "mcp_servers.banter.env");
+
+        assert!(result.contains("model = \"gpt\""));
+        assert!(result.contains("[other]"));
+        assert!(!result.contains("mcp_servers.banter"));
+        assert!(!result.contains("UNITY_PROJECT_PATH"));
+    }
+
+    #[test]
+    fn atomic_write_replaces_an_existing_file() {
+        let root = temporary_root();
+        let path = root.join("config.json");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&path, "old").unwrap();
+
+        atomic_write(&path, "new").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows installers and standalone bundle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run check:version
+      - run: npm run release:server
+      - run: npm audit --audit-level=low
+      - run: cargo test
+        working-directory: launcher/src-tauri
+
+      - name: Build standalone ZIP
+        shell: powershell
+        run: .\scripts\build-standalone.ps1
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: launcher
+          tagName: ${{ github.ref_name }}
+          releaseName: "BANTWORKS MCP __VERSION__"
+          releaseBody: "Windows launcher installers and a standalone Node 18+ MCP bundle. The launcher includes the MCP server and Unity bridge as versioned resources. Install Node.js 18 or newer before connecting an MCP client."
+          releaseDraft: true
+          prerelease: false
+          args: "--bundles nsis,msi"
+
+      - name: Attach standalone ZIP and checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: powershell
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $standalone = Get-Item "release\BANTWORKS-MCP-$version-standalone.zip"
+          $installers = @(Get-ChildItem "launcher\src-tauri\target\release\bundle" -Recurse -File | Where-Object { $_.Extension -in ".exe", ".msi" })
+          $artifacts = @($standalone) + $installers
+          $checksums = foreach ($artifact in $artifacts) {
+            $hash = (Get-FileHash $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($artifact.Name)"
+          }
+          $checksumPath = Join-Path $PWD "release\SHA256SUMS.txt"
+          [System.IO.File]::WriteAllLines($checksumPath, $checksums, [System.Text.UTF8Encoding]::new($false))
+          gh release upload "${{ github.ref_name }}" $standalone.FullName $checksumPath --clobber

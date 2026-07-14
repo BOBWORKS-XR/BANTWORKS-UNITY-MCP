@@ -12,7 +12,84 @@ param(
 $ConfigPath = "$env:APPDATA\banter-mcp\launcher-config.json"
 $ClaudeConfigPath = "$env:USERPROFILE\.claude.json"
 $CodexConfigPath = "$env:USERPROFILE\.codex\config.toml"
-$MCPRoot = "C:\tools\banter-mcp"
+$MCPRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$LegacyServerPath = "C:/tools/banter-mcp/dist/index.js"
+
+function Get-DefaultServerPath {
+    $candidates = @(
+        (Join-Path $MCPRoot "banter-mcp.mjs"),
+        (Join-Path $MCPRoot "release\banter-mcp.mjs"),
+        (Join-Path $MCPRoot "dist\index.js")
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw "MCP server was not found under $MCPRoot. Run '.\setup.ps1 -Install' first."
+}
+
+function Test-LegacyServerPath($value) {
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $false
+    }
+    return (($value -replace "\\", "/").Equals($LegacyServerPath, [System.StringComparison]::OrdinalIgnoreCase))
+}
+
+function Publish-AtomicFile($TemporaryPath, $Destination) {
+    if (-not (Test-Path -LiteralPath $Destination)) {
+        [System.IO.File]::Move($TemporaryPath, $Destination)
+        return
+    }
+
+    $parent = Split-Path -Parent $Destination
+    $replacementBackup = Join-Path $parent (".{0}.{1}.replace-backup" -f (Split-Path -Leaf $Destination), [guid]::NewGuid())
+    $published = $false
+    try {
+        [System.IO.File]::Replace($TemporaryPath, $Destination, $replacementBackup)
+        $published = $true
+    } finally {
+        if ($published -and (Test-Path -LiteralPath $replacementBackup)) {
+            Remove-Item -LiteralPath $replacementBackup -Force
+        }
+    }
+}
+
+function Write-AtomicText($Path, $Content) {
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    $temporaryPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Path), [guid]::NewGuid())
+    try {
+        [System.IO.File]::WriteAllText($temporaryPath, $Content, [System.Text.UTF8Encoding]::new($false))
+        Publish-AtomicFile $temporaryPath $Path
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+}
+
+function Copy-AtomicFile($Source, $Destination) {
+    $parent = Split-Path -Parent $Destination
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    $temporaryPath = Join-Path $parent (".{0}.{1}.tmp" -f (Split-Path -Leaf $Destination), [guid]::NewGuid())
+    try {
+        [System.IO.File]::Copy($Source, $temporaryPath, $true)
+        Publish-AtomicFile $temporaryPath $Destination
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+    }
+}
 
 function Ensure-ConfigDir {
     $configDir = Split-Path $ConfigPath
@@ -24,12 +101,23 @@ function Ensure-ConfigDir {
 function Load-Config {
     Ensure-ConfigDir
     if (Test-Path $ConfigPath) {
-        return Get-Content $ConfigPath | ConvertFrom-Json
+        $config = Get-Content $ConfigPath | ConvertFrom-Json
+        $configuredServer = $config.mcp_server_path
+        if ([string]::IsNullOrWhiteSpace($configuredServer) -or
+            ((Test-LegacyServerPath $configuredServer) -and -not (Test-Path -LiteralPath $configuredServer -PathType Leaf))) {
+            $defaultServer = Get-DefaultServerPath
+            if ($null -eq $config.PSObject.Properties["mcp_server_path"]) {
+                $config | Add-Member -NotePropertyName "mcp_server_path" -NotePropertyValue $defaultServer
+            } else {
+                $config.mcp_server_path = $defaultServer
+            }
+        }
+        return $config
     }
     return @{
         channels = @()
         active_channel_id = $null
-        mcp_server_path = "$MCPRoot\dist\index.js"
+        mcp_server_path = Get-DefaultServerPath
         auto_start = $false
         enable_custom_scripts = $false
     }
@@ -37,7 +125,10 @@ function Load-Config {
 
 function Save-Config($config) {
     Ensure-ConfigDir
-    $config | ConvertTo-Json -Depth 10 | Set-Content $ConfigPath
+    if (-not (Test-Path -LiteralPath $config.mcp_server_path -PathType Leaf)) {
+        throw "MCP server file does not exist: $($config.mcp_server_path)"
+    }
+    Write-AtomicText $ConfigPath ($config | ConvertTo-Json -Depth 10)
 }
 
 function Show-Menu {
@@ -225,7 +316,7 @@ function Apply-ToClaudeCode {
         env = $envVars
     } -Force
 
-    $claudeConfig | ConvertTo-Json -Depth 10 | Set-Content $ClaudeConfigPath
+    Write-AtomicText $ClaudeConfigPath ($claudeConfig | ConvertTo-Json -Depth 10)
 
     Write-Host ""
     Write-Host "Applied to Claude Code!" -ForegroundColor Green
@@ -305,7 +396,7 @@ function Apply-ToCodex {
     $content += "command = `"node`"`n"
     $content += "args = [`"$serverPath`"]`n"
     $content += "startup_timeout_sec = 20`n"
-    $content += "tool_timeout_sec = 60`n`n"
+    $content += "tool_timeout_sec = 600`n`n"
     $content += "[mcp_servers.banter.env]`n"
     $content += "UNITY_PROJECT_PATH = `"$projectPath`"`n"
 
@@ -314,7 +405,7 @@ function Apply-ToCodex {
         $content += "UNITY_SCENE_PATH = `"$scenePath`"`n"
     }
 
-    Set-Content -LiteralPath $CodexConfigPath -Value $content
+    Write-AtomicText $CodexConfigPath $content
 
     Write-Host ""
     Write-Host "Applied to Codex!" -ForegroundColor Green
@@ -354,16 +445,26 @@ function Install-UnityExtension {
         New-Item -ItemType Directory -Path $destDir -Force | Out-Null
     }
 
-    Copy-Item $sourcePath $destPath -Force
+    if (Test-Path -LiteralPath $destPath -PathType Leaf) {
+        $backupDir = "$($activeChannel.unity_project_path)\.bantworks-mcp\backups"
+        if (-not (Test-Path -LiteralPath $backupDir)) {
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        }
+        $backupPath = Join-Path $backupDir ("BanterMCPBridge-{0}.cs" -f [guid]::NewGuid())
+        Copy-Item -LiteralPath $destPath -Destination $backupPath
+    }
+
+    Copy-AtomicFile $sourcePath $destPath
 
     $stateDir = "$($activeChannel.unity_project_path)\.bantworks-mcp\state"
     if (-not (Test-Path $stateDir)) {
         New-Item -ItemType Directory -Path $stateDir -Force | Out-Null
     }
 
-    @{
+    $launcherSettings = @{
         enableCustomScripts = [bool]$config.enable_custom_scripts
-    } | ConvertTo-Json | Set-Content "$stateDir\launcher-settings.json"
+    } | ConvertTo-Json
+    Write-AtomicText "$stateDir\launcher-settings.json" $launcherSettings
 
     Write-Host ""
     Write-Host "Unity extension installed!" -ForegroundColor Green
@@ -372,7 +473,103 @@ function Install-UnityExtension {
     Write-Host "Open Unity to compile the extension." -ForegroundColor Yellow
 }
 
+function Show-Usage {
+    Write-Host "BANTWORKS MCP setup"
+    Write-Host ""
+    Write-Host "  .\setup.ps1              Open the interactive configuration menu"
+    Write-Host "  .\setup.ps1 -Install     Install dependencies and build the release server bundle"
+    Write-Host "  .\setup.ps1 -AddProject  Prompt for one Unity project, then exit"
+    Write-Host "  .\setup.ps1 -ListProjects"
+    Write-Host "  .\setup.ps1 -SetActive   Prompt for the active project, then exit"
+    Write-Host "  .\setup.ps1 -Help"
+}
+
+function Show-ProjectList {
+    $config = Load-Config
+    $channels = @($config.channels)
+    if ($channels.Count -eq 0) {
+        Write-Host "No projects configured."
+        return
+    }
+
+    foreach ($channel in $channels) {
+        $marker = if ($channel.id -eq $config.active_channel_id) { "*" } else { " " }
+        Write-Host "$marker $($channel.name) [$($channel.id)]"
+        Write-Host "  $($channel.unity_project_path)"
+    }
+}
+
+function Install-ServerBundle {
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if ($null -eq $node) {
+        throw "Node.js 18 or newer is required but 'node' was not found on PATH."
+    }
+
+    $nodeVersion = (& node --version).TrimStart("v")
+    if ($LASTEXITCODE -ne 0 -or -not ($nodeVersion -match '^(\d+)\.')) {
+        throw "Could not determine the installed Node.js version."
+    }
+    if ([int]$Matches[1] -lt 18) {
+        throw "Node.js 18 or newer is required; found $nodeVersion."
+    }
+
+    $standaloneBundle = Join-Path $MCPRoot "banter-mcp.mjs"
+    $packageManifest = Join-Path $MCPRoot "package.json"
+
+    if ((Test-Path -LiteralPath $standaloneBundle -PathType Leaf) -and
+        -not (Test-Path -LiteralPath $packageManifest -PathType Leaf)) {
+        & node --check $standaloneBundle
+        if ($LASTEXITCODE -ne 0) {
+            throw "Standalone MCP server validation failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "Standalone MCP server is installed and valid:" -ForegroundColor Green
+        Write-Host "  $standaloneBundle" -ForegroundColor DarkGray
+        Write-Host "  Node.js $nodeVersion" -ForegroundColor DarkGray
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $packageManifest -PathType Leaf)) {
+        throw "Neither a standalone MCP bundle nor package.json was found under $MCPRoot."
+    }
+
+    Push-Location $MCPRoot
+    try {
+        & npm ci
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm ci failed with exit code $LASTEXITCODE"
+        }
+
+        & npm run release:server
+        if ($LASTEXITCODE -ne 0) {
+            throw "Server bundle build failed with exit code $LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 # Main loop
+if ($Help) {
+    Show-Usage
+    exit 0
+}
+if ($Install) {
+    Install-ServerBundle
+    exit 0
+}
+if ($AddProject) {
+    Add-Project
+    exit 0
+}
+if ($ListProjects) {
+    Show-ProjectList
+    exit 0
+}
+if ($SetActive) {
+    Set-ActiveProject
+    exit 0
+}
+
 while ($true) {
     Show-Menu
     $choice = Read-Host "Select option"

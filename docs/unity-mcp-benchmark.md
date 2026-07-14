@@ -108,10 +108,14 @@ its public cancellation API.
 
 ### P2 - Distribution and Scale
 
-1. Versioned launcher/server bundles without machine-specific source paths.
+1. **Complete:** versioned standalone server and launcher resources without
+   machine-specific source paths, isolated bundle smoke, NSIS/MSI release
+   targets, and draft GitHub release automation.
 2. Project-local client configuration option and migration tooling.
 3. Tool groups so clients can expose only the capabilities needed for a task.
-4. Compatibility matrix across supported Unity, Banter SDK, Node, and clients.
+4. **Complete (initial matrix):** document exercised Unity, Banter SDK, Visual
+   Scripting, Test Framework, Node, client, and Windows distribution surfaces.
+   Automate Unity fixture rows before promoting them from manual coverage.
 
 ## Release Gate
 

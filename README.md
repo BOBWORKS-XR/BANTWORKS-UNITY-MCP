@@ -9,7 +9,7 @@ BANTWORKS MCP uses the standard stdio MCP transport. Codex is a first-class supp
 - The Windows launcher can write the selected Unity channel to Codex at `~/.codex/config.toml`.
 - `setup.ps1` can configure Codex from its `[X] Apply to Codex` menu action.
 - The launcher can keep Claude Code and Codex synchronized when a scene channel changes.
-- Other stdio-compatible MCP clients can launch the same `dist/index.js` server with the `UNITY_PROJECT_PATH` environment variable.
+- Other stdio-compatible MCP clients can launch the standalone `banter-mcp.mjs` bundle or the source build at `dist/index.js` with the `UNITY_PROJECT_PATH` environment variable.
 
 The repository is intentionally generic. It contains no project-specific gameplay, respawn, or scene logic; those belong in the Unity project using the bridge.
 
@@ -43,12 +43,22 @@ This knowledge improves graph generation and review, but source-class coverage i
 
 ## Quick Start
 
-### 1. Install Dependencies
+### 1. Install BANTWORKS MCP
 
-```bash
-cd C:/tools/banter-mcp
+For a release build, either install the Windows launcher or extract the standalone ZIP. Both contain a versioned MCP server and Unity bridge and do not depend on a checkout at `C:/tools`. Node.js 18 or newer is still required to run the MCP server. Tagged releases include `SHA256SUMS.txt` for artifact verification.
+
+From an extracted standalone ZIP, validate the included server with:
+
+```powershell
+.\setup.ps1 -Install
+```
+
+For development from source:
+
+```powershell
+Set-Location <path-to-bantworks-mcp>
 npm ci
-npm run build
+npm run release:server
 ```
 
 ### 2. Connect Codex or Claude Code
@@ -62,9 +72,9 @@ Add this to `~/.codex/config.toml` (on Windows, normally `C:/Users/<you>/.codex/
 ```toml
 [mcp_servers.banter]
 command = "node"
-args = ["C:/tools/banter-mcp/dist/index.js"]
+args = ["C:/path/to/BANTWORKS-MCP/banter-mcp.mjs"]
 startup_timeout_sec = 20
-tool_timeout_sec = 60
+tool_timeout_sec = 600
 
 [mcp_servers.banter.env]
 UNITY_PROJECT_PATH = "E:/unity/MCP_base"
@@ -73,7 +83,7 @@ UNITY_PROJECT_PATH = "E:/unity/MCP_base"
 #### Claude Code
 
 ```bash
-claude mcp add banter --scope user -- node C:/tools/banter-mcp/dist/index.js
+claude mcp add banter --scope user -- node C:/path/to/BANTWORKS-MCP/banter-mcp.mjs
 ```
 
 Or add the server directly to `.claude.json`:
@@ -82,7 +92,7 @@ Or add the server directly to `.claude.json`:
   "mcpServers": {
     "banter": {
       "command": "node",
-      "args": ["C:/tools/banter-mcp/dist/index.js"],
+      "args": ["C:/path/to/BANTWORKS-MCP/banter-mcp.mjs"],
       "env": {
         "UNITY_PROJECT_PATH": "E:/unity/MCP_base"
       }
@@ -103,9 +113,9 @@ At runtime, call `list_unity_projects` and pass one of its stable IDs to `select
 
 ### 4. Install Unity Extension (Optional - for full feedback loop)
 
-Copy the Unity extension to your project:
+Use the launcher's **Install Unity Extension** action or the PowerShell setup menu. For a manual install, copy the included bridge to your project:
 ```
-C:/tools/banter-mcp/unity-extension/Editor/BanterMCPBridge.cs
+<BANTWORKS-MCP>/unity-extension/Editor/BanterMCPBridge.cs
   → YourProject/Assets/Editor/BanterMCPBridge.cs
 ```
 
@@ -161,7 +171,7 @@ Scene lifecycle tools expose open and build-scene state, save without dialogs, a
 
 Project routing deduplicates environment and launcher projects by canonical path, assigns stable path-derived IDs, and reports the live Unity editor process identity. Each tool call snapshots its selected project, so switching projects cannot redirect an already-running command.
 
-The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md).
+The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md). The versions exercised in release checks and their known limits are documented in [docs/compatibility.md](docs/compatibility.md).
 
 ### Prompts (Guided workflows)
 
@@ -231,11 +241,13 @@ banter-mcp/
 
 ## Transport
 
-This server currently supports stdio transport only:
+This server currently supports stdio transport only. Run the release bundle:
 
 ```bash
-node dist/index.js
+node banter-mcp.mjs
 ```
+
+From a source checkout, `node dist/index.js` is equivalent after `npm run build`.
 
 The old `--http` flag is intentionally rejected until an HTTP transport is implemented.
 
@@ -248,7 +260,7 @@ This MCP follows the standard MCP protocol, so it works with any MCP-compatible 
 - Cursor (stdio)
 - Any client with MCP support
 
-No local-model host is bundled. Any local LLM client that supports stdio MCP can use the same `node dist/index.js` configuration shown above.
+No local-model host is bundled. Any local LLM client that supports stdio MCP can use the same `node banter-mcp.mjs` configuration shown above.
 
 ## Troubleshooting
 
@@ -282,7 +294,7 @@ cd launcher/src-tauri
 cargo check
 ```
 
-The GitHub Actions workflow runs the Node test suite, dependency audit, and Tauri launcher check on every push and pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
+The GitHub Actions workflow runs the Node test suite and standalone-bundle smoke on Node 18, 20, and 22, plus the dependency audit and Tauri launcher tests. Version tags build draft NSIS/MSI releases and a standalone ZIP. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, [docs/compatibility.md](docs/compatibility.md) for the verified matrix, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
 
 The evidence-based capability comparison and ordered roadmap are maintained in [docs/unity-mcp-benchmark.md](docs/unity-mcp-benchmark.md).
 

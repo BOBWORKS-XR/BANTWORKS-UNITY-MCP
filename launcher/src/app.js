@@ -2,12 +2,10 @@
 let config = {
   channels: [],
   active_channel_id: null,
-  mcp_server_path: 'C:/tools/banter-mcp/dist/index.js',
+  mcp_server_path: '',
   auto_start: false,
   enable_custom_scripts: false
 };
-
-let mcpRoot = 'C:/tools/banter-mcp';
 
 // DOM Elements (set after DOM loads)
 let statusEl, channelsList, emptyState, addChannelBtn, addChannelModal;
@@ -46,7 +44,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Load config
   try {
-    mcpRoot = await window.__TAURI__.core.invoke('get_mcp_root');
     config = await window.__TAURI__.core.invoke('load_config');
     updateUI();
   } catch (err) {
@@ -437,8 +434,7 @@ async function installExtension() {
 
   try {
     await window.__TAURI__.core.invoke('install_unity_extension', {
-      unityProjectPath: channel.unity_project_path,
-      mcpRoot: mcpRoot
+      unityProjectPath: channel.unity_project_path
     });
     await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
       unityProjectPath: channel.unity_project_path,

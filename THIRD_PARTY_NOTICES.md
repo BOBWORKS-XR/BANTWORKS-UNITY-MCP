@@ -4,7 +4,9 @@
 
 No code from the Unity MCP projects listed below is copied, vendored, or linked into this repository. The hardening changes in this repository were implemented independently against the existing BANTWORKS MCP file-bridge design.
 
-The Node dependency graph is tracked in `package-lock.json`; its direct MCP dependency is `@modelcontextprotocol/sdk`. Review its package metadata and license when redistributing a bundled build.
+The Node dependency graph is tracked in `package-lock.json`; its direct runtime MCP dependency is `@modelcontextprotocol/sdk`. The release bundle is produced with [esbuild](https://github.com/evanw/esbuild), which is MIT-licensed. Review locked package metadata and licenses when redistributing a bundled build.
+
+The Windows launcher uses [Tauri](https://github.com/tauri-apps/tauri), distributed under Apache-2.0 and MIT terms. GitHub release packaging uses the official [Tauri Action](https://github.com/tauri-apps/tauri-action); the action is CI infrastructure and is not shipped in the application.
 
 ## Unity MCP Research
 
