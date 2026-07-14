@@ -39,7 +39,7 @@ let toolGroupSelection: ToolGroupSelection = "all";
 const server = new Server(
   {
     name: "banter-mcp",
-    version: "1.7.0",
+    version: "1.8.0",
   },
   {
     capabilities: {

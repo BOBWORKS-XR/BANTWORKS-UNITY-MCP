@@ -56,7 +56,7 @@ export const BANTER_WORKFLOW_CONTRACT = {
     "Run validate_vs_graph before writing.",
     "After writing, run validate_vs_graph_in_unity to force import and deserialization.",
     "For Banter custom nodes, run validate_banter_visual_scripting against the imported graph.",
-    "Confirm the intended ScriptMachine already references the graph asset. The current bridge cannot assign asset object references; report an unattached graph instead of claiming the behavior is wired.",
+    "Confirm the intended ScriptMachine references the graph asset. Use set_asset_reference with property nest.macro when attachment is requested, enforce Unity.VisualScripting.ScriptGraphAsset as the expected type, and re-query the component.",
     "Inspect check_import_status and get_console_logs before reporting the graph ready to test.",
   ],
   webRootGate: [
@@ -98,11 +98,11 @@ export const BANTER_WORKFLOWS: Record<BanterWorkflowId, BanterWorkflow> = {
         id: "ownership-graph",
         surface: "visual-scripting",
         useWhen: "Ownership must be requested and released from graph-driven grab behavior.",
-        requiredToolGroups: ["read", "banter"],
+        requiredToolGroups: ["read", "author", "banter"],
         requiredTools: [
           "generate_vs_graph", "validate_vs_graph", "write_vs_graph",
           "validate_vs_graph_in_unity", "validate_banter_visual_scripting",
-          "check_import_status", "get_console_logs",
+          "set_asset_reference", "check_import_status", "get_console_logs",
         ],
         steps: [
           "Use OnGrab and OnRelease events from the selected SDK catalogue.",
@@ -115,7 +115,7 @@ export const BANTER_WORKFLOWS: Record<BanterWorkflowId, BanterWorkflow> = {
         id: "ownership-webroot",
         surface: "webroot",
         useWhen: "Existing WebRoot JavaScript owns the runtime behavior.",
-        requiredToolGroups: ["read", "banter"],
+        requiredToolGroups: ["read", "author", "banter"],
         requiredTools: ["write_webroot_js", "check_import_status", "get_console_logs"],
         steps: [
           "Resolve the object after the Banter scene reports it is ready.",
@@ -165,11 +165,11 @@ export const BANTER_WORKFLOWS: Record<BanterWorkflowId, BanterWorkflow> = {
         id: "interaction-graph",
         surface: "visual-scripting",
         useWhen: "The interaction behavior belongs in a Script Graph.",
-        requiredToolGroups: ["read", "banter"],
+        requiredToolGroups: ["read", "author", "banter"],
         requiredTools: [
           "generate_vs_graph", "validate_vs_graph", "write_vs_graph",
           "validate_vs_graph_in_unity", "validate_banter_visual_scripting",
-          "check_import_status", "get_console_logs",
+          "set_asset_reference", "check_import_status", "get_console_logs",
         ],
         steps: [
           "Select event nodes from the installed SDK evidence and connect only required outputs.",
@@ -219,11 +219,11 @@ export const BANTER_WORKFLOWS: Record<BanterWorkflowId, BanterWorkflow> = {
         id: "ui-graph",
         surface: "visual-scripting",
         useWhen: "Controls, events, hierarchy, values, or styles are created through Banter custom nodes.",
-        requiredToolGroups: ["read", "banter"],
+        requiredToolGroups: ["read", "author", "banter"],
         requiredTools: [
           "generate_vs_graph", "validate_vs_graph", "write_vs_graph",
           "validate_vs_graph_in_unity", "validate_banter_visual_scripting",
-          "check_import_status", "get_console_logs",
+          "set_asset_reference", "check_import_status", "get_console_logs",
         ],
         steps: [
           "Give every referenced element a stable, unique ID or name.",
@@ -271,11 +271,11 @@ export const BANTER_WORKFLOWS: Record<BanterWorkflowId, BanterWorkflow> = {
         id: "audio-graph",
         surface: "visual-scripting",
         useWhen: "Runtime URL loading or spectrum data belongs in Visual Scripting.",
-        requiredToolGroups: ["read", "banter"],
+        requiredToolGroups: ["read", "author", "banter"],
         requiredTools: [
           "generate_vs_graph", "validate_vs_graph", "write_vs_graph",
           "validate_vs_graph_in_unity", "validate_banter_visual_scripting",
-          "check_import_status", "get_console_logs",
+          "set_asset_reference", "check_import_status", "get_console_logs",
         ],
         steps: [
           "Choose LoadAudioUrl for runtime loading or a spectrum node for analysis.",
@@ -287,7 +287,7 @@ export const BANTER_WORKFLOWS: Record<BanterWorkflowId, BanterWorkflow> = {
         id: "audio-webroot",
         surface: "webroot",
         useWhen: "Playback is controlled by existing WebRoot runtime logic.",
-        requiredToolGroups: ["read", "banter"],
+        requiredToolGroups: ["read", "author", "banter"],
         requiredTools: ["write_webroot_js", "check_import_status", "get_console_logs"],
         steps: [
           "Resolve or create the audio object after the Banter scene is ready.",
@@ -328,11 +328,11 @@ export const BANTER_WORKFLOWS: Record<BanterWorkflowId, BanterWorkflow> = {
         id: "networking-graph",
         surface: "visual-scripting",
         useWhen: "Messaging or space state belongs in a Script Graph.",
-        requiredToolGroups: ["read", "banter"],
+        requiredToolGroups: ["read", "author", "banter"],
         requiredTools: [
           "generate_vs_graph", "validate_vs_graph", "write_vs_graph",
           "validate_vs_graph_in_unity", "validate_banter_visual_scripting",
-          "check_import_status", "get_console_logs",
+          "set_asset_reference", "check_import_status", "get_console_logs",
         ],
         steps: [
           "Choose OneShot for transient messages or a space-state property for persistent shared state.",

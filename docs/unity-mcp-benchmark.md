@@ -57,8 +57,6 @@ Strong today:
 
 Gaps that block a leadership claim:
 
-- the bridge cannot yet assign project asset references to serialized component
-  fields, so a newly written ScriptGraphAsset cannot be attached automatically;
 - Banter graph output lacks a committed Banter-package import/open fixture suite; and
 - Unity-side smoke testing is not yet automated in CI.
 
@@ -78,6 +76,10 @@ its public cancellation API.
    explicit per-`SerializedPropertyType` validation.
 4. **Complete:** preflight batches and roll back their Unity Undo group on
    failure unless partial progress is explicitly requested.
+5. **Complete:** assign AssetDatabase references by normalized path or GUID with
+   type checks, mutation-free preflight where Unity exposes `SerializedProperty`,
+   verified rollback, and guarded custom-serializer paths such as
+   `ScriptMachine.nest.macro`.
 
 ### P1 - General Unity Workflows
 

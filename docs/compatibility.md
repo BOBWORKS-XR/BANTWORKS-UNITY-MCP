@@ -10,7 +10,7 @@ CI rows are enforced by the repository workflow.
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Node.js 18, 20, 22, 24 | CI target | TypeScript build, 42 server tests, standalone esbuild bundle, and isolated no-`node_modules` smoke |
+| Node.js 18, 20, 22, 24 | CI target | TypeScript build, 43 server tests, standalone esbuild bundle, and isolated no-`node_modules` smoke |
 | Codex desktop/CLI | Supported configuration | Launcher and `setup.ps1` write stdio configuration, project environment, 20-second startup timeout, and 600-second tool timeout |
 | Claude Code/Desktop | Supported configuration | Launcher and `setup.ps1` write the same stdio server and selected project environment |
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |
@@ -26,7 +26,7 @@ the default remains `all` for backward compatibility.
 | 2022.3.39f1 | 1.9.4 | None | Manual: bridge compiled; canonical Start graph imported and deserialized with no missing elements |
 | 6000.3.2f1 | 1.9.9 | 3.2.2, source fingerprint `c893607975bb44f319445b533b421d184f6a5285` | Manual: bridge and SDK compiled; generated `Banter.VisualScripting.OnGrab` graph imported with one node and no missing elements; SDK validator passed |
 | 6000.3.2f1 | 1.9.9 | Same as above | Manual negative fixture: a forbidden custom unit imported, and the SDK validator returned the expected failure and exact forbidden type |
-| 6000.3.10f1 | Project-provided | Project-provided | Manual: current bridge compiled |
+| 6000.3.10f1 | 1.9.9 | None | Automated local disposable fixture: bridge compiled; path/GUID assignment, clear, type mismatch, incompatible type, traversal, and non-reference rejection passed; a real `ScriptGraphAsset` attached to and cleared from `ScriptMachine.nest.macro` |
 
 The observed Banter 3.2.2 package declares Unity 2022.3.39f1 metadata, but its
 source references Unity 6 `PhysicsMaterial` and `PhysicsMaterialCombine` types.

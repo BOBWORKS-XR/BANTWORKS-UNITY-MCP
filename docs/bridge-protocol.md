@@ -88,9 +88,16 @@ encode everything as a string. Supported shapes are:
 | Rect | `[x, y, width, height]` or `{ "x": 0, "y": 0, "width": 1, "height": 1 }` |
 | Bounds | `{ "center": [0, 0, 0], "size": [1, 1, 1] }` |
 
-Object references use `set_object_reference`, not
-`set_component_property`. Unsupported serialized property types return an
-explicit command failure.
+Scene-object and component references use `set_object_reference`. Project asset
+references use `set_asset_reference`, selected by normalized `Assets/...` or
+`Packages/...` path, or by the 32-character GUID returned from asset search.
+The asset tool accepts an optional expected type and verifies that Unity retains
+the assignment after applying it. It prefers native `SerializedProperty`
+references and supports guarded nested CLR paths for components that use custom
+serialization. Unity Visual Scripting graph attachment uses `nest.macro` on a
+`Unity.VisualScripting.ScriptMachine`. Neither reference type is accepted
+through `set_component_property`. Unsupported property types return an explicit
+command failure.
 
 The MCP server sends both `valueJson` for current bridges and a legacy `value`
 string. Bridges also continue to accept commands that contain only the legacy

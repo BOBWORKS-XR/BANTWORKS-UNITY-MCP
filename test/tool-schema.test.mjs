@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   isValidUnityTestRunId,
+  normalizeUnityAssetGuid,
+  normalizeUnityAssetReferencePath,
   normalizeUnityVisualScriptingAssetPath,
   normalizeUnitySceneAssetPath,
   playModeStateMatches,
@@ -45,6 +47,29 @@ test("component property writes expose typed values and component IDs", () => {
   assert.ok(schema.properties.value.oneOf);
   assert.ok(schema.properties.value.oneOf.some((option) => option.type === "boolean"));
   assert.ok(schema.properties.value.oneOf.some((option) => option.type === "array"));
+});
+
+test("asset references expose stable selectors and fail-closed asset targets", () => {
+  const schema = tools.get("set_asset_reference")?.inputSchema;
+  assert.ok(schema);
+  assert.deepEqual(schema.required, ["propertyName"]);
+  assert.equal(schema.properties.assetGuid.pattern, "^[0-9a-fA-F]{32}$");
+  assert.equal(schema.properties.clear.default, false);
+  assert.equal(schema.allOf.length, 2);
+  assert.equal(schema.allOf[1].anyOf[2].properties.clear.const, true);
+
+  assert.equal(
+    normalizeUnityAssetReferencePath("Assets\\Graphs\\Respawn.asset"),
+    "Assets/Graphs/Respawn.asset"
+  );
+  assert.equal(
+    normalizeUnityAssetReferencePath("Packages/com.example/Runtime/Data.asset"),
+    "Packages/com.example/Runtime/Data.asset"
+  );
+  assert.equal(normalizeUnityAssetReferencePath("Assets/../Outside.asset"), undefined);
+  assert.equal(normalizeUnityAssetReferencePath("C:/Outside.asset"), undefined);
+  assert.equal(normalizeUnityAssetGuid("ABCDEF0123456789ABCDEF0123456789"), "abcdef0123456789abcdef0123456789");
+  assert.equal(normalizeUnityAssetGuid("not-a-guid"), undefined);
 });
 
 test("batch tools advertise rollback-first behavior", () => {

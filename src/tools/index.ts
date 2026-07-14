@@ -42,6 +42,7 @@ interface Tool {
     properties: Record<string, unknown>;
     required?: string[];
     anyOf?: Array<{ required: string[] }>;
+    allOf?: Array<{ anyOf: Array<{ required: string[]; properties?: Record<string, unknown> }> }>;
   };
 }
 
@@ -979,6 +980,83 @@ Requires BanterMCPBridge extension.`,
       },
     },
 
+    {
+      name: "set_asset_reference",
+      description: `Assign a Unity project asset to an object-reference field on a scene component.
+Use this for ScriptGraphAsset, material, texture, audio clip, prefab, and other AssetDatabase references.
+Native serialized properties are preferred. Guarded nested CLR paths are also supported for custom serializers; use nest.macro for Unity.VisualScripting.ScriptMachine.
+Select the asset by Assets/... or Packages/... path, or by its 32-character Unity GUID. Set clear=true to remove the reference.
+Exactly one of assetPath, assetGuid, or clear=true is accepted. expectedAssetType provides an optional fail-closed type check.
+Requires BanterMCPBridge extension.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          objectPath: {
+            type: "string",
+            description: "Legacy path selector for the GameObject containing the component",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: source GameObject globalObjectId from scene-hierarchy.json",
+          },
+          componentType: {
+            type: "string",
+            description: "Component type name when it is unique on the object",
+          },
+          componentId: {
+            type: "string",
+            description: "Preferred: component globalObjectId from scene-hierarchy.json",
+          },
+          propertyName: {
+            type: "string",
+            minLength: 1,
+            maxLength: 512,
+            description: "Object-reference path (for example, 'material' or ScriptMachine's custom-serialized 'nest.macro')",
+          },
+          assetPath: {
+            type: "string",
+            minLength: 8,
+            maxLength: 1024,
+            description: "Unity asset path under Assets/ or Packages/",
+          },
+          assetGuid: {
+            type: "string",
+            pattern: "^[0-9a-fA-F]{32}$",
+            description: "Unity asset GUID, normally returned by search_unity_assets",
+          },
+          clear: {
+            type: "boolean",
+            default: false,
+            description: "Set true to clear the asset reference",
+          },
+          expectedAssetType: {
+            type: "string",
+            minLength: 1,
+            maxLength: 512,
+            description: "Optional exact or assignable Unity type (for example, Unity.VisualScripting.ScriptGraphAsset)",
+          },
+        },
+        required: ["propertyName"],
+        allOf: [
+          {
+            anyOf: [
+              { required: ["objectId", "componentId"] },
+              { required: ["objectPath", "componentId"] },
+              { required: ["objectId", "componentType"] },
+              { required: ["objectPath", "componentType"] },
+            ],
+          },
+          {
+            anyOf: [
+              { required: ["assetPath"] },
+              { required: ["assetGuid"] },
+              { required: ["clear"], properties: { clear: { const: true } } },
+            ],
+          },
+        ],
+      },
+    },
+
     // Batch Operations
     {
       name: "batch_create",
@@ -1445,6 +1523,21 @@ export async function handleToolCall(
         args.targetId as string | undefined,
         args.targetPath as string | undefined,
         args.targetComponent as string | undefined,
+        config
+      );
+      break;
+
+    case "set_asset_reference":
+      result = await setAssetReference(
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
+        args.componentId as string | undefined,
+        args.componentType as string | undefined,
+        args.propertyName as string,
+        args.assetPath,
+        args.assetGuid,
+        args.clear,
+        args.expectedAssetType,
         config
       );
       break;
@@ -3049,4 +3142,100 @@ async function setObjectReference(
   }
 
   return result;
+}
+
+export function normalizeUnityAssetReferencePath(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 1024) {
+    return undefined;
+  }
+
+  const raw = value.replace(/\\/g, "/").trim();
+  const segments = raw.split("/");
+  if (
+    segments.length < 2 ||
+    !["Assets", "Packages"].includes(segments[0]) ||
+    segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
+  ) {
+    return undefined;
+  }
+  return segments.join("/");
+}
+
+export function normalizeUnityAssetGuid(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^[0-9a-fA-F]{32}$/.test(value.trim())) {
+    return undefined;
+  }
+  return value.trim().toLowerCase();
+}
+
+async function setAssetReference(
+  objectId: string | undefined,
+  objectPath: string | undefined,
+  componentId: string | undefined,
+  componentType: string | undefined,
+  propertyName: string,
+  assetPathValue: unknown,
+  assetGuidValue: unknown,
+  clearValue: unknown,
+  expectedAssetTypeValue: unknown,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const assetPath = normalizeUnityAssetReferencePath(assetPathValue);
+  const assetGuid = normalizeUnityAssetGuid(assetGuidValue);
+  const clear = clearValue === true;
+  const targetCount = Number(assetPath !== undefined) + Number(assetGuid !== undefined) + Number(clear);
+
+  if (targetCount !== 1) {
+    return {
+      success: false,
+      error: "set_asset_reference requires exactly one valid assetPath, assetGuid, or clear=true target.",
+    };
+  }
+  if (typeof propertyName !== "string" || propertyName.trim().length === 0 || propertyName.length > 512) {
+    return { success: false, error: "propertyName must be a non-empty object-reference property path." };
+  }
+
+  let expectedAssetType: string | null = null;
+  if (expectedAssetTypeValue !== undefined) {
+    if (
+      typeof expectedAssetTypeValue !== "string" ||
+      expectedAssetTypeValue.trim().length === 0 ||
+      expectedAssetTypeValue.length > 512
+    ) {
+      return { success: false, error: "expectedAssetType must be a non-empty Unity type name." };
+    }
+    expectedAssetType = expectedAssetTypeValue.trim();
+  }
+
+  const command = {
+    type: "set_asset_reference",
+    objectId: objectId || null,
+    objectPath: objectPath || null,
+    componentId: componentId || null,
+    componentType: componentType || null,
+    propertyName: propertyName.trim(),
+    assetPath: assetPath || null,
+    assetGuid: assetGuid || null,
+    clear,
+    expectedAssetType,
+  };
+  const result = await sendUnityCommand(command, config);
+  if (!result.success) return result;
+
+  const componentLabel = componentType || componentId;
+  const targetLabel = clear ? "null" : (assetPath || `guid:${assetGuid}`);
+  return {
+    ...commandResponse(result, `Set ${componentLabel}.${propertyName.trim()} -> ${targetLabel}`),
+    details: {
+      objectId,
+      objectPath,
+      componentId,
+      componentType,
+      propertyName: propertyName.trim(),
+      assetPath,
+      assetGuid,
+      clear,
+      expectedAssetType,
+    },
+  };
 }

@@ -64,6 +64,9 @@ test("workflow resource and focused prompts expose every workflow", () => {
   const payload = JSON.parse(handleResourceRead("banter://workflows", config).contents[0].text);
   assert.deepEqual(Object.keys(payload.workflows), [...BANTER_WORKFLOW_IDS]);
   assert.ok(payload.contract.preflight.some((step) => step.includes("get_banter_sdk_info")));
+  const nodeLog = handleResourceRead("banter://custom-vs-node-log", config).contents[0].text;
+  assert.match(nodeLog, /Source SHA256: [0-9A-F]{64}/);
+  assert.doesNotMatch(nodeLog, /[A-Z]:[\\/](?:Users|home)[\\/]/i);
 
   const prompts = new Set(registerPrompts().map((prompt) => prompt.name));
   for (const [id, promptName] of Object.entries(focusedPromptNames)) {

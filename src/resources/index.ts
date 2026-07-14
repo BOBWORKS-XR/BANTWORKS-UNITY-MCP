@@ -63,6 +63,7 @@ When the user asks for something in their scene:
 - \`create_gameobject\` - Create cubes, spheres, empty objects, etc.
 - \`delete_gameobject\` - Remove objects from the scene
 - \`modify_gameobject\` - Change position, rotation, scale
+- \`set_asset_reference\` - Assign graph, material, texture, audio, prefab, and other Unity assets to component reference fields
 
 ### Visual Scripting
 - \`generate_vs_graph\` - Create interaction logic
@@ -107,7 +108,7 @@ Good: *Uses modify_gameobject to set scale [2, 2, 2]*
 - Don't ask permission for simple changes
 - Create first, then explain what you created
 - Be specific about what you did ("created at position X" not "you could create")
-- Writing a ScriptGraphAsset does not attach it to a ScriptMachine; verify the reference or report the graph as unattached
+- Writing a ScriptGraphAsset does not attach it to a ScriptMachine; use \`set_asset_reference\` on \`nest.macro\` and verify the component reference
 - Check your work with status/console tools
 - If something fails, fix it and try again
 
@@ -306,10 +307,7 @@ export function handleResourceRead(
       break;
 
     case "banter://custom-vs-node-log":
-      content = BANTER_CUSTOM_VS_NODE_LOG.replace(
-        "Generated from: C:/Users/bobman/Downloads/AllCustomNodes (1).asset",
-        "Generated from: AllCustomNodes (1).asset\nSource SHA256: 5F26A646B71FCC0C6215B880476F4F7623DD9B11F64208254A538B10998C0C94"
-      );
+      content = BANTER_CUSTOM_VS_NODE_LOG;
       mimeType = "text/markdown";
       break;
 

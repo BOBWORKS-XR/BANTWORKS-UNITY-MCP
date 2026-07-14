@@ -445,6 +445,11 @@ namespace BantworksMCP
                     SetObjectReference(setRefCmd);
                     return $"Set object reference: {setRefCmd.componentType}.{setRefCmd.propertyName}";
 
+                case "set_asset_reference":
+                    var setAssetRefCmd = JsonUtility.FromJson<SetAssetReferenceCommand>(json);
+                    string assignedAsset = SetAssetReference(setAssetRefCmd);
+                    return $"Set asset reference: {setAssetRefCmd.componentType}.{setAssetRefCmd.propertyName} -> {assignedAsset}";
+
                 case "batch":
                     var batchCmd = JsonUtility.FromJson<BatchCommand>(json);
                     ProcessBatchCommand(batchCmd);
@@ -2109,6 +2114,301 @@ namespace BantworksMCP
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
             Debug.Log($"[BANTWORKS MCP] Set reference {cmd.propertyName} on {cmd.componentType}");
             ExportSceneHierarchy();
+        }
+
+        private static string SetAssetReference(SetAssetReferenceCommand cmd)
+        {
+            if (cmd == null)
+                throw new InvalidOperationException("Asset reference command is missing");
+
+            bool hasAssetPath = !string.IsNullOrWhiteSpace(cmd.assetPath);
+            bool hasAssetGuid = !string.IsNullOrWhiteSpace(cmd.assetGuid);
+            int targetCount = (hasAssetPath ? 1 : 0) + (hasAssetGuid ? 1 : 0) + (cmd.clear ? 1 : 0);
+            if (targetCount != 1)
+                throw new InvalidOperationException("Asset reference requires exactly one assetPath, assetGuid, or clear=true target");
+            if (string.IsNullOrWhiteSpace(cmd.propertyName) || cmd.propertyName.Length > 512)
+                throw new InvalidOperationException("Asset reference requires a bounded property path");
+
+            var obj = ResolveGameObject(cmd.objectId, cmd.objectPath);
+            var component = ResolveComponent(obj, cmd.componentId, cmd.componentType);
+            string propertyPath = cmd.propertyName.Trim();
+            var serializedObject = new SerializedObject(component);
+            var property = serializedObject.FindProperty(propertyPath);
+            if (property != null && property.propertyType != SerializedPropertyType.ObjectReference)
+                throw new InvalidOperationException($"Property is not an object reference: {cmd.propertyName} on {cmd.componentType}");
+
+            string resolvedPath = null;
+            UnityEngine.Object targetAsset = null;
+            if (!cmd.clear)
+            {
+                if (hasAssetGuid)
+                {
+                    string normalizedGuid = cmd.assetGuid.Trim().ToLowerInvariant();
+                    if (normalizedGuid.Length != 32 || normalizedGuid.Any(c => !Uri.IsHexDigit(c)))
+                        throw new InvalidOperationException("assetGuid must be a 32-character hexadecimal Unity GUID");
+                    resolvedPath = AssetDatabase.GUIDToAssetPath(normalizedGuid);
+                    if (string.IsNullOrWhiteSpace(resolvedPath))
+                        throw new InvalidOperationException($"No Unity asset exists for GUID: {normalizedGuid}");
+                }
+                else
+                {
+                    resolvedPath = cmd.assetPath;
+                }
+
+                resolvedPath = NormalizeAssetReferencePath(resolvedPath);
+                targetAsset = AssetDatabase.LoadMainAssetAtPath(resolvedPath);
+                if (targetAsset == null)
+                    throw new InvalidOperationException($"Unity could not load the main asset at: {resolvedPath}");
+
+                if (!string.IsNullOrWhiteSpace(cmd.expectedAssetType) &&
+                    !AssetMatchesExpectedType(targetAsset, cmd.expectedAssetType.Trim()))
+                {
+                    string actualType = targetAsset.GetType().FullName ?? targetAsset.GetType().Name;
+                    throw new InvalidOperationException(
+                        $"Asset type mismatch at {resolvedPath}: expected {cmd.expectedAssetType.Trim()}, loaded {actualType}");
+                }
+            }
+
+            if (property == null)
+            {
+                SetReflectedAssetReference(component, propertyPath, targetAsset, cmd.componentType);
+            }
+            else
+            {
+                SetSerializedAssetReference(
+                    component,
+                    serializedObject,
+                    property,
+                    propertyPath,
+                    targetAsset,
+                    cmd.componentType);
+            }
+
+            EditorUtility.SetDirty(component);
+            EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+            Debug.Log($"[BANTWORKS MCP] Set asset reference {cmd.propertyName} on {cmd.componentType} -> {(cmd.clear ? "null" : resolvedPath)}");
+            ExportSceneHierarchy();
+            return cmd.clear ? "null" : resolvedPath;
+        }
+
+        private static void SetSerializedAssetReference(
+            Component component,
+            SerializedObject serializedObject,
+            SerializedProperty property,
+            string propertyPath,
+            UnityEngine.Object targetAsset,
+            string componentType)
+        {
+            UnityEngine.Object previousAsset = property.objectReferenceValue;
+
+            // Assign on the SerializedObject without applying first. Unity rejects
+            // incompatible references here, so no scene mutation has occurred.
+            property.objectReferenceValue = targetAsset;
+            if (property.objectReferenceValue != targetAsset)
+            {
+                serializedObject.Update();
+                string actualType = targetAsset == null ? "null" : targetAsset.GetType().FullName;
+                throw new InvalidOperationException(
+                    $"Asset {actualType} is not compatible with {componentType}.{propertyPath}");
+            }
+
+            serializedObject.Update();
+            property = serializedObject.FindProperty(propertyPath);
+            Undo.RecordObject(component, "MCP Set Asset Reference");
+            try
+            {
+                property.objectReferenceValue = targetAsset;
+                serializedObject.ApplyModifiedProperties();
+                serializedObject.Update();
+                property = serializedObject.FindProperty(propertyPath);
+                if (property == null || property.objectReferenceValue != targetAsset)
+                    throw new InvalidOperationException("Unity did not retain the requested reference");
+            }
+            catch (Exception assignmentError)
+            {
+                string rollbackError = null;
+                try
+                {
+                    var rollbackObject = new SerializedObject(component);
+                    var rollbackProperty = rollbackObject.FindProperty(propertyPath);
+                    if (rollbackProperty == null)
+                    {
+                        rollbackError = "property could not be resolved during rollback";
+                    }
+                    else
+                    {
+                        rollbackProperty.objectReferenceValue = previousAsset;
+                        rollbackObject.ApplyModifiedProperties();
+                        rollbackObject.Update();
+                        rollbackProperty = rollbackObject.FindProperty(propertyPath);
+                        if (rollbackProperty == null || rollbackProperty.objectReferenceValue != previousAsset)
+                            rollbackError = "the previous reference was not retained during rollback";
+                    }
+                }
+                catch (Exception error)
+                {
+                    rollbackError = GetInnermostExceptionMessage(error);
+                }
+
+                string rollbackResult = rollbackError == null
+                    ? "; the previous value was restored"
+                    : $"; rollback could not be verified: {rollbackError}";
+                throw new InvalidOperationException(
+                    $"Could not set asset reference on {componentType}.{propertyPath}: " +
+                    $"{GetInnermostExceptionMessage(assignmentError)}{rollbackResult}");
+            }
+        }
+
+        private static void SetReflectedAssetReference(
+            Component component,
+            string propertyPath,
+            UnityEngine.Object targetAsset,
+            string componentType)
+        {
+            ReflectedReferenceAccessor accessor = ResolveReflectedReferenceAccessor(component, propertyPath);
+            if (!typeof(UnityEngine.Object).IsAssignableFrom(accessor.ValueType))
+                throw new InvalidOperationException($"Property is not an object reference: {propertyPath} on {componentType}");
+            if (targetAsset != null && !accessor.ValueType.IsAssignableFrom(targetAsset.GetType()))
+            {
+                throw new InvalidOperationException(
+                    $"Asset {targetAsset.GetType().FullName} is not compatible with {componentType}.{propertyPath}");
+            }
+
+            UnityEngine.Object previousAsset = accessor.GetValue() as UnityEngine.Object;
+            Undo.RecordObject(component, "MCP Set Asset Reference");
+            try
+            {
+                accessor.SetValue(targetAsset);
+                UnityEngine.Object retainedAsset = accessor.GetValue() as UnityEngine.Object;
+                if (retainedAsset != targetAsset)
+                    throw new InvalidOperationException("the property did not retain the requested reference");
+            }
+            catch (Exception assignmentError)
+            {
+                string rollbackError = null;
+                try
+                {
+                    accessor.SetValue(previousAsset);
+                    UnityEngine.Object restoredAsset = accessor.GetValue() as UnityEngine.Object;
+                    if (restoredAsset != previousAsset)
+                        rollbackError = "the previous reference was not retained during rollback";
+                }
+                catch (Exception error)
+                {
+                    rollbackError = GetInnermostExceptionMessage(error);
+                }
+
+                string rollbackResult = rollbackError == null
+                    ? "; the previous value was restored"
+                    : $"; rollback could not be verified: {rollbackError}";
+                throw new InvalidOperationException(
+                    $"Could not set asset reference on {componentType}.{propertyPath}: " +
+                    $"{GetInnermostExceptionMessage(assignmentError)}{rollbackResult}");
+            }
+        }
+
+        private static ReflectedReferenceAccessor ResolveReflectedReferenceAccessor(object root, string propertyPath)
+        {
+            string[] segments = propertyPath.Split('.');
+            if (segments.Length == 0 || segments.Any(segment => !IsSafeMemberName(segment)))
+                throw new InvalidOperationException($"Invalid reflected property path: {propertyPath}");
+
+            object owner = root;
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                if (owner == null)
+                    throw new InvalidOperationException($"Property path contains a null owner before: {segments[i]}");
+
+                Type ownerType = owner.GetType();
+                System.Reflection.PropertyInfo property = ownerType.GetProperty(segments[i], flags);
+                FieldInfo field = property == null ? ownerType.GetField(segments[i], flags) : null;
+                bool isLast = i == segments.Length - 1;
+
+                if (property != null)
+                {
+                    MethodInfo getter = property.GetGetMethod(true);
+                    if (getter == null || getter.IsStatic || property.GetIndexParameters().Length != 0)
+                        throw new InvalidOperationException($"Property is not a readable instance member: {segments[i]}");
+                    if (isLast)
+                    {
+                        MethodInfo setter = property.GetSetMethod(true);
+                        if (setter == null || setter.IsStatic)
+                            throw new InvalidOperationException($"Property is not writable: {propertyPath}");
+                        return new ReflectedReferenceAccessor(owner, property);
+                    }
+                    owner = property.GetValue(owner);
+                    continue;
+                }
+
+                if (field != null)
+                {
+                    if (field.IsStatic)
+                        throw new InvalidOperationException($"Field is not an instance member: {segments[i]}");
+                    if (isLast)
+                    {
+                        if (field.IsInitOnly || field.IsLiteral)
+                            throw new InvalidOperationException($"Field is not writable: {propertyPath}");
+                        return new ReflectedReferenceAccessor(owner, field);
+                    }
+                    owner = field.GetValue(owner);
+                    continue;
+                }
+
+                throw new InvalidOperationException($"Property not found: {propertyPath} on {root.GetType().FullName}");
+            }
+
+            throw new InvalidOperationException($"Property not found: {propertyPath} on {root.GetType().FullName}");
+        }
+
+        private static bool IsSafeMemberName(string value)
+        {
+            if (string.IsNullOrEmpty(value) || !(char.IsLetter(value[0]) || value[0] == '_'))
+                return false;
+            return value.Skip(1).All(character => char.IsLetterOrDigit(character) || character == '_');
+        }
+
+        private static string GetInnermostExceptionMessage(Exception error)
+        {
+            while (error.InnerException != null)
+                error = error.InnerException;
+            return error.Message;
+        }
+
+        private static string NormalizeAssetReferencePath(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length > 1024)
+                throw new InvalidOperationException("Asset path is missing or exceeds 1024 characters");
+
+            string normalized = value.Replace('\\', '/').Trim();
+            string[] segments = normalized.Split('/');
+            if (segments.Length < 2 ||
+                (segments[0] != "Assets" && segments[0] != "Packages") ||
+                segments.Any(segment => string.IsNullOrEmpty(segment) || segment == "." || segment == ".."))
+            {
+                throw new InvalidOperationException("Asset path must be a normalized Assets/... or Packages/... path without traversal");
+            }
+            return string.Join("/", segments);
+        }
+
+        private static bool AssetMatchesExpectedType(UnityEngine.Object asset, string expectedTypeName)
+        {
+            Type actualType = asset.GetType();
+            if (string.Equals(actualType.FullName, expectedTypeName, StringComparison.Ordinal) ||
+                string.Equals(actualType.Name, expectedTypeName, StringComparison.Ordinal) ||
+                string.Equals(actualType.AssemblyQualifiedName, expectedTypeName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            Type expectedType = Type.GetType(expectedTypeName, false) ??
+                AppDomain.CurrentDomain.GetAssemblies()
+                    .Select(assembly => {
+                        try { return assembly.GetType(expectedTypeName, false); }
+                        catch { return null; }
+                    })
+                    .FirstOrDefault(type => type != null);
+            return expectedType != null && expectedType.IsAssignableFrom(actualType);
         }
 
         private static UnityEngine.Object ResolveObjectReferenceTarget(Type componentType, string propertyName, GameObject targetGameObject, string targetComponent)
@@ -4102,6 +4402,57 @@ namespace BantworksMCP
             public string targetId;
             public string targetPath;
             public string targetComponent;
+        }
+
+        [Serializable]
+        private class SetAssetReferenceCommand
+        {
+            public string type;
+            public string objectId;
+            public string objectPath;
+            public string componentType;
+            public string componentId;
+            public string propertyName;
+            public string assetPath;
+            public string assetGuid;
+            public bool clear;
+            public string expectedAssetType;
+        }
+
+        private sealed class ReflectedReferenceAccessor
+        {
+            private readonly object owner;
+            private readonly System.Reflection.PropertyInfo property;
+            private readonly FieldInfo field;
+
+            public ReflectedReferenceAccessor(object owner, System.Reflection.PropertyInfo property)
+            {
+                this.owner = owner;
+                this.property = property;
+                ValueType = property.PropertyType;
+            }
+
+            public ReflectedReferenceAccessor(object owner, FieldInfo field)
+            {
+                this.owner = owner;
+                this.field = field;
+                ValueType = field.FieldType;
+            }
+
+            public Type ValueType { get; }
+
+            public object GetValue()
+            {
+                return property != null ? property.GetValue(owner) : field.GetValue(owner);
+            }
+
+            public void SetValue(object value)
+            {
+                if (property != null)
+                    property.SetValue(owner, value);
+                else
+                    field.SetValue(owner, value);
+            }
         }
 
         [Serializable]

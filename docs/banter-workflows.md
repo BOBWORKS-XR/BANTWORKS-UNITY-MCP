@@ -31,12 +31,8 @@ Visual Scripting changes run this gate:
 2. Run `validate_vs_graph` before writing.
 3. Run `validate_vs_graph_in_unity` after writing to force Unity import and deserialization.
 4. Run `validate_banter_visual_scripting` for Banter custom nodes.
-5. Confirm the intended ScriptMachine already references the graph asset.
+5. Use `set_asset_reference` with property `nest.macro` when ScriptMachine attachment is requested, require `Unity.VisualScripting.ScriptGraphAsset` as the expected type, then verify the reference.
 6. Inspect import status and Unity console diagnostics.
-
-Graph creation is not graph attachment. The current bridge does not assign
-asset object references, so an unattached graph must be reported as such rather
-than described as working scene behavior.
 
 WebRoot writes are structurally checked by `write_webroot_js`, but that is not
 runtime proof. Scripts must wait for the documented Banter scene lifecycle,

@@ -41,7 +41,7 @@ This knowledge improves graph generation and review, but source-class coverage i
 - Node.js 18 or later.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
-- Unity 6000.3.10f1 is the latest editor version verified with the bridge. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
+- Unity 6000.3.10f1 is the latest editor version verified with the bridge. A disposable blank-project fixture also verifies generic asset-reference assignment and real Visual Scripting 1.9.9 `ScriptMachine.nest.macro` attachment. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
 
 ## Quick Start
 
@@ -151,9 +151,9 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (39 focused actions available to MCP clients)
+### Tools (40 focused actions available to MCP clients)
 
-All 39 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
+All 40 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
 
 | Category | Tools |
 |----------|-------|
@@ -166,7 +166,7 @@ All 39 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `aut
 | Unity tests | `discover_unity_tests`, `run_unity_tests`, `cancel_unity_test_run`, `get_unity_test_run` |
 | Scene lifecycle and builds | `get_unity_scenes`, `save_unity_scene`, `open_unity_scene`, `set_unity_build_scenes` |
 | Scene object operations | `create_gameobject`, `delete_gameobject`, `modify_gameobject`, `get_object_bounds` |
-| Components and references | `add_component`, `remove_component`, `set_component_property`, `set_object_reference` |
+| Components and references | `add_component`, `remove_component`, `set_component_property`, `set_object_reference`, `set_asset_reference` |
 | Prefabs and batches | `batch_create`, `instantiate_prefab`, `batch_instantiate_prefabs`, `get_prefab_catalog`, `scan_prefabs` |
 
 Scene-mutating tools run through the Unity bridge and return an explicit Unity acknowledgement when one arrives. Scene state exports stable Unity `globalObjectId` values for GameObjects and components; mutation tools prefer those IDs while retaining path selectors for older clients. Typed inspector writes support scalars, vectors, colors, enums, Rects, and Bounds with explicit validation. Ambiguous or stale selectors fail closed rather than modifying an arbitrary object.
@@ -302,6 +302,7 @@ Common fixes:
 ```powershell
 npm ci
 npm test
+./scripts/smoke-unity-asset-reference.ps1
 cd launcher/src-tauri
 cargo check
 ```

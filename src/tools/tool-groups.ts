@@ -43,6 +43,7 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "remove_component",
     "set_component_property",
     "set_object_reference",
+    "set_asset_reference",
     "batch_create",
     "instantiate_prefab",
     "batch_instantiate_prefabs",
