@@ -140,7 +140,11 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | Components and references | `add_component`, `remove_component`, `set_component_property`, `set_object_reference` |
 | Prefabs and batches | `batch_create`, `instantiate_prefab`, `batch_instantiate_prefabs`, `get_prefab_catalog`, `scan_prefabs` |
 
-Scene-mutating tools run through the Unity bridge and return an explicit Unity acknowledgement when one arrives. Paths that resolve to duplicate hierarchy objects fail closed rather than modifying an arbitrary object.
+Scene-mutating tools run through the Unity bridge and return an explicit Unity acknowledgement when one arrives. Scene state exports stable Unity `globalObjectId` values for GameObjects and components; mutation tools prefer those IDs while retaining path selectors for older clients. Typed inspector writes support scalars, vectors, colors, enums, Rects, and Bounds with explicit validation. Ambiguous or stale selectors fail closed rather than modifying an arbitrary object.
+
+Batch creation and prefab placement are preflighted and run as one Unity Undo transaction. They roll back on failure by default; partial progress requires the explicit `continueOnError` option.
+
+The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md).
 
 ### Prompts (Guided workflows)
 
@@ -256,6 +260,8 @@ cargo check
 ```
 
 The GitHub Actions workflow runs the Node test suite, dependency audit, and Tauri launcher check on every push and pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
+
+The evidence-based capability comparison and ordered roadmap are maintained in [docs/unity-mcp-benchmark.md](docs/unity-mcp-benchmark.md).
 
 ## License
 

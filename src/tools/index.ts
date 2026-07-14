@@ -10,6 +10,7 @@ import { queryProjectState, ProjectStateResult } from "./query-project.js";
 import { checkImportStatus, ImportStatusResult } from "./check-import-status.js";
 import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
 import { getBridgeStatus } from "./get-bridge-status.js";
+import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
 import { atomicWriteFileSync } from "../lib/files.js";
 
 interface Tool {
@@ -19,6 +20,7 @@ interface Tool {
     type: "object";
     properties: Record<string, unknown>;
     required?: string[];
+    anyOf?: Array<{ required: string[] }>;
   };
 }
 
@@ -306,6 +308,10 @@ Requires BanterMCPBridge extension to be installed and Unity Editor running.`,
             type: "string",
             description: "Path to parent object (e.g., 'ParentObject' or 'Parent/Child')",
           },
+          parentId: {
+            type: "string",
+            description: "Preferred: parent globalObjectId from scene-hierarchy.json",
+          },
         },
         required: ["name"],
       },
@@ -320,10 +326,14 @@ Requires BanterMCPBridge extension.`,
         properties: {
           objectPath: {
             type: "string",
-            description: "Path to the object (e.g., 'ObjectName' or 'Parent/Child')",
+            description: "Legacy path selector (e.g., 'ObjectName' or 'Parent/Child')",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: GameObject globalObjectId from scene-hierarchy.json",
           },
         },
-        required: ["objectPath"],
+        anyOf: [{ required: ["objectId"] }, { required: ["objectPath"] }],
       },
     },
 
@@ -336,7 +346,11 @@ Requires BanterMCPBridge extension.`,
         properties: {
           objectPath: {
             type: "string",
-            description: "Path to the object",
+            description: "Legacy path selector",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: GameObject globalObjectId from scene-hierarchy.json",
           },
           position: {
             type: "array",
@@ -354,7 +368,7 @@ Requires BanterMCPBridge extension.`,
             description: "New scale as [x, y, z]",
           },
         },
-        required: ["objectPath"],
+        anyOf: [{ required: ["objectId"] }, { required: ["objectPath"] }],
       },
     },
 
@@ -369,14 +383,19 @@ Requires BanterMCPBridge extension.`,
         properties: {
           objectPath: {
             type: "string",
-            description: "Path to the GameObject (e.g., 'MyObject' or 'Parent/Child')",
+            description: "Legacy path selector (e.g., 'MyObject' or 'Parent/Child')",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: GameObject globalObjectId from scene-hierarchy.json",
           },
           componentType: {
             type: "string",
             description: "Component type name (e.g., 'Rigidbody', 'BoxCollider', 'AudioSource')",
           },
         },
-        required: ["objectPath", "componentType"],
+        required: ["componentType"],
+        anyOf: [{ required: ["objectId"] }, { required: ["objectPath"] }],
       },
     },
 
@@ -389,14 +408,27 @@ Requires BanterMCPBridge extension.`,
         properties: {
           objectPath: {
             type: "string",
-            description: "Path to the GameObject",
+            description: "Legacy path selector",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: GameObject globalObjectId from scene-hierarchy.json",
           },
           componentType: {
             type: "string",
             description: "Component type name to remove (e.g., 'Rigidbody', 'BoxCollider')",
           },
+          componentId: {
+            type: "string",
+            description: "Preferred when a GameObject has duplicate component types: component globalObjectId from scene-hierarchy.json",
+          },
         },
-        required: ["objectPath", "componentType"],
+        anyOf: [
+          { required: ["objectId", "componentId"] },
+          { required: ["objectPath", "componentId"] },
+          { required: ["objectId", "componentType"] },
+          { required: ["objectPath", "componentType"] },
+        ],
       },
     },
 
@@ -410,22 +442,42 @@ Requires BanterMCPBridge extension.`,
         properties: {
           objectPath: {
             type: "string",
-            description: "Path to the GameObject",
+            description: "Legacy path selector",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: GameObject globalObjectId from scene-hierarchy.json",
           },
           componentType: {
             type: "string",
             description: "Component type name (e.g., 'Rigidbody', 'Transform')",
+          },
+          componentId: {
+            type: "string",
+            description: "Preferred when a GameObject has duplicate component types: component globalObjectId from scene-hierarchy.json",
           },
           propertyName: {
             type: "string",
             description: "Property name (e.g., 'mass', 'useGravity', 'isTrigger')",
           },
           value: {
-            type: "string",
-            description: "Property value as JSON string (e.g., '2.5', 'true', '[1,2,3]')",
+            oneOf: [
+              { type: "boolean" },
+              { type: "number" },
+              { type: "string" },
+              { type: "array", items: { type: "number" } },
+              { type: "object" },
+            ],
+            description: "Typed property value. Use numbers/booleans directly, arrays for vectors/colors, enum name or index, and objects for Rect/Bounds.",
           },
         },
-        required: ["objectPath", "componentType", "propertyName", "value"],
+        required: ["propertyName", "value"],
+        anyOf: [
+          { required: ["objectId", "componentId"] },
+          { required: ["objectPath", "componentId"] },
+          { required: ["objectId", "componentType"] },
+          { required: ["objectPath", "componentType"] },
+        ],
       },
     },
 
@@ -440,11 +492,19 @@ Requires BanterMCPBridge extension.`,
         properties: {
           objectPath: {
             type: "string",
-            description: "Path to the GameObject containing the component (e.g., 'Player/Body')",
+            description: "Legacy path selector for the GameObject containing the component",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: source GameObject globalObjectId from scene-hierarchy.json",
           },
           componentType: {
             type: "string",
             description: "Component type name (e.g., 'VRPlayerController', 'PhysicsRig')",
+          },
+          componentId: {
+            type: "string",
+            description: "Preferred when duplicate component types exist: source component globalObjectId",
           },
           propertyName: {
             type: "string",
@@ -452,14 +512,28 @@ Requires BanterMCPBridge extension.`,
           },
           targetPath: {
             type: "string",
-            description: "Path to the target GameObject to assign (e.g., 'Player/Head'), or 'null' to clear",
+            description: "Legacy target path selector, or 'null' to clear",
+          },
+          targetId: {
+            type: "string",
+            description: "Preferred: target GameObject globalObjectId from scene-hierarchy.json",
           },
           targetComponent: {
             type: "string",
             description: "Optional: specific component type on the target (e.g., 'Rigidbody'). If omitted, auto-detects based on field type.",
           },
         },
-        required: ["objectPath", "componentType", "propertyName", "targetPath"],
+        required: ["propertyName"],
+        anyOf: [
+          { required: ["objectId", "componentId", "targetId"] },
+          { required: ["objectPath", "componentId", "targetId"] },
+          { required: ["objectId", "componentType", "targetId"] },
+          { required: ["objectPath", "componentType", "targetId"] },
+          { required: ["objectId", "componentId", "targetPath"] },
+          { required: ["objectPath", "componentId", "targetPath"] },
+          { required: ["objectId", "componentType", "targetPath"] },
+          { required: ["objectPath", "componentType", "targetPath"] },
+        ],
       },
     },
 
@@ -486,9 +560,15 @@ Example: Create an office with walls, desks, chairs all at once.`,
                 rotation: { type: "array", items: { type: "number" }, description: "[x, y, z] euler angles" },
                 scale: { type: "array", items: { type: "number" }, description: "[x, y, z]" },
                 parentPath: { type: "string", description: "Parent object path" },
+                parentId: { type: "string", description: "Preferred parent globalObjectId" },
               },
               required: ["name"],
             },
+          },
+          continueOnError: {
+            type: "boolean",
+            default: false,
+            description: "Dangerous opt-in: keep successful operations when another operation fails. Default false rolls back the whole batch.",
           },
         },
         required: ["objects"],
@@ -531,6 +611,10 @@ Requires BanterMCPBridge extension.`,
             type: "string",
             description: "Path to parent object",
           },
+          parentId: {
+            type: "string",
+            description: "Preferred: parent globalObjectId from scene-hierarchy.json",
+          },
         },
         required: ["prefabPath"],
       },
@@ -557,9 +641,15 @@ Example: Create a village with houses, trees, fences all at once.`,
                 rotation: { type: "array", items: { type: "number" }, description: "[x, y, z] euler angles" },
                 scale: { type: "array", items: { type: "number" }, description: "[x, y, z]" },
                 parentPath: { type: "string", description: "Parent object path" },
+                parentId: { type: "string", description: "Preferred parent globalObjectId" },
               },
               required: ["prefabPath"],
             },
+          },
+          continueOnError: {
+            type: "boolean",
+            default: false,
+            description: "Dangerous opt-in: keep successful operations when another operation fails. Default false rolls back the whole batch.",
           },
         },
         required: ["prefabs"],
@@ -620,10 +710,14 @@ Returns:
         properties: {
           objectPath: {
             type: "string",
-            description: "Path to the GameObject (e.g., 'City/Buildings/Skyscraper_1')",
+            description: "Legacy path selector (e.g., 'City/Buildings/Skyscraper_1')",
+          },
+          objectId: {
+            type: "string",
+            description: "Preferred: GameObject globalObjectId from scene-hierarchy.json",
           },
         },
-        required: ["objectPath"],
+        anyOf: [{ required: ["objectId"] }, { required: ["objectPath"] }],
       },
     },
   ];
@@ -711,18 +805,24 @@ export async function handleToolCall(
         args.position as number[] | undefined,
         args.rotation as number[] | undefined,
         args.scale as number[] | undefined,
+        args.parentId as string | undefined,
         args.parentPath as string | undefined,
         config
       );
       break;
 
     case "delete_gameobject":
-      result = await deleteGameObject(args.objectPath as string, config);
+      result = await deleteGameObject(
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
+        config
+      );
       break;
 
     case "modify_gameobject":
       result = await modifyGameObject(
-        args.objectPath as string,
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
         args.position as number[] | undefined,
         args.rotation as number[] | undefined,
         args.scale as number[] | undefined,
@@ -732,7 +832,8 @@ export async function handleToolCall(
 
     case "add_component":
       result = await addComponent(
-        args.objectPath as string,
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
         args.componentType as string,
         config
       );
@@ -740,28 +841,35 @@ export async function handleToolCall(
 
     case "remove_component":
       result = await removeComponent(
-        args.objectPath as string,
-        args.componentType as string,
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
+        args.componentId as string | undefined,
+        args.componentType as string | undefined,
         config
       );
       break;
 
     case "set_component_property":
       result = await setComponentProperty(
-        args.objectPath as string,
-        args.componentType as string,
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
+        args.componentId as string | undefined,
+        args.componentType as string | undefined,
         args.propertyName as string,
-        args.value as string,
+        args.value,
         config
       );
       break;
 
     case "set_object_reference":
       result = await setObjectReference(
-        args.objectPath as string,
-        args.componentType as string,
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
+        args.componentId as string | undefined,
+        args.componentType as string | undefined,
         args.propertyName as string,
-        args.targetPath as string,
+        args.targetId as string | undefined,
+        args.targetPath as string | undefined,
         args.targetComponent as string | undefined,
         config
       );
@@ -775,8 +883,10 @@ export async function handleToolCall(
           position?: number[];
           rotation?: number[];
           scale?: number[];
+          parentId?: string;
           parentPath?: string;
         }>,
+        args.continueOnError as boolean | undefined,
         config
       );
       break;
@@ -788,6 +898,7 @@ export async function handleToolCall(
         args.position as number[] | undefined,
         args.rotation as number[] | undefined,
         args.scale as number[] | undefined,
+        args.parentId as string | undefined,
         args.parentPath as string | undefined,
         config
       );
@@ -801,8 +912,10 @@ export async function handleToolCall(
           position?: number[];
           rotation?: number[];
           scale?: number[];
+          parentId?: string;
           parentPath?: string;
         }>,
+        args.continueOnError as boolean | undefined,
         config
       );
       break;
@@ -822,7 +935,8 @@ export async function handleToolCall(
 
     case "get_object_bounds":
       result = await getObjectBounds(
-        args.objectPath as string,
+        args.objectId as string | undefined,
+        args.objectPath as string | undefined,
         config
       );
       break;
@@ -1025,12 +1139,17 @@ function commandResponse(result: UnityCommandResult, completedMessage: string): 
   };
 }
 
+function selectorLabel(objectId: string | undefined, objectPath: string | undefined): string {
+  return objectPath || objectId || "(missing selector)";
+}
+
 async function createGameObject(
   name: string,
   primitiveType: string | undefined,
   position: number[] | undefined,
   rotation: number[] | undefined,
   scale: number[] | undefined,
+  parentId: string | undefined,
   parentPath: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
@@ -1041,6 +1160,7 @@ async function createGameObject(
     position: position || [0, 0, 0],
     rotation: rotation || [0, 0, 0],
     scale: scale || [1, 1, 1],
+    parentId: parentId || null,
     parentPath: parentPath || null,
   };
 
@@ -1055,7 +1175,7 @@ async function createGameObject(
         position: position || [0, 0, 0],
         rotation: rotation || [0, 0, 0],
         scale: scale || [1, 1, 1],
-        parent: parentPath || "Scene Root",
+        parent: parentPath || parentId || "Scene Root",
       },
     };
   }
@@ -1064,19 +1184,21 @@ async function createGameObject(
 }
 
 async function deleteGameObject(
-  objectPath: string,
+  objectId: string | undefined,
+  objectPath: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const command = {
     type: "delete_gameobject",
-    objectPath,
+    objectId: objectId || null,
+    objectPath: objectPath || null,
   };
 
   const result = await sendUnityCommand(command, config);
 
   if (result.success) {
     return {
-      ...commandResponse(result, `Deleted GameObject '${objectPath}'`),
+      ...commandResponse(result, `Deleted GameObject '${selectorLabel(objectId, objectPath)}'`),
     };
   }
 
@@ -1084,7 +1206,8 @@ async function deleteGameObject(
 }
 
 async function modifyGameObject(
-  objectPath: string,
+  objectId: string | undefined,
+  objectPath: string | undefined,
   position: number[] | undefined,
   rotation: number[] | undefined,
   scale: number[] | undefined,
@@ -1092,7 +1215,8 @@ async function modifyGameObject(
 ): Promise<unknown> {
   const command = {
     type: "modify_gameobject",
-    objectPath,
+    objectId: objectId || null,
+    objectPath: objectPath || null,
     position: position || null,
     rotation: rotation || null,
     scale: scale || null,
@@ -1107,7 +1231,7 @@ async function modifyGameObject(
     if (scale) changes.push(`scale: [${scale.join(", ")}]`);
 
     return {
-      ...commandResponse(result, `Modified GameObject '${objectPath}'`),
+      ...commandResponse(result, `Modified GameObject '${selectorLabel(objectId, objectPath)}'`),
       changes: changes.length > 0 ? changes : ["No changes specified"],
     };
   }
@@ -1116,13 +1240,15 @@ async function modifyGameObject(
 }
 
 async function addComponent(
-  objectPath: string,
+  objectId: string | undefined,
+  objectPath: string | undefined,
   componentType: string,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const command = {
     type: "add_component",
-    objectPath,
+    objectId: objectId || null,
+    objectPath: objectPath || null,
     componentType,
   };
 
@@ -1130,7 +1256,7 @@ async function addComponent(
 
   if (result.success) {
     return {
-      ...commandResponse(result, `Added component ${componentType} to '${objectPath}'`),
+      ...commandResponse(result, `Added component ${componentType} to '${selectorLabel(objectId, objectPath)}'`),
     };
   }
 
@@ -1138,21 +1264,28 @@ async function addComponent(
 }
 
 async function removeComponent(
-  objectPath: string,
-  componentType: string,
+  objectId: string | undefined,
+  objectPath: string | undefined,
+  componentId: string | undefined,
+  componentType: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const command = {
     type: "remove_component",
-    objectPath,
-    componentType,
+    objectId: objectId || null,
+    objectPath: objectPath || null,
+    componentId: componentId || null,
+    componentType: componentType || null,
   };
 
   const result = await sendUnityCommand(command, config);
 
   if (result.success) {
     return {
-      ...commandResponse(result, `Removed component ${componentType} from '${objectPath}'`),
+      ...commandResponse(
+        result,
+        `Removed component ${componentType || componentId} from '${selectorLabel(objectId, objectPath)}'`
+      ),
     };
   }
 
@@ -1160,25 +1293,33 @@ async function removeComponent(
 }
 
 async function setComponentProperty(
-  objectPath: string,
-  componentType: string,
+  objectId: string | undefined,
+  objectPath: string | undefined,
+  componentId: string | undefined,
+  componentType: string | undefined,
   propertyName: string,
-  value: string,
+  value: unknown,
   config: BanterMCPConfig
 ): Promise<unknown> {
+  const encodedValue = encodeSerializedPropertyValue(value);
   const command = {
     type: "set_component_property",
-    objectPath,
-    componentType,
+    objectId: objectId || null,
+    objectPath: objectPath || null,
+    componentId: componentId || null,
+    componentType: componentType || null,
     propertyName,
-    value,
+    ...encodedValue,
   };
 
   const result = await sendUnityCommand(command, config);
 
   if (result.success) {
     return {
-      ...commandResponse(result, `Set ${componentType}.${propertyName} on '${objectPath}'`),
+      ...commandResponse(
+        result,
+        `Set ${componentType || componentId}.${propertyName} on '${selectorLabel(objectId, objectPath)}'`
+      ),
     };
   }
 
@@ -1192,8 +1333,10 @@ async function batchCreate(
     position?: number[];
     rotation?: number[];
     scale?: number[];
+    parentId?: string;
     parentPath?: string;
   }>,
+  continueOnError: boolean | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   // Convert each object to a create_gameobject command JSON string
@@ -1205,6 +1348,7 @@ async function batchCreate(
       position: obj.position || [0, 0, 0],
       rotation: obj.rotation || [0, 0, 0],
       scale: obj.scale || [1, 1, 1],
+      parentId: obj.parentId || null,
       parentPath: obj.parentPath || null,
     })
   );
@@ -1212,6 +1356,7 @@ async function batchCreate(
   const batchCommand = {
     type: "batch",
     commands,
+    continueOnError: continueOnError ?? false,
   };
 
   const result = await sendUnityCommand(batchCommand, config);
@@ -1233,6 +1378,7 @@ async function instantiatePrefab(
   position: number[] | undefined,
   rotation: number[] | undefined,
   scale: number[] | undefined,
+  parentId: string | undefined,
   parentPath: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
@@ -1243,6 +1389,7 @@ async function instantiatePrefab(
     position: position || [0, 0, 0],
     rotation: rotation || [0, 0, 0],
     scale: scale || [1, 1, 1],
+    parentId: parentId || null,
     parentPath: parentPath || null,
   };
 
@@ -1257,7 +1404,7 @@ async function instantiatePrefab(
         position: position || [0, 0, 0],
         rotation: rotation || [0, 0, 0],
         scale: scale || [1, 1, 1],
-        parent: parentPath || "Scene Root",
+        parent: parentPath || parentId || "Scene Root",
       },
     };
   }
@@ -1272,8 +1419,10 @@ async function batchInstantiatePrefabs(
     position?: number[];
     rotation?: number[];
     scale?: number[];
+    parentId?: string;
     parentPath?: string;
   }>,
+  continueOnError: boolean | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   // Convert each prefab to an instantiate_prefab command JSON string
@@ -1285,6 +1434,7 @@ async function batchInstantiatePrefabs(
       position: p.position || [0, 0, 0],
       rotation: p.rotation || [0, 0, 0],
       scale: p.scale || [1, 1, 1],
+      parentId: p.parentId || null,
       parentPath: p.parentPath || null,
     })
   );
@@ -1292,6 +1442,7 @@ async function batchInstantiatePrefabs(
   const batchCommand = {
     type: "batch",
     commands,
+    continueOnError: continueOnError ?? false,
   };
 
   const result = await sendUnityCommand(batchCommand, config);
@@ -1427,7 +1578,8 @@ async function scanPrefabs(config: BanterMCPConfig): Promise<unknown> {
 }
 
 async function getObjectBounds(
-  objectPath: string,
+  objectId: string | undefined,
+  objectPath: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const fs = await import("fs");
@@ -1435,7 +1587,8 @@ async function getObjectBounds(
 
   const command = {
     type: "get_object_bounds",
-    objectPath,
+    objectId: objectId || null,
+    objectPath: objectPath || null,
   };
 
   const result = await sendUnityCommand(command, config);
@@ -1467,19 +1620,21 @@ async function getObjectBounds(
       try {
         const boundsData = JSON.parse(fs.readFileSync(boundsPath, "utf-8"));
 
-        if (boundsData.commandId === result.commandId && boundsData.objectPath === objectPath) {
+        if (boundsData.commandId === result.commandId) {
           // Clean up the file
           fs.unlinkSync(boundsPath);
 
           if (boundsData.success) {
             return {
               success: true,
-              objectPath,
+              objectId: boundsData.objectId,
+              objectPath: boundsData.objectPath,
               bounds: boundsData.bounds,
             };
           } else {
             return {
               success: false,
+              objectId,
               objectPath,
               error: boundsData.error || "Object not found",
             };
@@ -1502,19 +1657,25 @@ async function getObjectBounds(
 }
 
 async function setObjectReference(
-  objectPath: string,
-  componentType: string,
+  objectId: string | undefined,
+  objectPath: string | undefined,
+  componentId: string | undefined,
+  componentType: string | undefined,
   propertyName: string,
-  targetPath: string,
+  targetId: string | undefined,
+  targetPath: string | undefined,
   targetComponent: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const command = {
     type: "set_object_reference",
-    objectPath,
-    componentType,
+    objectId: objectId || null,
+    objectPath: objectPath || null,
+    componentId: componentId || null,
+    componentType: componentType || null,
     propertyName,
-    targetPath,
+    targetId: targetId || null,
+    targetPath: targetPath || null,
     targetComponent: targetComponent || null,
   };
 
@@ -1522,12 +1683,17 @@ async function setObjectReference(
 
   if (result.success) {
     const targetInfo = targetComponent ? ` (${targetComponent})` : "";
+    const componentLabel = componentType || componentId;
+    const targetLabel = targetPath || targetId || "null";
     return {
-      ...commandResponse(result, `Set ${componentType}.${propertyName} -> ${targetPath}${targetInfo}`),
+      ...commandResponse(result, `Set ${componentLabel}.${propertyName} -> ${targetLabel}${targetInfo}`),
       details: {
+        objectId,
         objectPath,
+        componentId,
         componentType,
         propertyName,
+        targetId,
         targetPath,
         targetComponent: targetComponent || "(auto-detect)",
       },

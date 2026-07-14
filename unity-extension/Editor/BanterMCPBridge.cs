@@ -354,7 +354,7 @@ namespace BantworksMCP
 
                 case "batch":
                     var batchCmd = JsonUtility.FromJson<BatchCommand>(json);
-                    ProcessBatchCommand(batchCmd, json);
+                    ProcessBatchCommand(batchCmd);
                     return "Batch command completed";
 
                 case "instantiate_prefab":
@@ -424,9 +424,7 @@ namespace BantworksMCP
             if (cmd == null || string.IsNullOrWhiteSpace(cmd.name))
                 throw new InvalidOperationException("Create GameObject command requires a name");
 
-            GameObject parent = string.IsNullOrEmpty(cmd.parentPath)
-                ? null
-                : FindGameObjectByPath(cmd.parentPath);
+            GameObject parent = ResolveOptionalGameObject(cmd.parentId, cmd.parentPath);
             GameObject obj = null;
 
             // Create based on primitive type
@@ -482,16 +480,16 @@ namespace BantworksMCP
 
         private static void DeleteGameObject(DeleteGameObjectCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
             Undo.DestroyObjectImmediate(obj);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Deleted GameObject: {cmd.objectPath}");
+            Debug.Log($"[BANTWORKS MCP] Deleted GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
         }
 
         private static void ModifyGameObject(ModifyGameObjectCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
 
             Undo.RecordObject(obj.transform, "MCP Modify Transform");
 
@@ -511,13 +509,13 @@ namespace BantworksMCP
             }
 
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Modified GameObject: {cmd.objectPath}");
+            Debug.Log($"[BANTWORKS MCP] Modified GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
         }
 
         private static void AddComponentToObject(AddComponentCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
 
             // Try to find the component type
             Type componentType = FindComponentType(cmd.componentType);
@@ -534,13 +532,8 @@ namespace BantworksMCP
 
         private static void RemoveComponentFromObject(RemoveComponentCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
-
-            var component = obj.GetComponent(cmd.componentType);
-            if (component == null)
-            {
-                throw new InvalidOperationException($"Component not found: {cmd.componentType} on {cmd.objectPath}");
-            }
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
+            var component = ResolveComponent(obj, cmd.componentId, cmd.componentType);
 
             Undo.DestroyObjectImmediate(component);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
@@ -550,13 +543,8 @@ namespace BantworksMCP
 
         private static void SetComponentProperty(SetComponentPropertyCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
-
-            var component = obj.GetComponent(cmd.componentType);
-            if (component == null)
-            {
-                throw new InvalidOperationException($"Component not found: {cmd.componentType} on {cmd.objectPath}");
-            }
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
+            var component = ResolveComponent(obj, cmd.componentId, cmd.componentType);
 
             var so = new SerializedObject(component);
             var prop = so.FindProperty(cmd.propertyName);
@@ -567,8 +555,7 @@ namespace BantworksMCP
 
             Undo.RecordObject(component, "MCP Set Property");
 
-            // Set property value based on type
-            SetSerializedPropertyValue(prop, cmd.value);
+            SetSerializedPropertyValue(prop, cmd.valueJson, cmd.value);
 
             so.ApplyModifiedProperties();
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
@@ -578,13 +565,8 @@ namespace BantworksMCP
 
         private static void SetObjectReference(SetObjectReferenceCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
-
-            var component = obj.GetComponent(cmd.componentType);
-            if (component == null)
-            {
-                throw new InvalidOperationException($"Component not found: {cmd.componentType} on {cmd.objectPath}");
-            }
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
+            var component = ResolveComponent(obj, cmd.componentId, cmd.componentType);
 
             var so = new SerializedObject(component);
             var prop = so.FindProperty(cmd.propertyName);
@@ -599,12 +581,13 @@ namespace BantworksMCP
             }
 
             UnityEngine.Object targetObject = null;
-            bool clearReference = string.IsNullOrWhiteSpace(cmd.targetPath) ||
-                                  string.Equals(cmd.targetPath, "null", StringComparison.OrdinalIgnoreCase);
+            bool clearReference = string.IsNullOrWhiteSpace(cmd.targetId) &&
+                                  (string.IsNullOrWhiteSpace(cmd.targetPath) ||
+                                   string.Equals(cmd.targetPath, "null", StringComparison.OrdinalIgnoreCase));
 
             if (!clearReference)
             {
-                var targetGameObject = FindGameObjectByPath(cmd.targetPath);
+                var targetGameObject = ResolveGameObject(cmd.targetId, cmd.targetPath);
 
                 targetObject = ResolveObjectReferenceTarget(component.GetType(), cmd.propertyName, targetGameObject, cmd.targetComponent);
                 if (targetObject == null)
@@ -748,6 +731,85 @@ namespace BantworksMCP
             return null;
         }
 
+        private static GameObject ResolveGameObject(string objectId, string objectPath)
+        {
+            if (string.IsNullOrWhiteSpace(objectId))
+                return FindGameObjectByPath(objectPath);
+
+            GlobalObjectId globalObjectId;
+            if (!GlobalObjectId.TryParse(objectId, out globalObjectId))
+                throw new InvalidOperationException($"Invalid Unity GlobalObjectId: {objectId}");
+
+            var obj = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(globalObjectId) as GameObject;
+            if (obj == null)
+                throw new InvalidOperationException($"GameObject ID is stale or does not identify a GameObject: {objectId}");
+
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (obj.scene != activeScene)
+                throw new InvalidOperationException($"GameObject ID is not in the active scene: {objectId}");
+
+            return obj;
+        }
+
+        private static GameObject ResolveOptionalGameObject(string objectId, string objectPath)
+        {
+            return string.IsNullOrWhiteSpace(objectId) && string.IsNullOrWhiteSpace(objectPath)
+                ? null
+                : ResolveGameObject(objectId, objectPath);
+        }
+
+        private static Component ResolveComponent(GameObject owner, string componentId, string componentType)
+        {
+            if (!string.IsNullOrWhiteSpace(componentId))
+            {
+                GlobalObjectId globalObjectId;
+                if (!GlobalObjectId.TryParse(componentId, out globalObjectId))
+                    throw new InvalidOperationException($"Invalid component GlobalObjectId: {componentId}");
+
+                var component = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(globalObjectId) as Component;
+                if (component == null)
+                    throw new InvalidOperationException($"Component ID is stale or does not identify a Component: {componentId}");
+                if (component.gameObject != owner)
+                    throw new InvalidOperationException($"Component ID does not belong to GameObject '{GetGameObjectPath(owner)}': {componentId}");
+                if (!string.IsNullOrWhiteSpace(componentType) &&
+                    !string.Equals(component.GetType().Name, componentType, StringComparison.Ordinal) &&
+                    !string.Equals(component.GetType().FullName, componentType, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Component ID identifies {component.GetType().FullName}, not requested type {componentType}");
+                }
+
+                return component;
+            }
+
+            if (string.IsNullOrWhiteSpace(componentType))
+                throw new InvalidOperationException("Component type or componentId is required");
+
+            var matches = owner.GetComponents<Component>()
+                .Where(component => component != null &&
+                    (string.Equals(component.GetType().Name, componentType, StringComparison.Ordinal) ||
+                     string.Equals(component.GetType().FullName, componentType, StringComparison.Ordinal)))
+                .ToList();
+
+            if (matches.Count == 1)
+                return matches[0];
+            if (matches.Count == 0)
+                throw new InvalidOperationException($"Component not found: {componentType} on {GetGameObjectPath(owner)}");
+
+            throw new InvalidOperationException(
+                $"Component type is ambiguous on {GetGameObjectPath(owner)}: {componentType}. Supply componentId from scene-hierarchy.json.");
+        }
+
+        private static string GetStableObjectId(UnityEngine.Object obj)
+        {
+            return obj == null ? null : GlobalObjectId.GetGlobalObjectIdSlow(obj).ToString();
+        }
+
+        private static string DescribeObject(string objectId, string objectPath)
+        {
+            return !string.IsNullOrWhiteSpace(objectPath) ? objectPath : objectId;
+        }
+
         private static GameObject FindGameObjectByPath(string objectPath)
         {
             if (string.IsNullOrWhiteSpace(objectPath))
@@ -773,9 +835,7 @@ namespace BantworksMCP
             if (cmd == null || string.IsNullOrWhiteSpace(cmd.prefabPath))
                 throw new InvalidOperationException("Instantiate prefab command requires prefabPath");
 
-            GameObject parent = string.IsNullOrEmpty(cmd.parentPath)
-                ? null
-                : FindGameObjectByPath(cmd.parentPath);
+            GameObject parent = ResolveOptionalGameObject(cmd.parentId, cmd.parentPath);
             // Load prefab from asset path
             GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(cmd.prefabPath);
             if (prefab == null)
@@ -835,6 +895,7 @@ namespace BantworksMCP
 
             GameObject obj = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
             if (obj == null) throw new InvalidOperationException($"Failed to instantiate prefab: {cmd.prefabPath}");
+            Undo.RegisterCreatedObjectUndo(obj, "MCP Batch Instantiate Prefab");
 
             if (!string.IsNullOrEmpty(cmd.name))
                 obj.name = cmd.name;
@@ -848,23 +909,23 @@ namespace BantworksMCP
             if (cmd.scale != null && cmd.scale.Length == 3)
                 obj.transform.localScale = new Vector3(cmd.scale[0], cmd.scale[1], cmd.scale[2]);
 
-            if (!string.IsNullOrEmpty(cmd.parentPath))
+            var parent = ResolveOptionalGameObject(cmd.parentId, cmd.parentPath);
+            if (parent != null)
             {
-                var parent = FindGameObjectByPath(cmd.parentPath);
                 obj.transform.SetParent(parent.transform, true);
             }
         }
 
         private static void GetObjectBounds(GetBoundsCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
 
             Bounds bounds = CalculateGameObjectBounds(obj);
-            ExportBoundsResult(cmd.id, cmd.objectPath, true, bounds);
-            Debug.Log($"[BANTWORKS MCP] Got bounds for {cmd.objectPath}: size={bounds.size}, center={bounds.center}");
+            ExportBoundsResult(cmd.id, GetStableObjectId(obj), GetGameObjectPath(obj), true, bounds);
+            Debug.Log($"[BANTWORKS MCP] Got bounds for {GetGameObjectPath(obj)}: size={bounds.size}, center={bounds.center}");
         }
 
-        private static void ExportBoundsResult(string commandId, string objectPath, bool success, Bounds? bounds)
+        private static void ExportBoundsResult(string commandId, string objectId, string objectPath, bool success, Bounds? bounds)
         {
             try
             {
@@ -875,6 +936,7 @@ namespace BantworksMCP
                 sb.AppendLine("{");
                 sb.AppendLine($"    \"commandId\": \"{EscapeJsonString(commandId)}\",");
                 sb.AppendLine($"    \"success\": {(success ? "true" : "false")},");
+                sb.AppendLine($"    \"objectId\": \"{EscapeJsonString(objectId)}\",");
                 sb.AppendLine($"    \"objectPath\": \"{EscapeJsonString(objectPath)}\",");
                 sb.AppendLine($"    \"timestamp\": {DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()},");
 
@@ -903,208 +965,234 @@ namespace BantworksMCP
             }
         }
 
-        private static void ProcessBatchCommand(BatchCommand batchCmd, string fullJson)
+        private static void ProcessBatchCommand(BatchCommand batchCmd)
         {
-            // JsonUtility can't parse string arrays with escaped JSON properly
-            // So we manually extract the commands from the raw JSON
-            int createdCount = 0;
-            int errorCount = 0;
+            var commandStrings = batchCmd?.commands?
+                .Where(command => !string.IsNullOrWhiteSpace(command))
+                .ToList() ?? new List<string>();
 
-            // Extract commands array manually
-            var commandStrings = ExtractCommandsFromJson(fullJson);
+            if (commandStrings.Count == 0)
+                throw new InvalidOperationException("Batch requires at least one command");
 
-            Debug.Log($"[BANTWORKS MCP] Batch: found {commandStrings.Count} commands to process");
+            PreflightBatchCommands(commandStrings);
 
-            foreach (var cmdJson in commandStrings)
+            Undo.IncrementCurrentGroup();
+            int undoGroup = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("BANTWORKS MCP Batch");
+
+            int appliedCount = 0;
+            var errors = new List<string>();
+
+            for (int index = 0; index < commandStrings.Count; index++)
             {
                 try
                 {
-                    var baseCmd = JsonUtility.FromJson<MCPCommand>(cmdJson);
+                    ExecuteBatchCommand(commandStrings[index]);
+                    appliedCount++;
+                }
+                catch (Exception e)
+                {
+                    string error = $"Operation {index + 1} failed: {e.Message}";
+                    errors.Add(error);
+                    Debug.LogError($"[BANTWORKS MCP] Batch {error}");
+
+                    if (!batchCmd.continueOnError)
+                    {
+                        Undo.RevertAllDownToGroup(undoGroup);
+                        ExportSceneHierarchy();
+                        throw new InvalidOperationException($"Batch rolled back. {error}");
+                    }
+                }
+            }
+
+            Undo.CollapseUndoOperations(undoGroup);
+            EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+            ExportSceneHierarchy();
+
+            if (errors.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Batch completed with {errors.Count} failed operation(s) and {appliedCount} applied operation(s): {string.Join("; ", errors)}");
+            }
+
+            Debug.Log($"[BANTWORKS MCP] Batch completed: {appliedCount} operations");
+        }
+
+        private static void ExecuteBatchCommand(string commandJson)
+        {
+            var baseCmd = JsonUtility.FromJson<MCPCommand>(commandJson);
+            if (baseCmd == null || string.IsNullOrWhiteSpace(baseCmd.type))
+                throw new InvalidOperationException("Batch operation is missing a command type");
+
+            switch (baseCmd.type)
+            {
+                case "create_gameobject":
+                    CreateGameObjectSilent(JsonUtility.FromJson<CreateGameObjectCommand>(commandJson));
+                    break;
+                case "delete_gameobject":
+                    DeleteGameObjectSilent(JsonUtility.FromJson<DeleteGameObjectCommand>(commandJson));
+                    break;
+                case "modify_gameobject":
+                    ModifyGameObjectSilent(JsonUtility.FromJson<ModifyGameObjectCommand>(commandJson));
+                    break;
+                case "instantiate_prefab":
+                    InstantiatePrefabSilent(JsonUtility.FromJson<InstantiatePrefabCommand>(commandJson));
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported batch command type: {baseCmd.type}");
+            }
+        }
+
+        private static void PreflightBatchCommands(List<string> commandStrings)
+        {
+            var plannedObjectPaths = new HashSet<string>(StringComparer.Ordinal);
+
+            for (int index = 0; index < commandStrings.Count; index++)
+            {
+                try
+                {
+                    string commandJson = commandStrings[index];
+                    var baseCmd = JsonUtility.FromJson<MCPCommand>(commandJson);
+                    if (baseCmd == null || string.IsNullOrWhiteSpace(baseCmd.type))
+                        throw new InvalidOperationException("Command type is required");
+
                     switch (baseCmd.type)
                     {
                         case "create_gameobject":
-                            var createCmd = JsonUtility.FromJson<CreateGameObjectCommand>(cmdJson);
-                            CreateGameObjectSilent(createCmd);
-                            createdCount++;
+                            PreflightCreateGameObject(
+                                JsonUtility.FromJson<CreateGameObjectCommand>(commandJson),
+                                plannedObjectPaths);
                             break;
                         case "delete_gameobject":
-                            var deleteCmd = JsonUtility.FromJson<DeleteGameObjectCommand>(cmdJson);
-                            DeleteGameObjectSilent(deleteCmd);
-                            createdCount++;
+                            var deleteCmd = JsonUtility.FromJson<DeleteGameObjectCommand>(commandJson);
+                            ResolveGameObject(deleteCmd?.objectId, deleteCmd?.objectPath);
                             break;
                         case "modify_gameobject":
-                            var modifyCmd = JsonUtility.FromJson<ModifyGameObjectCommand>(cmdJson);
-                            ModifyGameObjectSilent(modifyCmd);
-                            createdCount++;
+                            var modifyCmd = JsonUtility.FromJson<ModifyGameObjectCommand>(commandJson);
+                            ResolveGameObject(modifyCmd?.objectId, modifyCmd?.objectPath);
+                            ValidateTransformValues(modifyCmd?.position, "position");
+                            ValidateTransformValues(modifyCmd?.rotation, "rotation");
+                            ValidateTransformValues(modifyCmd?.scale, "scale");
                             break;
                         case "instantiate_prefab":
-                            var prefabCmd = JsonUtility.FromJson<InstantiatePrefabCommand>(cmdJson);
-                            InstantiatePrefabSilent(prefabCmd);
-                            createdCount++;
+                            PreflightInstantiatePrefab(
+                                JsonUtility.FromJson<InstantiatePrefabCommand>(commandJson),
+                                plannedObjectPaths);
                             break;
                         default:
-                            Debug.LogWarning($"[BANTWORKS MCP] Batch: unsupported command type: {baseCmd.type}");
-                            errorCount++;
-                            break;
+                            throw new InvalidOperationException($"Unsupported batch command type: {baseCmd.type}");
                     }
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"[BANTWORKS MCP] Batch command error: {e.Message}\nJSON: {cmdJson}");
-                    errorCount++;
+                    throw new InvalidOperationException($"Batch preflight failed at operation {index + 1}: {e.Message}");
                 }
             }
+        }
 
-            // Mark scene dirty once at the end
-            EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Batch completed: {createdCount} operations, {errorCount} errors");
-            ExportSceneHierarchy();
+        private static void PreflightCreateGameObject(
+            CreateGameObjectCommand cmd,
+            HashSet<string> plannedObjectPaths)
+        {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.name))
+                throw new InvalidOperationException("Create GameObject command requires a name");
+            ValidateObjectName(cmd.name);
 
-            if (errorCount > 0)
-                throw new InvalidOperationException($"Batch completed with {errorCount} failed operation(s). {createdCount} operation(s) were applied.");
+            if (!string.IsNullOrWhiteSpace(cmd.primitiveType))
+            {
+                PrimitiveType primitiveType;
+                if (!Enum.TryParse(cmd.primitiveType, true, out primitiveType))
+                    throw new InvalidOperationException($"Unknown primitive type: {cmd.primitiveType}");
+            }
+
+            ValidateTransformValues(cmd.position, "position");
+            ValidateTransformValues(cmd.rotation, "rotation");
+            ValidateTransformValues(cmd.scale, "scale");
+
+            string parentPath = ResolveBatchParentPath(cmd.parentId, cmd.parentPath, plannedObjectPaths);
+            RegisterPlannedObjectPath(parentPath, cmd.name, plannedObjectPaths);
+        }
+
+        private static void PreflightInstantiatePrefab(
+            InstantiatePrefabCommand cmd,
+            HashSet<string> plannedObjectPaths)
+        {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.prefabPath))
+                throw new InvalidOperationException("Instantiate prefab command requires prefabPath");
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(cmd.prefabPath);
+            if (prefab == null)
+                throw new InvalidOperationException($"Prefab not found: {cmd.prefabPath}");
+
+            string objectName = string.IsNullOrWhiteSpace(cmd.name) ? prefab.name : cmd.name;
+            ValidateObjectName(objectName);
+            ValidateTransformValues(cmd.position, "position");
+            ValidateTransformValues(cmd.rotation, "rotation");
+            ValidateTransformValues(cmd.scale, "scale");
+
+            string parentPath = ResolveBatchParentPath(cmd.parentId, cmd.parentPath, plannedObjectPaths);
+            RegisterPlannedObjectPath(parentPath, objectName, plannedObjectPaths);
+        }
+
+        private static string ResolveBatchParentPath(
+            string parentId,
+            string parentPath,
+            HashSet<string> plannedObjectPaths)
+        {
+            if (!string.IsNullOrWhiteSpace(parentId))
+                return GetGameObjectPath(ResolveGameObject(parentId, parentPath));
+            if (string.IsNullOrWhiteSpace(parentPath))
+                return null;
+            if (plannedObjectPaths.Contains(parentPath))
+                return parentPath;
+
+            return GetGameObjectPath(ResolveGameObject(null, parentPath));
+        }
+
+        private static void RegisterPlannedObjectPath(
+            string parentPath,
+            string objectName,
+            HashSet<string> plannedObjectPaths)
+        {
+            string objectPath = string.IsNullOrWhiteSpace(parentPath)
+                ? objectName
+                : parentPath + "/" + objectName;
+
+            if (!plannedObjectPaths.Add(objectPath))
+                throw new InvalidOperationException($"Batch would create duplicate object path: {objectPath}");
+
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            bool pathAlreadyExists = Resources.FindObjectsOfTypeAll<GameObject>()
+                .Any(candidate => candidate.scene == activeScene && GetGameObjectPath(candidate) == objectPath);
+            if (pathAlreadyExists)
+                throw new InvalidOperationException($"Object path already exists in the active scene: {objectPath}");
+        }
+
+        private static void ValidateObjectName(string objectName)
+        {
+            if (objectName.Contains("/"))
+                throw new InvalidOperationException("GameObject names containing '/' are not supported by the bridge path contract");
+        }
+
+        private static void ValidateTransformValues(float[] values, string fieldName)
+        {
+            if (values == null)
+                return;
+            if (values.Length != 3)
+                throw new InvalidOperationException($"{fieldName} must contain exactly three numbers");
+            if (values.Any(value => float.IsNaN(value) || float.IsInfinity(value)))
+                throw new InvalidOperationException($"{fieldName} must contain finite numbers");
         }
 
         /// <summary>
-        /// Manually extracts command strings from a batch JSON since JsonUtility
-        /// can't properly deserialize arrays of JSON strings
+        /// Creates a GameObject inside the current batch Undo group.
         /// </summary>
-        private static List<string> ExtractCommandsFromJson(string json)
-        {
-            var results = new List<string>();
-
-            // Find the "commands" array in the JSON
-            int commandsStart = json.IndexOf("\"commands\"");
-            if (commandsStart < 0)
-            {
-                Debug.LogError("[BANTWORKS MCP] Batch: 'commands' array not found in JSON");
-                return results;
-            }
-
-            // Find the opening bracket of the array
-            int arrayStart = json.IndexOf('[', commandsStart);
-            if (arrayStart < 0)
-            {
-                Debug.LogError("[BANTWORKS MCP] Batch: Could not find commands array start");
-                return results;
-            }
-
-            // Find matching closing bracket
-            int depth = 0;
-            int arrayEnd = -1;
-            for (int i = arrayStart; i < json.Length; i++)
-            {
-                if (json[i] == '[') depth++;
-                else if (json[i] == ']') depth--;
-                if (depth == 0)
-                {
-                    arrayEnd = i;
-                    break;
-                }
-            }
-
-            if (arrayEnd < 0)
-            {
-                Debug.LogError("[BANTWORKS MCP] Batch: Could not find commands array end");
-                return results;
-            }
-
-            // Extract the array content (between [ and ])
-            string arrayContent = json.Substring(arrayStart + 1, arrayEnd - arrayStart - 1).Trim();
-
-            // Parse each JSON string in the array
-            // Format: "escaped json", "escaped json", ...
-            int pos = 0;
-            while (pos < arrayContent.Length)
-            {
-                // Skip whitespace and commas
-                while (pos < arrayContent.Length && (char.IsWhiteSpace(arrayContent[pos]) || arrayContent[pos] == ','))
-                    pos++;
-
-                if (pos >= arrayContent.Length) break;
-
-                // Expect opening quote
-                if (arrayContent[pos] != '"')
-                {
-                    Debug.LogError($"[BANTWORKS MCP] Batch: Expected quote at position {pos}");
-                    break;
-                }
-
-                // Find the end of this JSON string (handling escapes)
-                pos++; // skip opening quote
-                int stringStart = pos;
-                while (pos < arrayContent.Length)
-                {
-                    if (arrayContent[pos] == '\\')
-                    {
-                        pos += 2; // skip escape sequence
-                    }
-                    else if (arrayContent[pos] == '"')
-                    {
-                        break; // found closing quote
-                    }
-                    else
-                    {
-                        pos++;
-                    }
-                }
-
-                if (pos >= arrayContent.Length)
-                {
-                    Debug.LogError("[BANTWORKS MCP] Batch: Unterminated string");
-                    break;
-                }
-
-                // Extract the string content (without quotes) and unescape it
-                string escapedJson = arrayContent.Substring(stringStart, pos - stringStart);
-                string unescapedJson = UnescapeJsonString(escapedJson);
-                results.Add(unescapedJson);
-
-                pos++; // skip closing quote
-            }
-
-            return results;
-        }
-
-        /// <summary>
-        /// Unescapes a JSON string value (handles \", \, \n, etc.)
-        /// </summary>
-        private static string UnescapeJsonString(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-
-            var result = new System.Text.StringBuilder(s.Length);
-            for (int i = 0; i < s.Length; i++)
-            {
-                if (s[i] == '\\' && i + 1 < s.Length)
-                {
-                    char next = s[i + 1];
-                    switch (next)
-                    {
-                        case '"': result.Append('"'); i++; break;
-                        case '\\': result.Append('\\'); i++; break;
-                        case 'n': result.Append('\n'); i++; break;
-                        case 'r': result.Append('\r'); i++; break;
-                        case 't': result.Append('\t'); i++; break;
-                        case '/': result.Append('/'); i++; break;
-                        default: result.Append(s[i]); break;
-                    }
-                }
-                else
-                {
-                    result.Append(s[i]);
-                }
-            }
-            return result.ToString();
-        }
-
         private static void CreateGameObjectSilent(CreateGameObjectCommand cmd)
         {
             if (cmd == null || string.IsNullOrWhiteSpace(cmd.name))
                 throw new InvalidOperationException("Create GameObject command requires a name");
 
-            GameObject parent = string.IsNullOrEmpty(cmd.parentPath)
-                ? null
-                : FindGameObjectByPath(cmd.parentPath);
+            GameObject parent = ResolveOptionalGameObject(cmd.parentId, cmd.parentPath);
             GameObject obj = null;
 
             if (string.IsNullOrEmpty(cmd.primitiveType))
@@ -1125,6 +1213,8 @@ namespace BantworksMCP
                 }
             }
 
+            Undo.RegisterCreatedObjectUndo(obj, "MCP Batch Create GameObject");
+
             if (cmd.position != null && cmd.position.Length == 3)
                 obj.transform.position = new Vector3(cmd.position[0], cmd.position[1], cmd.position[2]);
 
@@ -1142,13 +1232,14 @@ namespace BantworksMCP
 
         private static void DeleteGameObjectSilent(DeleteGameObjectCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
-            UnityEngine.Object.DestroyImmediate(obj);
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
+            Undo.DestroyObjectImmediate(obj);
         }
 
         private static void ModifyGameObjectSilent(ModifyGameObjectCommand cmd)
         {
-            var obj = FindGameObjectByPath(cmd?.objectPath);
+            var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
+            Undo.RecordObject(obj.transform, "MCP Batch Modify GameObject");
 
             if (cmd.position != null && cmd.position.Length == 3)
                 obj.transform.position = new Vector3(cmd.position[0], cmd.position[1], cmd.position[2]);
@@ -1160,39 +1251,230 @@ namespace BantworksMCP
                 obj.transform.localScale = new Vector3(cmd.scale[0], cmd.scale[1], cmd.scale[2]);
         }
 
-        private static void SetSerializedPropertyValue(SerializedProperty prop, string valueJson)
+        private static void SetSerializedPropertyValue(SerializedProperty prop, string typedJson, string legacyValue)
         {
+            bool hasTypedValue = typedJson != null;
+            string scalarValue = GetScalarValue(typedJson, legacyValue, hasTypedValue);
+
             switch (prop.propertyType)
             {
                 case SerializedPropertyType.Boolean:
-                    prop.boolValue = bool.Parse(valueJson);
+                    bool boolValue;
+                    if (!bool.TryParse(scalarValue, out boolValue))
+                        throw new InvalidOperationException($"Expected a boolean for {prop.propertyPath}, got: {scalarValue}");
+                    prop.boolValue = boolValue;
                     break;
                 case SerializedPropertyType.Integer:
-                    prop.intValue = int.Parse(valueJson, CultureInfo.InvariantCulture);
+                    prop.intValue = ParseInt(scalarValue, prop.propertyPath);
                     break;
                 case SerializedPropertyType.Float:
-                    prop.floatValue = float.Parse(valueJson, CultureInfo.InvariantCulture);
+                    prop.floatValue = ParseFloat(scalarValue, prop.propertyPath);
                     break;
                 case SerializedPropertyType.String:
-                    prop.stringValue = valueJson;
+                    prop.stringValue = hasTypedValue && IsJsonString(typedJson)
+                        ? ParseJsonString(typedJson)
+                        : scalarValue;
                     break;
                 case SerializedPropertyType.Vector2:
-                    var v2 = JsonUtility.FromJson<Vector2>(valueJson);
-                    prop.vector2Value = v2;
+                    var v2 = ParseFloatArray(GetStructuredValue(typedJson, legacyValue, hasTypedValue), 2, prop.propertyPath);
+                    prop.vector2Value = new Vector2(v2[0], v2[1]);
                     break;
                 case SerializedPropertyType.Vector3:
-                    var v3 = JsonUtility.FromJson<Vector3>(valueJson);
-                    prop.vector3Value = v3;
+                    var v3 = ParseFloatArray(GetStructuredValue(typedJson, legacyValue, hasTypedValue), 3, prop.propertyPath);
+                    prop.vector3Value = new Vector3(v3[0], v3[1], v3[2]);
+                    break;
+                case SerializedPropertyType.Vector4:
+                    var v4 = ParseFloatArray(GetStructuredValue(typedJson, legacyValue, hasTypedValue), 4, prop.propertyPath);
+                    prop.vector4Value = new Vector4(v4[0], v4[1], v4[2], v4[3]);
+                    break;
+                case SerializedPropertyType.Vector2Int:
+                    var v2Int = ParseIntArray(GetStructuredValue(typedJson, legacyValue, hasTypedValue), 2, prop.propertyPath);
+                    prop.vector2IntValue = new Vector2Int(v2Int[0], v2Int[1]);
+                    break;
+                case SerializedPropertyType.Vector3Int:
+                    var v3Int = ParseIntArray(GetStructuredValue(typedJson, legacyValue, hasTypedValue), 3, prop.propertyPath);
+                    prop.vector3IntValue = new Vector3Int(v3Int[0], v3Int[1], v3Int[2]);
+                    break;
+                case SerializedPropertyType.Quaternion:
+                    var quaternion = ParseFloatArray(GetStructuredValue(typedJson, legacyValue, hasTypedValue), 4, prop.propertyPath);
+                    prop.quaternionValue = new Quaternion(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
                     break;
                 case SerializedPropertyType.Color:
-                    var color = JsonUtility.FromJson<Color>(valueJson);
-                    prop.colorValue = color;
+                    var color = ParseFloatArray(GetStructuredValue(typedJson, legacyValue, hasTypedValue), 4, prop.propertyPath);
+                    prop.colorValue = new Color(color[0], color[1], color[2], color[3]);
                     break;
                 case SerializedPropertyType.Enum:
-                    prop.enumValueIndex = int.Parse(valueJson, CultureInfo.InvariantCulture);
+                    prop.enumValueIndex = ParseEnumValue(prop, scalarValue);
+                    break;
+                case SerializedPropertyType.LayerMask:
+                    prop.intValue = ParseInt(scalarValue, prop.propertyPath);
+                    break;
+                case SerializedPropertyType.Rect:
+                    prop.rectValue = ParseRect(GetStructuredValue(typedJson, legacyValue, hasTypedValue), prop.propertyPath);
+                    break;
+                case SerializedPropertyType.Bounds:
+                    prop.boundsValue = ParseBounds(GetStructuredValue(typedJson, legacyValue, hasTypedValue), prop.propertyPath);
                     break;
                 default:
                     throw new InvalidOperationException($"Unsupported property type: {prop.propertyType}");
+            }
+        }
+
+        private static string GetScalarValue(string typedJson, string legacyValue, bool hasTypedValue)
+        {
+            if (!hasTypedValue)
+                return legacyValue;
+
+            return IsJsonString(typedJson) ? ParseJsonString(typedJson) : typedJson;
+        }
+
+        private static string GetStructuredValue(string typedJson, string legacyValue, bool hasTypedValue)
+        {
+            return hasTypedValue && IsJsonString(typedJson)
+                ? ParseJsonString(typedJson)
+                : (hasTypedValue ? typedJson : legacyValue);
+        }
+
+        private static bool IsJsonString(string value)
+        {
+            return !string.IsNullOrEmpty(value) && value.TrimStart().StartsWith("\"");
+        }
+
+        private static string ParseJsonString(string json)
+        {
+            try
+            {
+                var wrapper = JsonUtility.FromJson<StringJsonValue>("{\"value\":" + json + "}");
+                return wrapper?.value;
+            }
+            catch (Exception e)
+            {
+                throw new InvalidOperationException($"Invalid JSON string value: {e.Message}");
+            }
+        }
+
+        private static int ParseInt(string value, string propertyPath)
+        {
+            int parsed;
+            if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed))
+                throw new InvalidOperationException($"Expected an integer for {propertyPath}, got: {value}");
+            return parsed;
+        }
+
+        private static float ParseFloat(string value, string propertyPath)
+        {
+            float parsed;
+            if (!float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) ||
+                float.IsNaN(parsed) || float.IsInfinity(parsed))
+            {
+                throw new InvalidOperationException($"Expected a finite number for {propertyPath}, got: {value}");
+            }
+            return parsed;
+        }
+
+        private static float[] ParseFloatArray(string json, int expectedLength, string propertyPath)
+        {
+            try
+            {
+                var wrapper = JsonUtility.FromJson<FloatArrayJsonValue>("{\"values\":" + json + "}");
+                if (wrapper?.values == null || wrapper.values.Length != expectedLength)
+                    throw new InvalidOperationException($"Expected {expectedLength} numbers for {propertyPath}");
+                if (wrapper.values.Any(value => float.IsNaN(value) || float.IsInfinity(value)))
+                    throw new InvalidOperationException($"Expected finite numbers for {propertyPath}");
+                return wrapper.values;
+            }
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                throw new InvalidOperationException($"Invalid numeric array for {propertyPath}: {e.Message}");
+            }
+        }
+
+        private static int[] ParseIntArray(string json, int expectedLength, string propertyPath)
+        {
+            try
+            {
+                var wrapper = JsonUtility.FromJson<IntArrayJsonValue>("{\"values\":" + json + "}");
+                if (wrapper?.values == null || wrapper.values.Length != expectedLength)
+                    throw new InvalidOperationException($"Expected {expectedLength} integers for {propertyPath}");
+                return wrapper.values;
+            }
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                throw new InvalidOperationException($"Invalid integer array for {propertyPath}: {e.Message}");
+            }
+        }
+
+        private static int ParseEnumValue(SerializedProperty prop, string value)
+        {
+            int index;
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out index))
+            {
+                if (index < 0 || index >= prop.enumNames.Length)
+                    throw new InvalidOperationException($"Enum index out of range for {prop.propertyPath}: {index}");
+                return index;
+            }
+
+            index = Array.FindIndex(prop.enumNames, name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+                index = Array.FindIndex(prop.enumDisplayNames, name => string.Equals(name, value, StringComparison.OrdinalIgnoreCase));
+            if (index < 0)
+                throw new InvalidOperationException($"Unknown enum value for {prop.propertyPath}: {value}");
+            return index;
+        }
+
+        private static Rect ParseRect(string json, string propertyPath)
+        {
+            if (json != null && json.TrimStart().StartsWith("["))
+            {
+                var values = ParseFloatArray(json, 4, propertyPath);
+                return new Rect(values[0], values[1], values[2], values[3]);
+            }
+
+            try
+            {
+                var value = JsonUtility.FromJson<RectJsonValue>(json);
+                if (value == null)
+                    throw new InvalidOperationException($"Expected a Rect object for {propertyPath}");
+                return new Rect(value.x, value.y, value.width, value.height);
+            }
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                throw new InvalidOperationException($"Invalid Rect for {propertyPath}: {e.Message}");
+            }
+        }
+
+        private static Bounds ParseBounds(string json, string propertyPath)
+        {
+            try
+            {
+                var value = JsonUtility.FromJson<BoundsJsonValue>(json);
+                if (value?.center == null || value.center.Length != 3 || value.size == null || value.size.Length != 3)
+                    throw new InvalidOperationException($"Bounds for {propertyPath} requires center and size arrays of length 3");
+                if (value.center.Concat(value.size).Any(item => float.IsNaN(item) || float.IsInfinity(item)))
+                    throw new InvalidOperationException($"Bounds for {propertyPath} requires finite numbers");
+                return new Bounds(
+                    new Vector3(value.center[0], value.center[1], value.center[2]),
+                    new Vector3(value.size[0], value.size[1], value.size[2]));
+            }
+            catch (InvalidOperationException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                throw new InvalidOperationException($"Invalid Bounds for {propertyPath}: {e.Message}");
             }
         }
 
@@ -1276,6 +1558,7 @@ namespace BantworksMCP
             var info = new GameObjectInfo
             {
                 name = obj.name,
+                globalObjectId = GetStableObjectId(obj),
                 path = GetGameObjectPath(obj),
                 active = obj.activeSelf,
                 layer = obj.layer,
@@ -1328,6 +1611,7 @@ namespace BantworksMCP
             {
                 type = comp.GetType().Name,
                 fullType = comp.GetType().FullName,
+                globalObjectId = GetStableObjectId(comp),
                 properties = new List<PropertyInfo>()
             };
 
@@ -1844,6 +2128,7 @@ namespace BantworksMCP
             public float[] position;
             public float[] rotation;
             public float[] scale;
+            public string parentId;
             public string parentPath;
         }
 
@@ -1851,6 +2136,7 @@ namespace BantworksMCP
         private class DeleteGameObjectCommand
         {
             public string type;
+            public string objectId;
             public string objectPath;
         }
 
@@ -1858,6 +2144,7 @@ namespace BantworksMCP
         private class ModifyGameObjectCommand
         {
             public string type;
+            public string objectId;
             public string objectPath;
             public float[] position;
             public float[] rotation;
@@ -1868,6 +2155,7 @@ namespace BantworksMCP
         private class AddComponentCommand
         {
             public string type;
+            public string objectId;
             public string objectPath;
             public string componentType;
         }
@@ -1876,27 +2164,69 @@ namespace BantworksMCP
         private class RemoveComponentCommand
         {
             public string type;
+            public string objectId;
             public string objectPath;
             public string componentType;
+            public string componentId;
         }
 
         [Serializable]
         private class SetComponentPropertyCommand
         {
             public string type;
+            public string objectId;
             public string objectPath;
             public string componentType;
+            public string componentId;
             public string propertyName;
             public string value;
+            public string valueJson;
+        }
+
+        [Serializable]
+        private class StringJsonValue
+        {
+            public string value;
+        }
+
+        [Serializable]
+        private class FloatArrayJsonValue
+        {
+            public float[] values;
+        }
+
+        [Serializable]
+        private class IntArrayJsonValue
+        {
+            public int[] values;
+        }
+
+        [Serializable]
+        private class RectJsonValue
+        {
+            public float x;
+            public float y;
+            public float width;
+            public float height;
+        }
+
+        [Serializable]
+        private class BoundsJsonValue
+        {
+            public float[] center;
+            public float[] size;
         }
 
         [Serializable]
         private class SetObjectReferenceCommand
         {
             public string type;
+            public string objectId;
             public string objectPath;
             public string componentType;
+            public string componentId;
             public string propertyName;
+            public string targetId;
             public string targetPath;
             public string targetComponent;
         }
@@ -1906,6 +2236,7 @@ namespace BantworksMCP
         {
             public string type;
             public string[] commands;  // Array of JSON strings, each representing a command
+            public bool continueOnError;
         }
 
         [Serializable]
@@ -1917,6 +2248,7 @@ namespace BantworksMCP
             public float[] position;
             public float[] rotation;
             public float[] scale;
+            public string parentId;
             public string parentPath;
         }
 
@@ -1925,6 +2257,7 @@ namespace BantworksMCP
         {
             public string id;
             public string type;
+            public string objectId;
             public string objectPath;
         }
 
@@ -1941,6 +2274,7 @@ namespace BantworksMCP
         private class GameObjectInfo
         {
             public string name;
+            public string globalObjectId;
             public string path;
             public bool active;
             public int layer;
@@ -1957,6 +2291,7 @@ namespace BantworksMCP
         {
             public string type;
             public string fullType;
+            public string globalObjectId;
             public List<PropertyInfo> properties;
         }
 
