@@ -30,6 +30,8 @@ namespace BantworksMCP
         private static readonly string FailedCommandsFolder = Path.Combine(CommandsFolder, "failed");
         private static readonly string CommandResultsFolder = Path.Combine(StateFolder, "command-results");
         private static readonly string BoundsResultsFolder = Path.Combine(StateFolder, "bounds-results");
+        private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
+        private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
 
         private static double lastCommandCheck = 0;
         private static double lastStateExport = 0;
@@ -112,6 +114,10 @@ namespace BantworksMCP
                 Directory.CreateDirectory(CommandResultsFolder);
             if (!Directory.Exists(BoundsResultsFolder))
                 Directory.CreateDirectory(BoundsResultsFolder);
+            if (!Directory.Exists(ScreenshotResultsFolder))
+                Directory.CreateDirectory(ScreenshotResultsFolder);
+            if (!Directory.Exists(AssetSearchResultsFolder))
+                Directory.CreateDirectory(AssetSearchResultsFolder);
 
             string ignorePath = Path.Combine(MCPFolder, ".gitignore");
             if (!File.Exists(ignorePath))
@@ -317,6 +323,21 @@ namespace BantworksMCP
                     ExportProjectState();
                     return "Project state exported";
 
+                case "control_play_mode":
+                    var playModeCmd = JsonUtility.FromJson<PlayModeCommand>(json);
+                    ControlPlayMode(playModeCmd);
+                    return $"Play Mode action requested: {playModeCmd.action}";
+
+                case "capture_screenshot":
+                    var screenshotCmd = JsonUtility.FromJson<ScreenshotCommand>(json);
+                    CaptureScreenshot(screenshotCmd);
+                    return $"Captured {screenshotCmd.source} screenshot";
+
+                case "search_assets":
+                    var assetSearchCmd = JsonUtility.FromJson<AssetSearchCommand>(json);
+                    SearchAssets(assetSearchCmd);
+                    return $"Searched Unity assets: {assetSearchCmd.query}";
+
                 case "create_gameobject":
                     var createCmd = JsonUtility.FromJson<CreateGameObjectCommand>(json);
                     CreateGameObject(createCmd);
@@ -485,6 +506,207 @@ namespace BantworksMCP
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
             Debug.Log($"[BANTWORKS MCP] Deleted GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
+        }
+
+        private static void ControlPlayMode(PlayModeCommand cmd)
+        {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.action))
+                throw new InvalidOperationException("Play Mode command requires an action");
+            if (EditorApplication.isCompiling)
+                throw new InvalidOperationException("Unity is compiling. Wait for compilation to finish before changing Play Mode.");
+
+            switch (cmd.action.Trim().ToLowerInvariant())
+            {
+                case "play":
+                    if (EditorApplication.isPlaying)
+                        EditorApplication.isPaused = false;
+                    else if (!EditorApplication.isPlayingOrWillChangePlaymode)
+                        EditorApplication.isPlaying = true;
+                    break;
+                case "pause":
+                    if (!EditorApplication.isPlaying)
+                        throw new InvalidOperationException("Unity must be in Play Mode before it can be paused");
+                    EditorApplication.isPaused = true;
+                    break;
+                case "resume":
+                    if (!EditorApplication.isPlaying)
+                        throw new InvalidOperationException("Unity must be in Play Mode before it can be resumed");
+                    EditorApplication.isPaused = false;
+                    break;
+                case "stop":
+                    if (EditorApplication.isPlayingOrWillChangePlaymode)
+                        EditorApplication.isPlaying = false;
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown Play Mode action: {cmd.action}");
+            }
+
+            ExportEditorState();
+        }
+
+        private static void CaptureScreenshot(ScreenshotCommand cmd)
+        {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.id))
+                throw new InvalidOperationException("Screenshot command requires an ID");
+
+            string source = string.IsNullOrWhiteSpace(cmd.source)
+                ? "game"
+                : cmd.source.Trim().ToLowerInvariant();
+            int width = cmd.width == 0 ? 1280 : cmd.width;
+            int height = cmd.height == 0 ? 720 : cmd.height;
+            if (width < 64 || width > 4096 || height < 64 || height > 4096)
+                throw new InvalidOperationException("Screenshot width and height must be between 64 and 4096 pixels");
+
+            Camera camera;
+            switch (source)
+            {
+                case "game":
+                    camera = ResolveScreenshotCamera(cmd.cameraId, cmd.cameraPath);
+                    break;
+                case "scene":
+                    var sceneView = SceneView.lastActiveSceneView ?? SceneView.sceneViews.OfType<SceneView>().FirstOrDefault();
+                    camera = sceneView?.camera;
+                    if (camera == null)
+                        throw new InvalidOperationException("No Scene View camera is available. Open a Scene View and try again.");
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown screenshot source: {cmd.source}");
+            }
+
+            string outputPath = Path.Combine(ScreenshotResultsFolder, cmd.id + ".png");
+            RenderTexture renderTexture = null;
+            Texture2D texture = null;
+            RenderTexture previousActive = RenderTexture.active;
+            RenderTexture previousTarget = camera.targetTexture;
+
+            try
+            {
+                renderTexture = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32);
+                camera.targetTexture = renderTexture;
+                camera.Render();
+
+                RenderTexture.active = renderTexture;
+                texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                texture.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                texture.Apply(false, false);
+
+                byte[] png = texture.EncodeToPNG();
+                if (png == null || png.Length == 0)
+                    throw new InvalidOperationException("Unity returned an empty screenshot");
+
+                WriteAtomicBytes(outputPath, png);
+                DeleteOldFiles(ScreenshotResultsFolder, "*.png", 20);
+                Debug.Log($"[BANTWORKS MCP] Captured {source} screenshot {width}x{height} using {camera.name}");
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget;
+                RenderTexture.active = previousActive;
+                if (renderTexture != null)
+                    RenderTexture.ReleaseTemporary(renderTexture);
+                if (texture != null)
+                    UnityEngine.Object.DestroyImmediate(texture);
+            }
+        }
+
+        private static Camera ResolveScreenshotCamera(string cameraId, string cameraPath)
+        {
+            if (!string.IsNullOrWhiteSpace(cameraId))
+            {
+                GlobalObjectId globalObjectId;
+                if (!GlobalObjectId.TryParse(cameraId, out globalObjectId))
+                    throw new InvalidOperationException($"Invalid camera GlobalObjectId: {cameraId}");
+
+                var cameraById = GlobalObjectId.GlobalObjectIdentifierToObjectSlow(globalObjectId) as Camera;
+                var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                if (cameraById == null || cameraById.gameObject.scene != activeScene)
+                    throw new InvalidOperationException($"Camera ID is stale or not in the active scene: {cameraId}");
+                return cameraById;
+            }
+
+            if (!string.IsNullOrWhiteSpace(cameraPath))
+            {
+                var owner = ResolveGameObject(null, cameraPath);
+                return ResolveComponent(owner, null, "Camera") as Camera;
+            }
+
+            if (Camera.main != null)
+                return Camera.main;
+
+            var scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var camera = Resources.FindObjectsOfTypeAll<Camera>()
+                .FirstOrDefault(candidate => candidate.gameObject.scene == scene && candidate.enabled);
+            if (camera == null)
+                throw new InvalidOperationException("No enabled Camera exists in the active scene");
+            return camera;
+        }
+
+        private static void SearchAssets(AssetSearchCommand cmd)
+        {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.id))
+                throw new InvalidOperationException("Asset search command requires an ID");
+            if (string.IsNullOrWhiteSpace(cmd.query))
+                throw new InvalidOperationException("Asset search requires a non-empty query");
+
+            int limit = cmd.limit == 0 ? 100 : cmd.limit;
+            if (limit < 1 || limit > 500)
+                throw new InvalidOperationException("Asset search limit must be between 1 and 500");
+
+            string[] searchFolders = null;
+            if (cmd.folders != null && cmd.folders.Length > 0)
+            {
+                searchFolders = cmd.folders
+                    .Select(folder => (folder ?? "").Replace('\\', '/').TrimEnd('/'))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+
+                foreach (string folder in searchFolders)
+                {
+                    bool allowedRoot = folder == "Assets" || folder.StartsWith("Assets/", StringComparison.Ordinal) ||
+                        (cmd.includePackages && (folder == "Packages" || folder.StartsWith("Packages/", StringComparison.Ordinal)));
+                    if (!allowedRoot || !AssetDatabase.IsValidFolder(folder))
+                        throw new InvalidOperationException($"Invalid or disallowed asset search folder: {folder}");
+                }
+            }
+            else if (!cmd.includePackages)
+            {
+                searchFolders = new[] { "Assets" };
+            }
+
+            string[] guids = searchFolders == null
+                ? AssetDatabase.FindAssets(cmd.query)
+                : AssetDatabase.FindAssets(cmd.query, searchFolders);
+
+            var paths = guids
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(assetPath => !string.IsNullOrWhiteSpace(assetPath))
+                .Where(assetPath => cmd.includePackages || !assetPath.StartsWith("Packages/", StringComparison.Ordinal))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(assetPath => assetPath, StringComparer.Ordinal)
+                .ToList();
+
+            var result = new AssetSearchResult
+            {
+                commandId = cmd.id,
+                success = true,
+                query = cmd.query,
+                totalMatches = paths.Count,
+                truncated = paths.Count > limit,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                assets = paths.Take(limit).Select(assetPath => new AssetSearchEntry
+                {
+                    guid = AssetDatabase.AssetPathToGUID(assetPath),
+                    path = assetPath,
+                    name = Path.GetFileNameWithoutExtension(assetPath),
+                    type = AssetDatabase.GetMainAssetTypeAtPath(assetPath)?.FullName,
+                    isFolder = AssetDatabase.IsValidFolder(assetPath)
+                }).ToList()
+            };
+
+            WriteAtomicText(
+                Path.Combine(AssetSearchResultsFolder, cmd.id + ".json"),
+                JsonUtility.ToJson(result, true));
+            DeleteOldFiles(AssetSearchResultsFolder, "*.json", 50);
         }
 
         private static void ModifyGameObject(ModifyGameObjectCommand cmd)
@@ -1513,6 +1735,54 @@ namespace BantworksMCP
             }
         }
 
+        private static void WriteAtomicBytes(string destinationPath, byte[] contents)
+        {
+            string temporaryPath = destinationPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllBytes(temporaryPath, contents);
+
+                for (int attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        if (File.Exists(destinationPath))
+                            File.Replace(temporaryPath, destinationPath, null);
+                        else
+                            File.Move(temporaryPath, destinationPath);
+                        return;
+                    }
+                    catch (IOException) when (attempt < 8)
+                    {
+                        System.Threading.Thread.Sleep(25);
+                    }
+                }
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
+        }
+
+        private static void DeleteOldFiles(string folder, string searchPattern, int filesToKeep)
+        {
+            try
+            {
+                foreach (var file in new DirectoryInfo(folder)
+                    .GetFiles(searchPattern)
+                    .OrderByDescending(candidate => candidate.LastWriteTimeUtc)
+                    .Skip(filesToKeep))
+                {
+                    file.Delete();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[BANTWORKS MCP] Could not prune old result files in {folder}: {e.Message}");
+            }
+        }
+
         private static string FormatJsonFloat(float value)
         {
             return value.ToString("R", CultureInfo.InvariantCulture);
@@ -1709,6 +1979,8 @@ namespace BantworksMCP
                     isPlaying = EditorApplication.isPlaying,
                     isPaused = EditorApplication.isPaused,
                     isCompiling = EditorApplication.isCompiling,
+                    isPlayingOrWillChangePlaymode = EditorApplication.isPlayingOrWillChangePlaymode,
+                    isUpdating = EditorApplication.isUpdating,
                     activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name,
                     selectedObjects = Selection.gameObjects?.Select(o => o.name).ToArray() ?? new string[0],
                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
@@ -2184,6 +2456,58 @@ namespace BantworksMCP
         }
 
         [Serializable]
+        private class PlayModeCommand
+        {
+            public string type;
+            public string action;
+        }
+
+        [Serializable]
+        private class ScreenshotCommand
+        {
+            public string id;
+            public string type;
+            public string source;
+            public int width;
+            public int height;
+            public string cameraId;
+            public string cameraPath;
+        }
+
+        [Serializable]
+        private class AssetSearchCommand
+        {
+            public string id;
+            public string type;
+            public string query;
+            public string[] folders;
+            public int limit;
+            public bool includePackages;
+        }
+
+        [Serializable]
+        private class AssetSearchResult
+        {
+            public string commandId;
+            public bool success;
+            public string query;
+            public int totalMatches;
+            public bool truncated;
+            public long timestamp;
+            public List<AssetSearchEntry> assets;
+        }
+
+        [Serializable]
+        private class AssetSearchEntry
+        {
+            public string guid;
+            public string path;
+            public string name;
+            public string type;
+            public bool isFolder;
+        }
+
+        [Serializable]
         private class StringJsonValue
         {
             public string value;
@@ -2309,6 +2633,8 @@ namespace BantworksMCP
             public bool isPlaying;
             public bool isPaused;
             public bool isCompiling;
+            public bool isPlayingOrWillChangePlaymode;
+            public bool isUpdating;
             public string activeScene;
             public string[] selectedObjects;
             public long timestamp;

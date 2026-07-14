@@ -39,6 +39,8 @@ Strong today:
 - atomic command/state publication and per-command acknowledgement;
 - stable Unity global IDs for GameObjects and components with path fallback;
 - typed, validated inspector writes with legacy command compatibility;
+- domain-reload-aware Play Mode control and correlated PNG capture;
+- read-only package inventory and bounded AssetDatabase search;
 - Codex and Claude Code launcher configuration;
 - focused scene, component, prefab, bounds, console, and import tools;
 - read-only bridge health diagnostics;
@@ -47,8 +49,7 @@ Strong today:
 
 Gaps that block a leadership claim:
 
-- no first-class Play Mode or Unity Test Runner workflow;
-- no Game/Scene View screenshot workflow;
+- no first-class Unity Test Runner workflow;
 - no session-level routing across multiple open Unity projects;
 - Banter graph output lacks a committed Unity import/open fixture suite; and
 - Unity-side smoke testing is still manual.
@@ -67,11 +68,12 @@ Gaps that block a leadership claim:
 
 ### P1 - General Unity Workflows
 
-1. Play, pause, stop, compilation, and domain-reload-aware readiness.
-2. Unity Test Runner discovery, filtered execution, progress, and results.
-3. Game View and Scene View screenshots with correlated result files.
-4. AssetDatabase search, package inventory, scene save/load, and build settings.
-5. Stable project instance IDs and explicit per-session routing.
+1. **Complete:** Play, pause, resume, stop, compilation, and domain-reload-aware readiness.
+2. **Next:** Unity Test Runner discovery, filtered execution, progress, and results.
+3. **Complete:** Game camera and Scene View screenshots with correlated result files and MCP image output.
+4. **Partial:** AssetDatabase search and package inventory are complete; scene
+   save/load and build settings remain.
+5. **Pending:** stable project instance IDs and explicit per-session routing.
 
 ### P1 - Banter Advantage
 

@@ -12,6 +12,8 @@ With `UNITY_PROJECT_PATH` set to a Unity project root, the bridge uses:
 | `.bantworks-mcp/state/*.json` | Unity to MCP | Hierarchy, editor state, console, import status, and prefab catalogue |
 | `.bantworks-mcp/state/command-results/*.json` | Unity to MCP | Per-command acknowledgement or failure |
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
+| `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
+| `.bantworks-mcp/state/asset-search-results/*.json` | Unity to MCP | Correlated AssetDatabase query results |
 
 The bridge directory is project-local and ignored by Git through its own `.gitignore` file.
 
@@ -86,6 +88,25 @@ normal Undo action in the Unity Editor.
 `continueOnError: true` is an explicit opt-in for partial progress. In that
 mode, successful operations remain applied and the acknowledgement still reports
 the failed operations. Use it only when operations are independent.
+
+## Editor Workflows
+
+`control_play_mode` supports `play`, `pause`, `resume`, and `stop`. The MCP
+server does not treat the command acknowledgement as the final state. It polls
+`editor-state.json` until Unity reaches the requested state and compilation has
+finished, including after a Play Mode domain reload.
+
+`capture_unity_screenshot` renders either an active game Camera or the current
+Scene View camera into a bounded RenderTexture. The PNG is published under the
+command UUID and returned to the client as an MCP image block. Callers cannot
+choose an arbitrary filesystem destination. The bridge retains only the 20 most
+recent screenshot files.
+
+`search_unity_assets` uses `AssetDatabase.FindAssets` and publishes a correlated
+JSON result containing GUIDs, paths, names, and main asset types. Searches are
+bounded to 500 results and default to the `Assets` tree; package search requires
+an explicit option. `get_unity_packages` is read-only and parses the project's
+package manifest, lock file, and Unity version without requiring a running Editor.
 
 ## Health Check
 

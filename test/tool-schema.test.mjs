@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { registerTools } from "../dist/tools/index.js";
+import { playModeStateMatches, registerTools } from "../dist/tools/index.js";
 
 const tools = new Map(registerTools().map((tool) => [tool.name, tool]));
 
@@ -38,4 +38,47 @@ test("batch tools advertise rollback-first behavior", () => {
     assert.ok(option, `missing ${name}.continueOnError`);
     assert.equal(option.default, false);
   }
+});
+
+test("Play Mode schema is bounded and state matching waits for compilation", () => {
+  const schema = tools.get("control_play_mode")?.inputSchema;
+  assert.deepEqual(schema?.properties.action.enum, ["play", "pause", "resume", "stop"]);
+  assert.equal(schema?.properties.timeoutMs.maximum, 120000);
+
+  assert.equal(
+    playModeStateMatches("play", { isPlaying: true, isPaused: false, isCompiling: true }),
+    false
+  );
+  assert.equal(
+    playModeStateMatches("pause", { isPlaying: true, isPaused: true, isCompiling: false }),
+    true
+  );
+  assert.equal(
+    playModeStateMatches("stop", {
+      isPlaying: false,
+      isPaused: false,
+      isCompiling: false,
+      isPlayingOrWillChangePlaymode: true,
+    }),
+    false
+  );
+});
+
+test("screenshot tool exposes bounded Game and Scene capture", () => {
+  const schema = tools.get("capture_unity_screenshot")?.inputSchema;
+  assert.deepEqual(schema?.properties.source.enum, ["game", "scene"]);
+  assert.equal(schema?.properties.width.minimum, 64);
+  assert.equal(schema?.properties.width.maximum, 2048);
+  assert.equal(schema?.properties.height.maximum, 2048);
+  assert.ok(schema?.properties.cameraId);
+});
+
+test("project discovery exposes packages and bounded AssetDatabase search", () => {
+  const packages = tools.get("get_unity_packages")?.inputSchema;
+  assert.equal(packages?.properties.directOnly.default, false);
+
+  const assets = tools.get("search_unity_assets")?.inputSchema;
+  assert.deepEqual(assets?.required, ["query"]);
+  assert.equal(assets?.properties.limit.maximum, 500);
+  assert.equal(assets?.properties.includePackages.default, false);
 });

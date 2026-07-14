@@ -3,6 +3,8 @@
  */
 
 import type { BanterMCPConfig } from "../lib/config.js";
+import * as fs from "fs";
+import * as path from "path";
 import { validateVSGraph, VSValidationResult } from "./validate-vs-graph.js";
 import { writeVSGraph, WriteVSGraphResult } from "./write-vs-graph.js";
 import { generateVSGraph, GenerateVSGraphResult } from "./generate-vs-graph.js";
@@ -11,6 +13,7 @@ import { checkImportStatus, ImportStatusResult } from "./check-import-status.js"
 import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
 import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
+import { getUnityPackages } from "./get-unity-packages.js";
 import { atomicWriteFileSync } from "../lib/files.js";
 
 interface Tool {
@@ -22,6 +25,20 @@ interface Tool {
     required?: string[];
     anyOf?: Array<{ required: string[] }>;
   };
+}
+
+type ToolTextContent = { type: "text"; text: string };
+type ToolImageContent = { type: "image"; data: string; mimeType: string };
+
+interface ImageToolResult extends Record<string, unknown> {
+  imageData: string;
+  mimeType: string;
+}
+
+function isImageToolResult(value: unknown): value is ImageToolResult {
+  return typeof value === "object" && value !== null &&
+    typeof (value as ImageToolResult).imageData === "string" &&
+    typeof (value as ImageToolResult).mimeType === "string";
 }
 
 /**
@@ -187,6 +204,60 @@ Use this first after configuring a new Unity project or when Unity tools appear 
     },
 
     {
+      name: "get_unity_packages",
+      description: `Read the Unity project's direct and resolved package inventory.
+Returns requested and resolved versions, package source, dependency depth, and the project Unity version. This tool is read-only and does not require the Editor to be running.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          search: {
+            type: "string",
+            description: "Optional package name or version filter",
+          },
+          directOnly: {
+            type: "boolean",
+            default: false,
+            description: "Return only packages declared directly in Packages/manifest.json",
+          },
+        },
+      },
+    },
+
+    {
+      name: "search_unity_assets",
+      description: `Search Unity's AssetDatabase using the same filter syntax as the Project window.
+Examples: "t:Prefab chair", "t:Scene", or "l:environment". Returns GUIDs, asset paths, names, and main asset types through a correlated bridge result.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            minLength: 1,
+            description: "AssetDatabase.FindAssets query",
+          },
+          folders: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional Assets/... folders to search",
+          },
+          limit: {
+            type: "number",
+            minimum: 1,
+            maximum: 500,
+            default: 100,
+            description: "Maximum entries to return",
+          },
+          includePackages: {
+            type: "boolean",
+            default: false,
+            description: "Allow Packages/... folders and package results",
+          },
+        },
+        required: ["query"],
+      },
+    },
+
+    {
       name: "query_project_state",
       description: `Query the current Unity project state.
 Returns scene hierarchy, components, and other project information.
@@ -266,6 +337,71 @@ Use after writing multiple files to force Unity to import them.`,
           path: {
             type: "string",
             description: "Optional: specific path to refresh",
+          },
+        },
+      },
+    },
+
+    {
+      name: "control_play_mode",
+      description: `Start, pause, resume, or stop Unity Play Mode.
+Waits for Unity's exported editor state to reach the requested state and for compilation to finish, including across a domain reload.
+Requires BanterMCPBridge extension to be installed and Unity Editor running.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["play", "pause", "resume", "stop"],
+            description: "Requested Play Mode action",
+          },
+          timeoutMs: {
+            type: "number",
+            minimum: 1000,
+            maximum: 120000,
+            default: 30000,
+            description: "Maximum time to wait for Unity to reach the requested state",
+          },
+        },
+        required: ["action"],
+      },
+    },
+
+    {
+      name: "capture_unity_screenshot",
+      description: `Capture the active Game camera or Scene View as a PNG.
+Returns screenshot metadata and an MCP image block. Game capture works in Edit or Play Mode; Scene capture requires an open Scene View.
+Requires BanterMCPBridge extension to be installed and Unity Editor running.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          source: {
+            type: "string",
+            enum: ["game", "scene"],
+            default: "game",
+            description: "View to capture",
+          },
+          width: {
+            type: "number",
+            minimum: 64,
+            maximum: 2048,
+            default: 1280,
+            description: "PNG width in pixels",
+          },
+          height: {
+            type: "number",
+            minimum: 64,
+            maximum: 2048,
+            default: 720,
+            description: "PNG height in pixels",
+          },
+          cameraId: {
+            type: "string",
+            description: "Optional Camera component globalObjectId for Game capture",
+          },
+          cameraPath: {
+            type: "string",
+            description: "Legacy path to a GameObject containing the Camera component",
           },
         },
       },
@@ -730,7 +866,7 @@ export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
   config: BanterMCPConfig
-): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+): Promise<{ content: Array<ToolTextContent | ToolImageContent> }> {
   let result: unknown;
 
   switch (name) {
@@ -777,6 +913,24 @@ export async function handleToolCall(
       result = getBridgeStatus(config);
       break;
 
+    case "get_unity_packages":
+      result = getUnityPackages(
+        args.search as string | undefined,
+        args.directOnly as boolean | undefined,
+        config
+      );
+      break;
+
+    case "search_unity_assets":
+      result = await searchUnityAssets(
+        args.query as string,
+        args.folders as string[] | undefined,
+        args.limit as number | undefined,
+        args.includePackages as boolean | undefined,
+        config
+      );
+      break;
+
     case "check_import_status":
       result = await checkImportStatus(
         args.assetPath as string | undefined,
@@ -796,6 +950,25 @@ export async function handleToolCall(
 
     case "refresh_unity_assets":
       result = await refreshUnityAssets(args.path as string | undefined, config);
+      break;
+
+    case "control_play_mode":
+      result = await controlPlayMode(
+        args.action as PlayModeAction,
+        args.timeoutMs as number | undefined,
+        config
+      );
+      break;
+
+    case "capture_unity_screenshot":
+      result = await captureUnityScreenshot(
+        args.source as ScreenshotSource | undefined,
+        args.width as number | undefined,
+        args.height as number | undefined,
+        args.cameraId as string | undefined,
+        args.cameraPath as string | undefined,
+        config
+      );
       break;
 
     case "create_gameobject":
@@ -945,6 +1118,16 @@ export async function handleToolCall(
       throw new Error(`Unknown tool: ${name}`);
   }
 
+  if (isImageToolResult(result)) {
+    const { imageData, mimeType, ...metadata } = result;
+    return {
+      content: [
+        { type: "text", text: JSON.stringify(metadata, null, 2) },
+        { type: "image", data: imageData, mimeType },
+      ],
+    };
+  }
+
   return {
     content: [
       {
@@ -1032,6 +1215,241 @@ async function refreshUnityAssets(
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
+}
+
+export type PlayModeAction = "play" | "pause" | "resume" | "stop";
+
+interface EditorStateSnapshot {
+  isPlaying: boolean;
+  isPaused: boolean;
+  isCompiling: boolean;
+  isPlayingOrWillChangePlaymode?: boolean;
+  isUpdating?: boolean;
+  activeScene?: string;
+  timestamp?: number;
+}
+
+async function controlPlayMode(
+  action: PlayModeAction,
+  timeoutMs: number | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  if (!["play", "pause", "resume", "stop"].includes(action)) {
+    return { success: false, error: `Unknown Play Mode action: ${action}` };
+  }
+
+  const result = await sendUnityCommand({ type: "control_play_mode", action }, config);
+  if (!result.success) {
+    return result;
+  }
+
+  const timeout = Number.isFinite(timeoutMs)
+    ? Math.min(Math.max(timeoutMs as number, 1000), 120000)
+    : 30000;
+  const startedAt = Date.now();
+  let lastState: EditorStateSnapshot | undefined;
+
+  while (Date.now() - startedAt < timeout) {
+    lastState = readEditorState(config);
+    if (lastState && playModeStateMatches(action, lastState)) {
+      return {
+        success: true,
+        commandId: result.commandId,
+        action,
+        unityAcknowledged: result.completed === true,
+        state: lastState,
+        message: `Unity reached the requested '${action}' Play Mode state.`,
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return {
+    success: false,
+    commandId: result.commandId,
+    action,
+    error: `Timed out after ${timeout}ms waiting for Unity to reach the requested Play Mode state.`,
+    lastState,
+  };
+}
+
+function readEditorState(config: BanterMCPConfig): EditorStateSnapshot | undefined {
+  const statePath = path.join(config.mcpStatePath, "editor-state.json");
+
+  try {
+    return JSON.parse(fs.readFileSync(statePath, "utf-8")) as EditorStateSnapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+export function playModeStateMatches(action: PlayModeAction, state: EditorStateSnapshot): boolean {
+  if (state.isCompiling) {
+    return false;
+  }
+
+  switch (action) {
+    case "play":
+    case "resume":
+      return state.isPlaying && !state.isPaused;
+    case "pause":
+      return state.isPlaying && state.isPaused;
+    case "stop":
+      return !state.isPlaying && state.isPlayingOrWillChangePlaymode !== true;
+  }
+}
+
+type ScreenshotSource = "game" | "scene";
+
+async function captureUnityScreenshot(
+  requestedSource: ScreenshotSource | undefined,
+  requestedWidth: number | undefined,
+  requestedHeight: number | undefined,
+  cameraId: string | undefined,
+  cameraPath: string | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const source = requestedSource ?? "game";
+  const width = requestedWidth ?? 1280;
+  const height = requestedHeight ?? 720;
+
+  if (!["game", "scene"].includes(source)) {
+    return { success: false, error: `Unknown screenshot source: ${source}` };
+  }
+  if (!Number.isInteger(width) || !Number.isInteger(height) ||
+      width < 64 || width > 2048 || height < 64 || height > 2048) {
+    return { success: false, error: "Screenshot width and height must be whole numbers between 64 and 2048." };
+  }
+
+  const result = await sendUnityCommand({
+    type: "capture_screenshot",
+    source,
+    width,
+    height,
+    cameraId: cameraId || null,
+    cameraPath: cameraPath || null,
+  }, config);
+  if (!result.success || !result.commandId) {
+    return result;
+  }
+
+  const screenshotPath = path.join(config.mcpStatePath, "screenshot-results", `${result.commandId}.png`);
+  const lateResultPath = path.join(config.mcpStatePath, "command-results", `${result.commandId}.json`);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 15000) {
+    if (fs.existsSync(screenshotPath)) {
+      const image = fs.readFileSync(screenshotPath);
+      return {
+        success: true,
+        commandId: result.commandId,
+        source,
+        width,
+        height,
+        cameraId,
+        cameraPath,
+        imagePath: screenshotPath,
+        byteLength: image.length,
+        mimeType: "image/png",
+        imageData: image.toString("base64"),
+      } satisfies ImageToolResult;
+    }
+
+    if (!result.completed && fs.existsSync(lateResultPath)) {
+      try {
+        const lateResult = JSON.parse(fs.readFileSync(lateResultPath, "utf-8")) as BridgeCommandResult;
+        if (lateResult.commandId === result.commandId && lateResult.success === false) {
+          fs.unlinkSync(lateResultPath);
+          return {
+            success: false,
+            commandId: result.commandId,
+            error: lateResult.error || "Unity failed to capture the screenshot.",
+          };
+        }
+      } catch {
+        // The bridge may still be atomically publishing the result.
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return {
+    success: false,
+    commandId: result.commandId,
+    error: "Timed out waiting for the screenshot result from Unity.",
+  };
+}
+
+async function searchUnityAssets(
+  query: string,
+  folders: string[] | undefined,
+  requestedLimit: number | undefined,
+  includePackages: boolean | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const normalizedQuery = query?.trim();
+  const limit = requestedLimit ?? 100;
+  if (!normalizedQuery) {
+    return { success: false, error: "Asset search query is required." };
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+    return { success: false, error: "Asset search limit must be a whole number between 1 and 500." };
+  }
+
+  const result = await sendUnityCommand({
+    type: "search_assets",
+    query: normalizedQuery,
+    folders: folders ?? [],
+    limit,
+    includePackages: includePackages === true,
+  }, config);
+  if (!result.success || !result.commandId) {
+    return result;
+  }
+
+  const resultPath = path.join(config.mcpStatePath, "asset-search-results", `${result.commandId}.json`);
+  const lateResultPath = path.join(config.mcpStatePath, "command-results", `${result.commandId}.json`);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 10000) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const searchResult = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
+        if (searchResult.commandId === result.commandId) {
+          fs.unlinkSync(resultPath);
+          return searchResult;
+        }
+      } catch {
+        // The bridge may still be atomically publishing the result.
+      }
+    }
+
+    if (!result.completed && fs.existsSync(lateResultPath)) {
+      try {
+        const lateResult = JSON.parse(fs.readFileSync(lateResultPath, "utf-8")) as BridgeCommandResult;
+        if (lateResult.commandId === result.commandId && lateResult.success === false) {
+          fs.unlinkSync(lateResultPath);
+          return {
+            success: false,
+            commandId: result.commandId,
+            error: lateResult.error || "Unity failed to search the AssetDatabase.",
+          };
+        }
+      } catch {
+        // Retry while Unity publishes the command result.
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return {
+    success: false,
+    commandId: result.commandId,
+    error: "Timed out waiting for the AssetDatabase search result from Unity.",
+  };
 }
 
 interface UnityCommandResult {

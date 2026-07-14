@@ -129,13 +129,15 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (22 focused actions available to MCP clients)
+### Tools (26 focused actions available to MCP clients)
 
 | Category | Tools |
 |----------|-------|
 | Visual Scripting | `generate_vs_graph`, `validate_vs_graph`, `write_vs_graph` |
 | Banter WebRoot | `write_webroot_js` |
 | Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
+| Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot` |
+| Project and asset discovery | `get_unity_packages`, `search_unity_assets` |
 | Scene operations | `create_gameobject`, `delete_gameobject`, `modify_gameobject`, `get_object_bounds` |
 | Components and references | `add_component`, `remove_component`, `set_component_property`, `set_object_reference` |
 | Prefabs and batches | `batch_create`, `instantiate_prefab`, `batch_instantiate_prefabs`, `get_prefab_catalog`, `scan_prefabs` |
