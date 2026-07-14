@@ -20,7 +20,7 @@ struct ProjectChannel {
 }
 
 /// Full launcher configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LauncherConfig {
     channels: Vec<ProjectChannel>,
     active_channel_id: Option<String>,
@@ -29,6 +29,60 @@ struct LauncherConfig {
     auto_start: bool,
     #[serde(default)]
     enable_custom_scripts: bool,
+    #[serde(default = "default_tool_groups")]
+    tool_groups: String,
+}
+
+fn default_tool_groups() -> String {
+    "all".to_string()
+}
+
+fn normalize_tool_groups(value: &str) -> Result<String, String> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() || value == "all" {
+        return Ok("all".to_string());
+    }
+
+    let mut entries: Vec<&str> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    entries.sort_unstable();
+    entries.dedup();
+
+    if entries.is_empty() {
+        return Err(
+            "Tool groups must contain all, none, read, author, test, or banter".to_string(),
+        );
+    }
+
+    if entries.contains(&"all") || entries.contains(&"none") {
+        if entries.len() != 1 {
+            return Err("Tool groups cannot combine 'all' or 'none' with other groups".to_string());
+        }
+        return Ok(entries[0].to_string());
+    }
+
+    const KNOWN_GROUPS: [&str; 4] = ["read", "author", "test", "banter"];
+    let unknown: Vec<&str> = entries
+        .iter()
+        .copied()
+        .filter(|entry| !KNOWN_GROUPS.contains(entry))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "Unknown tool groups: {}. Use all, none, read, author, test, or banter",
+            unknown.join(", ")
+        ));
+    }
+
+    Ok(KNOWN_GROUPS
+        .iter()
+        .copied()
+        .filter(|group| entries.contains(group))
+        .collect::<Vec<_>>()
+        .join(","))
 }
 
 fn find_mcp_server_path(root: &Path) -> Option<PathBuf> {
@@ -246,6 +300,7 @@ fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
         {
             config.mcp_server_path = default_mcp_server_path(&app)?.to_string_lossy().to_string();
         }
+        config.tool_groups = normalize_tool_groups(&config.tool_groups)?;
         Ok(config)
     } else {
         Ok(LauncherConfig {
@@ -254,6 +309,7 @@ fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
             mcp_server_path: default_mcp_server_path(&app)?.to_string_lossy().to_string(),
             auto_start: false,
             enable_custom_scripts: false,
+            tool_groups: default_tool_groups(),
         })
     }
 }
@@ -265,6 +321,7 @@ fn save_config(mut config: LauncherConfig) -> Result<(), String> {
     config.mcp_server_path = validate_mcp_server_path(&config.mcp_server_path)?
         .to_string_lossy()
         .to_string();
+    config.tool_groups = normalize_tool_groups(&config.tool_groups)?;
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
@@ -361,18 +418,51 @@ fn get_claude_mcp_config() -> Result<serde_json::Value, String> {
     }
 }
 
+fn build_claude_mcp_config(
+    mut config: serde_json::Value,
+    channel: &ProjectChannel,
+    mcp_server_path: &str,
+    tool_groups: &str,
+) -> Result<serde_json::Value, String> {
+    if !config.is_object() {
+        return Err("Claude config root must be a JSON object".to_string());
+    }
+    if config.get("mcpServers").is_none() {
+        config["mcpServers"] = serde_json::json!({});
+    } else if !config["mcpServers"].is_object() {
+        return Err("Claude config mcpServers must be a JSON object".to_string());
+    }
+
+    let mut env = serde_json::json!({
+        "UNITY_PROJECT_PATH": channel.unity_project_path,
+        "BANTWORKS_TOOL_GROUPS": normalize_tool_groups(tool_groups)?
+    });
+    if let Some(scene) = &channel.scene_path {
+        env["UNITY_SCENE_PATH"] = serde_json::json!(scene);
+    }
+
+    config["mcpServers"]["banter"] = serde_json::json!({
+        "command": "node",
+        "args": [mcp_server_path],
+        "env": env
+    });
+    Ok(config)
+}
+
 /// Update Claude Code MCP configuration for a channel
 #[tauri::command]
 fn update_claude_mcp_config(
     channel: ProjectChannel,
     mcp_server_path: String,
+    tool_groups: String,
 ) -> Result<(), String> {
     let config_path = get_claude_config_path();
     let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
         .to_string_lossy()
         .to_string();
+    let tool_groups = normalize_tool_groups(&tool_groups)?;
 
-    let mut config: serde_json::Value = if config_path.exists() {
+    let config: serde_json::Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read Claude config: {}", e))?;
         serde_json::from_str(&content).map_err(|e| {
@@ -385,28 +475,52 @@ fn update_claude_mcp_config(
         serde_json::json!({})
     };
 
-    if config.get("mcpServers").is_none() {
-        config["mcpServers"] = serde_json::json!({});
-    }
-
-    let mut env = serde_json::json!({
-        "UNITY_PROJECT_PATH": channel.unity_project_path
-    });
-
-    if let Some(scene) = &channel.scene_path {
-        env["UNITY_SCENE_PATH"] = serde_json::json!(scene);
-    }
-
-    config["mcpServers"]["banter"] = serde_json::json!({
-        "command": "node",
-        "args": [mcp_server_path],
-        "env": env
-    });
+    let config = build_claude_mcp_config(config, &channel, &mcp_server_path, &tool_groups)?;
 
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize Claude config: {}", e))?;
 
     atomic_write(&config_path, &content)
+}
+
+fn build_codex_mcp_config(
+    existing: &str,
+    channel: &ProjectChannel,
+    mcp_server_path: &str,
+    tool_groups: &str,
+) -> Result<String, String> {
+    let tool_groups = normalize_tool_groups(tool_groups)?;
+    let mut content = remove_toml_table_block(existing, "mcp_servers.banter");
+    content = remove_toml_table_block(&content, "mcp_servers.banter.env");
+
+    if !content.ends_with('\n') && !content.is_empty() {
+        content.push('\n');
+    }
+
+    content.push_str("\n[mcp_servers.banter]\n");
+    content.push_str("command = \"node\"\n");
+    content.push_str(&format!(
+        "args = [\"{}\"]\n",
+        escape_toml_string(mcp_server_path)
+    ));
+    content.push_str("startup_timeout_sec = 20\n");
+    content.push_str("tool_timeout_sec = 600\n");
+    content.push_str("\n[mcp_servers.banter.env]\n");
+    content.push_str(&format!(
+        "UNITY_PROJECT_PATH = \"{}\"\n",
+        escape_toml_string(&channel.unity_project_path.replace("\\", "/"))
+    ));
+    content.push_str(&format!(
+        "BANTWORKS_TOOL_GROUPS = \"{}\"\n",
+        escape_toml_string(&tool_groups)
+    ));
+    if let Some(scene) = &channel.scene_path {
+        content.push_str(&format!(
+            "UNITY_SCENE_PATH = \"{}\"\n",
+            escape_toml_string(&scene.replace("\\", "/"))
+        ));
+    }
+    Ok(content)
 }
 
 /// Remove Banter MCP from Claude config
@@ -438,7 +552,11 @@ fn remove_claude_mcp_config() -> Result<(), String> {
 
 /// Update Codex MCP configuration for a channel
 #[tauri::command]
-fn update_codex_mcp_config(channel: ProjectChannel, mcp_server_path: String) -> Result<(), String> {
+fn update_codex_mcp_config(
+    channel: ProjectChannel,
+    mcp_server_path: String,
+    tool_groups: String,
+) -> Result<(), String> {
     let config_path = get_codex_config_path();
     let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
         .to_string_lossy()
@@ -456,33 +574,7 @@ fn update_codex_mcp_config(channel: ProjectChannel, mcp_server_path: String) -> 
         String::new()
     };
 
-    let mut content = remove_toml_table_block(&existing, "mcp_servers.banter");
-    content = remove_toml_table_block(&content, "mcp_servers.banter.env");
-
-    if !content.ends_with('\n') && !content.is_empty() {
-        content.push('\n');
-    }
-
-    content.push_str("\n[mcp_servers.banter]\n");
-    content.push_str("command = \"node\"\n");
-    content.push_str(&format!(
-        "args = [\"{}\"]\n",
-        escape_toml_string(&mcp_server_path)
-    ));
-    content.push_str("startup_timeout_sec = 20\n");
-    content.push_str("tool_timeout_sec = 600\n");
-    content.push_str("\n[mcp_servers.banter.env]\n");
-    content.push_str(&format!(
-        "UNITY_PROJECT_PATH = \"{}\"\n",
-        escape_toml_string(&channel.unity_project_path.replace("\\", "/"))
-    ));
-
-    if let Some(scene) = &channel.scene_path {
-        content.push_str(&format!(
-            "UNITY_SCENE_PATH = \"{}\"\n",
-            escape_toml_string(&scene.replace("\\", "/"))
-        ));
-    }
+    let content = build_codex_mcp_config(&existing, &channel, &mcp_server_path, &tool_groups)?;
 
     atomic_write(&config_path, &content)
 }
@@ -714,5 +806,59 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "new");
         assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn tool_groups_are_normalized_and_fail_closed() {
+        assert_eq!(normalize_tool_groups(""), Ok("all".to_string()));
+        assert_eq!(
+            normalize_tool_groups("banter, read,banter"),
+            Ok("read,banter".to_string())
+        );
+        assert_eq!(normalize_tool_groups("none"), Ok("none".to_string()));
+        assert!(normalize_tool_groups("all,read").is_err());
+        assert!(normalize_tool_groups("admin").is_err());
+        assert!(normalize_tool_groups(",,,").is_err());
+    }
+
+    #[test]
+    fn client_configs_include_the_selected_tool_groups() {
+        let channel = ProjectChannel {
+            id: "channel".to_string(),
+            name: "Project".to_string(),
+            unity_project_path: "E:\\unity\\Project".to_string(),
+            scene_path: Some("E:\\unity\\Project\\Assets\\Main.unity".to_string()),
+            enabled: true,
+        };
+
+        let claude = build_claude_mcp_config(
+            serde_json::json!({ "keep": true, "mcpServers": { "other": {} } }),
+            &channel,
+            "C:\\BANTWORKS\\banter-mcp.mjs",
+            "banter,read",
+        )
+        .unwrap();
+        assert_eq!(claude["keep"], true);
+        assert!(claude["mcpServers"]["other"].is_object());
+        assert_eq!(
+            claude["mcpServers"]["banter"]["env"]["BANTWORKS_TOOL_GROUPS"],
+            "read,banter"
+        );
+
+        let codex = build_codex_mcp_config(
+            "model = \"gpt\"\n\n[other]\nkeep = true\n",
+            &channel,
+            "C:/BANTWORKS/banter-mcp.mjs",
+            "read,banter",
+        )
+        .unwrap();
+        assert!(codex.contains("model = \"gpt\""));
+        assert!(codex.contains("[other]"));
+        assert!(codex.contains("BANTWORKS_TOOL_GROUPS = \"read,banter\""));
+        assert!(codex.contains("UNITY_SCENE_PATH = \"E:/unity/Project/Assets/Main.unity\""));
+
+        assert!(
+            build_claude_mcp_config(serde_json::json!([]), &channel, "server.mjs", "all").is_err()
+        );
     }
 }

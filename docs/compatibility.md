@@ -16,6 +16,8 @@ CI rows are enforced by the repository workflow.
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |
 
 The server intentionally rejects `--http`. It does not open a network listener.
+Tool-surface restriction is client-independent through `BANTWORKS_TOOL_GROUPS`;
+the default remains `all` for backward compatibility.
 
 ## Unity and Banter
 

@@ -11,6 +11,7 @@ $CodexDir = Join-Path $UserProfile ".codex"
 New-Item -ItemType Directory -Path $Editor, $ConfigDir, $CodexDir -Force | Out-Null
 Set-Content -LiteralPath (Join-Path $Editor "BanterMCPBridge.cs") -Value "// old bridge"
 Set-Content -LiteralPath (Join-Path $CodexDir "config.toml") -Value 'model = "existing"'
+Set-Content -LiteralPath (Join-Path $UserProfile ".claude.json") -Value '{"keep":true,"mcpServers":{"other":{}}}'
 
 $config = @{
     channels = @(@{
@@ -32,7 +33,7 @@ $PreviousUserProfile = $env:USERPROFILE
 try {
     $env:APPDATA = $AppData
     $env:USERPROFILE = $UserProfile
-    "X`n`nE`n`nQ`n" | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "setup.ps1") | Out-Null
+    "G`n3`n`nX`n`nC`n`nE`n`nQ`n" | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "setup.ps1") | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "setup.ps1 exited with code $LASTEXITCODE"
     }
@@ -49,8 +50,17 @@ try {
     }
 
     $codexConfig = Get-Content (Join-Path $CodexDir "config.toml") -Raw
-    if ($codexConfig -notmatch 'model = "existing"' -or $codexConfig -notmatch '\[mcp_servers\.banter\]') {
+    if ($codexConfig -notmatch 'model = "existing"' -or
+        $codexConfig -notmatch '\[mcp_servers\.banter\]' -or
+        $codexConfig -notmatch 'BANTWORKS_TOOL_GROUPS = "read,banter"') {
         throw "Existing Codex configuration was not preserved and updated"
+    }
+
+    $claudeConfig = Get-Content (Join-Path $UserProfile ".claude.json") -Raw | ConvertFrom-Json
+    if ($claudeConfig.keep -ne $true -or
+        $null -eq $claudeConfig.mcpServers.other -or
+        $claudeConfig.mcpServers.banter.env.BANTWORKS_TOOL_GROUPS -ne "read,banter") {
+        throw "Existing Claude configuration was not preserved and updated"
     }
 
     $temporaryFiles = @(Get-ChildItem $TestRoot -Recurse -Force -File | Where-Object {

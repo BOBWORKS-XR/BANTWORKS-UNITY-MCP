@@ -3,6 +3,7 @@ let config = {
   channels: [],
   active_channel_id: null,
   mcp_server_path: '',
+  tool_groups: 'all',
   auto_start: false,
   enable_custom_scripts: false
 };
@@ -11,7 +12,7 @@ let config = {
 let statusEl, channelsList, emptyState, addChannelBtn, addChannelModal;
 let modalBackdrop, channelNameInput, scenePathInput, pathValidation;
 let browseBtn, cancelBtn, confirmAddBtn, mcpServerPathInput;
-let autoConfigCheckbox, customScriptsCheckbox, applyConfigBtn, applyCodexBtn;
+let toolGroupsSelect, autoConfigCheckbox, customScriptsCheckbox, applyConfigBtn, applyCodexBtn;
 let disconnectBtn, disconnectCodexBtn, installExtensionBtn, openDocsBtn;
 
 // Initialize when DOM is ready
@@ -30,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   cancelBtn = document.getElementById('cancelBtn');
   confirmAddBtn = document.getElementById('confirmAddBtn');
   mcpServerPathInput = document.getElementById('mcpServerPath');
+  toolGroupsSelect = document.getElementById('toolGroups');
   autoConfigCheckbox = document.getElementById('autoConfig');
   customScriptsCheckbox = document.getElementById('customScripts');
   applyConfigBtn = document.getElementById('applyConfigBtn');
@@ -117,6 +119,21 @@ function setupEventListeners() {
     }
   });
 
+  toolGroupsSelect.addEventListener('change', async function() {
+    config.tool_groups = toolGroupsSelect.value;
+    try {
+      await window.__TAURI__.core.invoke('save_config', { config: config });
+      var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
+      if (autoConfigCheckbox.checked && channel) {
+        await updateConfiguredClients(channel);
+        showToast('Capability profile applied to Claude and Codex', 'success');
+      }
+    } catch (err) {
+      console.error('Failed to save capability profile:', err);
+      showToast('Failed to save capability profile', 'error');
+    }
+  });
+
   autoConfigCheckbox.addEventListener('change', async function() {
     config.auto_start = autoConfigCheckbox.checked;
     try {
@@ -161,6 +178,21 @@ function setupEventListeners() {
 
 function updateUI() {
   mcpServerPathInput.value = config.mcp_server_path;
+  var toolGroups = config.tool_groups || 'all';
+  Array.from(toolGroupsSelect.options).forEach(function(option) {
+    if (option.dataset.custom === 'true') option.remove();
+  });
+  var hasProfile = Array.from(toolGroupsSelect.options).some(function(option) {
+    return option.value === toolGroups;
+  });
+  if (!hasProfile) {
+    var customOption = document.createElement('option');
+    customOption.value = toolGroups;
+    customOption.textContent = 'Custom (' + toolGroups + ')';
+    customOption.dataset.custom = 'true';
+    toolGroupsSelect.appendChild(customOption);
+  }
+  toolGroupsSelect.value = toolGroups;
   autoConfigCheckbox.checked = config.auto_start !== false;
   customScriptsCheckbox.checked = config.enable_custom_scripts === true;
   renderChannels();
@@ -252,14 +284,7 @@ async function selectChannel(channelId) {
     if (autoConfigCheckbox.checked) {
       var channel = config.channels.find(function(c) { return c.id === channelId; });
       if (channel) {
-        await window.__TAURI__.core.invoke('update_claude_mcp_config', {
-          channel: channel,
-          mcpServerPath: config.mcp_server_path
-        });
-        await window.__TAURI__.core.invoke('update_codex_mcp_config', {
-          channel: channel,
-          mcpServerPath: config.mcp_server_path
-        });
+        await updateConfiguredClients(channel);
         showToast('Applied to Claude and Codex', 'success');
       }
     }
@@ -375,7 +400,8 @@ async function applyToClaudeCode() {
   try {
     await window.__TAURI__.core.invoke('update_claude_mcp_config', {
       channel: channel,
-      mcpServerPath: config.mcp_server_path
+      mcpServerPath: config.mcp_server_path,
+      toolGroups: config.tool_groups || 'all'
     });
     showToast('Applied to Claude Code (~/.claude.json)', 'success');
   } catch (err) {
@@ -395,13 +421,27 @@ async function applyToCodex() {
   try {
     await window.__TAURI__.core.invoke('update_codex_mcp_config', {
       channel: channel,
-      mcpServerPath: config.mcp_server_path
+      mcpServerPath: config.mcp_server_path,
+      toolGroups: config.tool_groups || 'all'
     });
     showToast('Applied to Codex (~/.codex/config.toml)', 'success');
   } catch (err) {
     console.error('Failed to apply Codex config:', err);
     showToast('Failed to update Codex config', 'error');
   }
+}
+
+async function updateConfiguredClients(channel) {
+  await window.__TAURI__.core.invoke('update_claude_mcp_config', {
+    channel: channel,
+    mcpServerPath: config.mcp_server_path,
+    toolGroups: config.tool_groups || 'all'
+  });
+  await window.__TAURI__.core.invoke('update_codex_mcp_config', {
+    channel: channel,
+    mcpServerPath: config.mcp_server_path,
+    toolGroups: config.tool_groups || 'all'
+  });
 }
 
 async function disconnectFromClaude() {

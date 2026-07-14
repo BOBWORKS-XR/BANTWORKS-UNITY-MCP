@@ -112,7 +112,9 @@ its public cancellation API.
    machine-specific source paths, isolated bundle smoke, NSIS/MSI release
    targets, and draft GitHub release automation.
 2. Project-local client configuration option and migration tooling.
-3. Tool groups so clients can expose only the capabilities needed for a task.
+3. **Complete:** composable `read`, `author`, `test`, and `banter` capability
+   groups, routing-only mode, tools/list filtering, direct-call enforcement,
+   fail-closed parsing, and Codex/Claude launcher profiles.
 4. **Complete (initial matrix):** document exercised Unity, Banter SDK, Visual
    Scripting, Test Framework, Node, client, and Windows distribution surfaces.
    Automate Unity fixture rows before promoting them from manual coverage.

@@ -21,6 +21,7 @@ The repository is intentionally generic. It contains no project-specific gamepla
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
 - **Unity Integration**: Query project state, check import status, refresh assets
 - **Closed-Loop Workflow**: Validate → Write → Import and deserialize in Unity → Test
+- **Capability Profiles**: Limit the exposed tool surface to inspection, authoring, testing, Banter workflows, or minimal project routing
 
 ## Banter Visual Scripting Expertise
 
@@ -78,6 +79,7 @@ tool_timeout_sec = 600
 
 [mcp_servers.banter.env]
 UNITY_PROJECT_PATH = "E:/unity/MCP_base"
+BANTWORKS_TOOL_GROUPS = "all"
 ```
 
 #### Claude Code
@@ -94,7 +96,8 @@ Or add the server directly to `.claude.json`:
       "command": "node",
       "args": ["C:/path/to/BANTWORKS-MCP/banter-mcp.mjs"],
       "env": {
-        "UNITY_PROJECT_PATH": "E:/unity/MCP_base"
+        "UNITY_PROJECT_PATH": "E:/unity/MCP_base",
+        "BANTWORKS_TOOL_GROUPS": "all"
       }
     }
   }
@@ -105,7 +108,7 @@ Restart the selected MCP client after changing its configuration.
 
 ### 3. Configure Through the Windows Launcher (Optional)
 
-The BANTWORKS MCP launcher can manage multiple Unity scene channels and install the Unity bridge. Select a channel, then use **Apply to Codex** or **Apply to Claude Code**. With **Auto-configure Clients** enabled, changing the active channel updates both configurations.
+The BANTWORKS MCP launcher can manage multiple Unity scene channels, choose a capability profile, and install the Unity bridge. Select a channel, then use **Apply to Codex** or **Apply to Claude Code**. With **Auto-configure Clients** enabled, changing the active channel or capability profile updates both configurations.
 
 At runtime, call `list_unity_projects` and pass one of its stable IDs to `select_unity_project`. Selection affects subsequent calls in the current MCP session only; launcher and client configuration remain unchanged.
 
@@ -135,6 +138,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 |----------|-------------|
 | `banter://components` | 63 source-checked public scene components plus the `BanterObjectId` runtime helper |
 | `banter://sdk-compatibility` | Catalogue hashes, observed package profiles, and interpretation limits |
+| `banter://tool-groups` | Exact capability-group membership, special values, and launcher presets |
 | `banter://vs-nodes` | Hand-authored Banter node reference with port notes |
 | `banter://custom-vs-nodes` | Exact catalogue of 162 custom Banter node types extracted from a real graph asset |
 | `banter://custom-vs-node-log` | Markdown log with every captured custom node, category, and serialized default |
@@ -146,6 +150,8 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://console` | Unity console logs (requires extension) |
 
 ### Tools (39 focused actions available to MCP clients)
+
+All 39 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
 
 | Category | Tools |
 |----------|-------|

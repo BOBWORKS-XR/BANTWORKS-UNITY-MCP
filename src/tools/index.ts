@@ -17,6 +17,22 @@ import { getUnityPackages } from "./get-unity-packages.js";
 import { getBanterSDKInfo } from "./get-banter-sdk-info.js";
 import { atomicWriteFileSync } from "../lib/files.js";
 import type { UnityProjectRouter } from "../lib/project-router.js";
+import {
+  describeToolGroupSelection,
+  isToolEnabled,
+  type ToolGroupSelection,
+} from "./tool-groups.js";
+
+export {
+  ALWAYS_AVAILABLE_TOOLS,
+  TOOL_GROUP_MEMBERSHIP,
+  TOOL_GROUP_NAMES,
+  describeToolGroupSelection,
+  isToolEnabled,
+  parseToolGroupSelection,
+  type ToolGroupName,
+  type ToolGroupSelection,
+} from "./tool-groups.js";
 
 interface Tool {
   name: string;
@@ -46,8 +62,8 @@ function isImageToolResult(value: unknown): value is ImageToolResult {
 /**
  * Register all available tools
  */
-export function registerTools(): Tool[] {
-  return [
+export function registerTools(selection: ToolGroupSelection = "all"): Tool[] {
+  const tools: Tool[] = [
     // VS Graph Tools
     {
       name: "validate_vs_graph",
@@ -1147,6 +1163,7 @@ Returns:
       },
     },
   ];
+  return tools.filter((tool) => isToolEnabled(tool.name, selection));
 }
 
 /**
@@ -1156,8 +1173,16 @@ export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
   config: BanterMCPConfig,
-  projectRouter?: UnityProjectRouter
+  projectRouter?: UnityProjectRouter,
+  selection: ToolGroupSelection = "all"
 ): Promise<{ content: Array<ToolTextContent | ToolImageContent> }> {
+  if (!isToolEnabled(name, selection)) {
+    throw new Error(
+      `Tool '${name}' is disabled by BANTWORKS_TOOL_GROUPS ` +
+      `(enabled selection: ${describeToolGroupSelection(selection)}).`
+    );
+  }
+
   let result: unknown;
 
   switch (name) {

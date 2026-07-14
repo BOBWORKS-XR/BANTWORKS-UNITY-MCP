@@ -60,6 +60,21 @@
 
         <div class="setting-row">
           <div class="setting-info">
+            <label for="toolGroups">Exposed Capabilities</label>
+            <p class="hint">Limit the MCP tools visible to connected clients</p>
+          </div>
+          <select id="toolGroups" class="input select-input">
+            <option value="all">Full Unity + Banter</option>
+            <option value="read">Inspection</option>
+            <option value="read,banter">Banter workflow</option>
+            <option value="read,author">Unity authoring</option>
+            <option value="read,test">Testing</option>
+            <option value="none">Minimal routing</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
             <label>Auto-configure Clients</label>
             <p class="hint">Keep Claude Code and Codex synchronized with the selected Unity channel</p>
           </div>
@@ -132,7 +147,7 @@
     </main>
 
     <footer class="footer">
-      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v1.5.0</span> • <a href="#" id="githubLink">GitHub</a></p>
+      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v1.6.0</span> • <a href="#" id="githubLink">GitHub</a></p>
     </footer>
   </div>
 

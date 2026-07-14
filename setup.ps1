@@ -38,6 +38,31 @@ function Test-LegacyServerPath($value) {
     return (($value -replace "\\", "/").Equals($LegacyServerPath, [System.StringComparison]::OrdinalIgnoreCase))
 }
 
+function Normalize-ToolGroups($Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return "all"
+    }
+
+    $entries = @(($Value.ToLowerInvariant() -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
+    if ($entries.Count -eq 0) {
+        throw "Tool groups must contain all, none, read, author, test, or banter."
+    }
+    if ($entries -contains "all" -or $entries -contains "none") {
+        if ($entries.Count -ne 1) {
+            throw "Tool groups cannot combine 'all' or 'none' with other groups."
+        }
+        return $entries[0]
+    }
+
+    $knownGroups = @("read", "author", "test", "banter")
+    $unknown = @($entries | Where-Object { $_ -notin $knownGroups })
+    if ($unknown.Count -gt 0) {
+        throw "Unknown tool groups: $($unknown -join ', '). Use all, none, read, author, test, or banter."
+    }
+
+    return (@($knownGroups | Where-Object { $_ -in $entries }) -join ",")
+}
+
 function Publish-AtomicFile($TemporaryPath, $Destination) {
     if (-not (Test-Path -LiteralPath $Destination)) {
         [System.IO.File]::Move($TemporaryPath, $Destination)
@@ -112,12 +137,19 @@ function Load-Config {
                 $config.mcp_server_path = $defaultServer
             }
         }
+        $toolGroups = Normalize-ToolGroups $config.tool_groups
+        if ($null -eq $config.PSObject.Properties["tool_groups"]) {
+            $config | Add-Member -NotePropertyName "tool_groups" -NotePropertyValue $toolGroups
+        } else {
+            $config.tool_groups = $toolGroups
+        }
         return $config
     }
     return @{
         channels = @()
         active_channel_id = $null
         mcp_server_path = Get-DefaultServerPath
+        tool_groups = "all"
         auto_start = $false
         enable_custom_scripts = $false
     }
@@ -128,6 +160,7 @@ function Save-Config($config) {
     if (-not (Test-Path -LiteralPath $config.mcp_server_path -PathType Leaf)) {
         throw "MCP server file does not exist: $($config.mcp_server_path)"
     }
+    $config.tool_groups = Normalize-ToolGroups $config.tool_groups
     Write-AtomicText $ConfigPath ($config | ConvertTo-Json -Depth 10)
 }
 
@@ -159,6 +192,7 @@ function Show-Menu {
     Write-Host ""
     Write-Host "  [A] Add new project"
     Write-Host "  [S] Set active project"
+    Write-Host "  [G] Set capability profile"
     Write-Host "  [R] Remove a project"
     Write-Host "  [C] Apply to Claude Code"
     Write-Host "  [X] Apply to Codex"
@@ -241,6 +275,35 @@ function Set-ActiveProject {
     }
 }
 
+function Set-CapabilityProfile {
+    $config = Load-Config
+    Write-Host ""
+    Write-Host "Capability Profile" -ForegroundColor Cyan
+    Write-Host "  1. Full Unity + Banter"
+    Write-Host "  2. Inspection"
+    Write-Host "  3. Banter workflow"
+    Write-Host "  4. Unity authoring"
+    Write-Host "  5. Testing"
+    Write-Host "  6. Minimal routing"
+    $selection = Read-Host "Select profile"
+    $profiles = @{
+        "1" = "all"
+        "2" = "read"
+        "3" = "read,banter"
+        "4" = "read,author"
+        "5" = "read,test"
+        "6" = "none"
+    }
+    if (-not $profiles.ContainsKey($selection)) {
+        Write-Host "Invalid selection!" -ForegroundColor Red
+        return
+    }
+
+    $config.tool_groups = $profiles[$selection]
+    Save-Config $config
+    Write-Host "Capability profile set to: $($config.tool_groups)" -ForegroundColor Green
+}
+
 function Remove-Project {
     $config = Load-Config
 
@@ -303,6 +366,7 @@ function Apply-ToClaudeCode {
 
     $envVars = @{
         UNITY_PROJECT_PATH = $activeChannel.unity_project_path
+        BANTWORKS_TOOL_GROUPS = Normalize-ToolGroups $config.tool_groups
     }
 
     if ($activeChannel.scene_path) {
@@ -399,6 +463,8 @@ function Apply-ToCodex {
     $content += "tool_timeout_sec = 600`n`n"
     $content += "[mcp_servers.banter.env]`n"
     $content += "UNITY_PROJECT_PATH = `"$projectPath`"`n"
+    $toolGroups = Escape-TomlString (Normalize-ToolGroups $config.tool_groups)
+    $content += "BANTWORKS_TOOL_GROUPS = `"$toolGroups`"`n"
 
     if ($activeChannel.scene_path) {
         $scenePath = Escape-TomlString ($activeChannel.scene_path -replace "\\", "/")
@@ -577,6 +643,7 @@ while ($true) {
     switch ($choice.ToUpper()) {
         "A" { Add-Project; Read-Host "Press Enter to continue" }
         "S" { Set-ActiveProject; Read-Host "Press Enter to continue" }
+        "G" { Set-CapabilityProfile; Read-Host "Press Enter to continue" }
         "R" { Remove-Project; Read-Host "Press Enter to continue" }
         "C" { Apply-ToClaudeCode; Read-Host "Press Enter to continue" }
         "X" { Apply-ToCodex; Read-Host "Press Enter to continue" }

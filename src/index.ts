@@ -20,19 +20,26 @@ import {
   GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { registerTools, handleToolCall } from "./tools/index.js";
+import {
+  registerTools,
+  handleToolCall,
+  parseToolGroupSelection,
+  describeToolGroupSelection,
+  type ToolGroupSelection,
+} from "./tools/index.js";
 import { registerResources, handleResourceRead } from "./resources/index.js";
 import { registerPrompts, handlePromptGet } from "./prompts/index.js";
 import { getConfig } from "./lib/config.js";
 import { UnityProjectRouter } from "./lib/project-router.js";
 
 const projectRouter = new UnityProjectRouter(getConfig());
+let toolGroupSelection: ToolGroupSelection = "all";
 
 // Create MCP server
 const server = new Server(
   {
     name: "banter-mcp",
-    version: "1.5.0",
+    version: "1.6.0",
   },
   {
     capabilities: {
@@ -45,13 +52,19 @@ const server = new Server(
 
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools: registerTools() };
+  return { tools: registerTools(toolGroupSelection) };
 });
 
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const requestConfig = projectRouter.getActiveConfig();
-  return handleToolCall(request.params.name, request.params.arguments ?? {}, requestConfig, projectRouter);
+  return handleToolCall(
+    request.params.name,
+    request.params.arguments ?? {},
+    requestConfig,
+    projectRouter,
+    toolGroupSelection
+  );
 });
 
 // List available resources
@@ -76,6 +89,7 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 
 // Start server
 async function main() {
+  toolGroupSelection = parseToolGroupSelection(process.env.BANTWORKS_TOOL_GROUPS);
   const args = process.argv.slice(2);
   const useHttp = args.includes("--http");
 
@@ -86,7 +100,9 @@ async function main() {
     // Stdio transport for Codex, Claude Code, and other MCP clients.
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Banter MCP running on stdio");
+    console.error(
+      `Banter MCP running on stdio (tool groups: ${describeToolGroupSelection(toolGroupSelection)})`
+    );
   }
 }
 

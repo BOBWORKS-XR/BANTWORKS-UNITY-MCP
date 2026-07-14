@@ -14,6 +14,11 @@ import { VS_GRAPH_INSTRUCTIONS } from "./vs-graph-instructions.js";
 import { UNITY_VS_JSON_MANUAL } from "./unity-vs-json-manual.js";
 import { UNITY_VS_JSON_ERRATA } from "./unity-vs-json-errata.js";
 import { BANTER_SDK_COMPATIBILITY } from "./banter-sdk-compatibility.js";
+import {
+  ALWAYS_AVAILABLE_TOOLS,
+  TOOL_GROUP_MEMBERSHIP,
+  TOOL_GROUP_NAMES,
+} from "../tools/tool-groups.js";
 
 /**
  * System prompt that guides connected MCP clients during Banter development
@@ -25,6 +30,10 @@ You are connected to a Unity project through the Banter MCP. You have DIRECT ACC
 ## CRITICAL: Be Proactive, Not Advisory
 
 **DO things, don't just explain how to do them.**
+
+The server may expose a limited capability profile. Use only tools present in
+\`tools/list\`; a missing tool is intentionally unavailable, not a reason to
+invent an equivalent write path.
 
 ### Instead of:
 - "You could add a BanterGrababble component..."
@@ -130,6 +139,12 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
       uri: "banter://sdk-compatibility",
       name: "Banter SDK Compatibility",
       description: "Banter node/component catalogue provenance and observed package source coverage",
+      mimeType: "application/json",
+    },
+    {
+      uri: "banter://tool-groups",
+      name: "BANTWORKS Tool Groups",
+      description: "Capability-group names, exact tool membership, presets, and filtering behavior",
       mimeType: "application/json",
     },
     {
@@ -239,6 +254,29 @@ export function handleResourceRead(
 
     case "banter://sdk-compatibility":
       content = JSON.stringify(BANTER_SDK_COMPATIBILITY, null, 2);
+      break;
+
+    case "banter://tool-groups":
+      content = JSON.stringify({
+        environmentVariable: "BANTWORKS_TOOL_GROUPS",
+        default: "all",
+        specialValues: {
+          all: "Expose all tools",
+          none: "Expose only project routing and bridge health tools",
+        },
+        alwaysAvailable: [...ALWAYS_AVAILABLE_TOOLS],
+        groups: Object.fromEntries(
+          TOOL_GROUP_NAMES.map((group) => [group, [...TOOL_GROUP_MEMBERSHIP[group]]])
+        ),
+        launcherProfiles: {
+          full: "all",
+          inspection: "read",
+          banterWorkflow: "read,banter",
+          unityAuthoring: "read,author",
+          testing: "read,test",
+          minimalRouting: "none",
+        },
+      }, null, 2);
       break;
 
     case "banter://vs-nodes":

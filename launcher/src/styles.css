@@ -388,6 +388,10 @@ body {
   border-color: var(--accent);
 }
 
+.select-input {
+  cursor: pointer;
+}
+
 .input-with-button {
   display: flex;
   gap: 8px;
@@ -574,6 +578,29 @@ body {
 
 .toast.error {
   border-color: var(--error);
+}
+
+@media (max-width: 640px) {
+  .header,
+  .main {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .setting-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .setting-row .input {
+    max-width: none;
+  }
+
+  .action-buttons .btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
 }
 
 @keyframes slideIn {
