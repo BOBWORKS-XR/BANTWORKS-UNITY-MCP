@@ -41,7 +41,7 @@ This knowledge improves graph generation and review, but source-class coverage i
 - Node.js 18 or later.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
-- Unity 6000.3.10f1 is the latest editor version verified with the bridge. A disposable blank-project fixture also verifies generic asset-reference assignment and real Visual Scripting 1.9.9 `ScriptMachine.nest.macro` attachment. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
+- Unity 6000.3.10f1 is the latest editor version verified with the bridge. Disposable blank-project fixtures verify generic asset-reference assignment and, on Unity 6000.3.2f1, generated Banter Visual Scripting import, `ScriptMachine.nest.macro` persistence, and the SDK allow-list validator. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
 
 ## Quick Start
 
@@ -303,9 +303,14 @@ Common fixes:
 npm ci
 npm test
 ./scripts/smoke-unity-asset-reference.ps1
+./scripts/smoke-unity-banter-vs.ps1
 cd launcher/src-tauri
 cargo check
 ```
+
+The Banter smoke creates and removes a disposable blank Unity project. It pins
+the public SideQuestVR/BanterSDK Git package to a known revision and does not
+read or modify a user project.
 
 The GitHub Actions workflow runs the Node test suite and standalone-bundle smoke on Node 18, 20, 22, and 24, plus the dependency audit and Tauri launcher tests. Version tags build draft NSIS/MSI releases and a standalone ZIP. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, [docs/compatibility.md](docs/compatibility.md) for the verified matrix, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
 

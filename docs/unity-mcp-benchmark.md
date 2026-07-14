@@ -57,8 +57,9 @@ Strong today:
 
 Gaps that block a leadership claim:
 
-- Banter graph output lacks a committed Banter-package import/open fixture suite; and
-- Unity-side smoke testing is not yet automated in CI.
+- Unity-side smoke testing is not yet automated in hosted CI; and
+- the repeatable Banter fixture currently pins one known SDK revision rather
+  than exercising a supported-version matrix.
 
 Compatibility limit: Test Framework 1.1 supports discovery and execution but
 does not expose public cancellation. BANTWORKS fails with a capability error
@@ -101,11 +102,13 @@ its public cancellation API.
 2. **Complete (server-side):** maintain known-good Visual Scripting graph
    fixtures for canonical generation, Unity 1.9 serialization compatibility,
    referential integrity, native metadata, and old-MCP metadata migration.
-3. **Complete (manual release fixture):** `validate_vs_graph_in_unity` forces
+3. **Complete (repeatable local fixtures):** `validate_vs_graph_in_unity` forces
    import and deserialization and reports graph-element diagnostics. A generic
-   fixture passed in Unity 2022.3.39f1 with Visual Scripting 1.9.4, and a
-   generated `Banter.VisualScripting.OnGrab` fixture passed in Unity 6000.3.2f1
-   with Banter 3.2.2 and Visual Scripting 1.9.9. Commit and automate this matrix.
+   fixture passed in Unity 2022.3.39f1 with Visual Scripting 1.9.4. The committed
+   Banter fixture generates `Banter.VisualScripting.OnGrab`, imports it in Unity
+   6000.3.2f1 with Visual Scripting 1.9.9 and a pinned public Banter SDK, persists
+   its `ScriptMachine` reference, and exercises allow, reject, and recovery
+   validation paths. Hosted Unity CI and a supported-version matrix remain.
 4. **Complete:** `validate_banter_visual_scripting` invokes the SDK's public
    validator reflectively and returns bounded structured diagnostics. Positive
    and deliberately forbidden custom-unit fixtures verified both paths.
@@ -124,7 +127,8 @@ its public cancellation API.
    fail-closed parsing, and Codex/Claude launcher profiles.
 4. **Complete (initial matrix):** document exercised Unity, Banter SDK, Visual
    Scripting, Test Framework, Node, client, and Windows distribution surfaces.
-   Automate Unity fixture rows before promoting them from manual coverage.
+   Generic asset-reference and pinned Banter rows now have repeatable local
+   fixtures; hosted Unity CI and a supported-version matrix remain.
 
 ## Release Gate
 
