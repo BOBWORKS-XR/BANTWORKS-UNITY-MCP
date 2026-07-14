@@ -33,6 +33,7 @@ namespace BantworksMCP
         private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
         private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
         private static readonly string TestRunResultsFolder = Path.Combine(StateFolder, "test-runs");
+        private static readonly string SceneResultsFolder = Path.Combine(StateFolder, "scene-results");
 
         private static double lastCommandCheck = 0;
         private static double lastStateExport = 0;
@@ -126,6 +127,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(AssetSearchResultsFolder);
             if (!Directory.Exists(TestRunResultsFolder))
                 Directory.CreateDirectory(TestRunResultsFolder);
+            if (!Directory.Exists(SceneResultsFolder))
+                Directory.CreateDirectory(SceneResultsFolder);
 
             string ignorePath = Path.Combine(MCPFolder, ".gitignore");
             if (!File.Exists(ignorePath))
@@ -356,6 +359,26 @@ namespace BantworksMCP
                     var runTestsCmd = JsonUtility.FromJson<RunTestsCommand>(json);
                     RunUnityTests(runTestsCmd);
                     return $"Started Unity {runTestsCmd.mode} tests";
+
+                case "get_scenes":
+                    var getScenesCmd = JsonUtility.FromJson<GetScenesCommand>(json);
+                    ExportSceneManagementResult(getScenesCmd.id, "Read Unity scene state");
+                    return "Read Unity scene state";
+
+                case "save_scene":
+                    var saveSceneCmd = JsonUtility.FromJson<SaveSceneCommand>(json);
+                    SaveUnityScene(saveSceneCmd);
+                    return "Saved Unity scene";
+
+                case "open_scene":
+                    var openSceneCmd = JsonUtility.FromJson<OpenSceneCommand>(json);
+                    OpenUnityScene(openSceneCmd);
+                    return $"Opened Unity scene: {openSceneCmd.scenePath}";
+
+                case "set_build_scenes":
+                    var setBuildScenesCmd = JsonUtility.FromJson<SetBuildScenesCommand>(json);
+                    SetUnityBuildScenes(setBuildScenesCmd);
+                    return "Updated Unity build scenes";
 
                 case "create_gameobject":
                     var createCmd = JsonUtility.FromJson<CreateGameObjectCommand>(json);
@@ -1191,6 +1214,258 @@ namespace BantworksMCP
                     HandleTestRunnerCallback(RunId, targetMethod.Name, args != null && args.Length > 0 ? args[0] : null);
                 return null;
             }
+        }
+
+        private static void SaveUnityScene(SaveSceneCommand cmd)
+        {
+            ValidateSceneCommand(cmd?.id);
+            EnsureSceneEditingReady();
+
+            UnityEngine.SceneManagement.Scene scene;
+            if (string.IsNullOrWhiteSpace(cmd.scenePath))
+            {
+                scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            }
+            else
+            {
+                string sourcePath = NormalizeSceneAssetPath(cmd.scenePath, "scenePath");
+                scene = UnityEngine.SceneManagement.SceneManager.GetSceneByPath(sourcePath);
+                if (!scene.IsValid() || !scene.isLoaded)
+                    throw new InvalidOperationException("The requested scene is not open: " + sourcePath);
+            }
+
+            if (!scene.IsValid() || !scene.isLoaded)
+                throw new InvalidOperationException("No loaded scene is available to save");
+
+            string saveAsPath = null;
+            if (!string.IsNullOrWhiteSpace(cmd.saveAsPath))
+            {
+                saveAsPath = NormalizeSceneAssetPath(cmd.saveAsPath, "saveAsPath");
+                string parentFolder = Path.GetDirectoryName(saveAsPath)?.Replace('\\', '/');
+                if (string.IsNullOrWhiteSpace(parentFolder) || !AssetDatabase.IsValidFolder(parentFolder))
+                    throw new InvalidOperationException("The saveAsPath parent must be an existing Unity asset folder: " + parentFolder);
+
+                bool samePath = string.Equals(scene.path, saveAsPath, StringComparison.Ordinal);
+                bool destinationExists = File.Exists(Path.Combine(ProjectRoot, saveAsPath)) ||
+                    AssetDatabase.LoadAssetAtPath<SceneAsset>(saveAsPath) != null;
+                if (destinationExists && !samePath && !cmd.overwrite)
+                    throw new InvalidOperationException("A scene already exists at saveAsPath. Set overwrite=true to replace it.");
+            }
+            else if (string.IsNullOrWhiteSpace(scene.path))
+            {
+                throw new InvalidOperationException("The active scene has never been saved. Provide saveAsPath under Assets/.");
+            }
+
+            bool saved = saveAsPath == null
+                ? EditorSceneManager.SaveScene(scene)
+                : EditorSceneManager.SaveScene(scene, saveAsPath, false);
+            if (!saved)
+                throw new InvalidOperationException("Unity did not save the scene");
+
+            ExportProjectState();
+            ExportSceneManagementResult(cmd.id, "Saved scene: " + scene.path);
+        }
+
+        private static void OpenUnityScene(OpenSceneCommand cmd)
+        {
+            ValidateSceneCommand(cmd?.id);
+            EnsureSceneEditingReady();
+
+            string scenePath = NormalizeSceneAssetPath(cmd.scenePath, "scenePath");
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+                throw new InvalidOperationException("Scene asset was not found: " + scenePath);
+
+            string requestedMode = string.IsNullOrWhiteSpace(cmd.mode)
+                ? "single"
+                : cmd.mode.Trim().ToLowerInvariant();
+            if (requestedMode != "single" && requestedMode != "additive")
+                throw new InvalidOperationException("Scene open mode must be 'single' or 'additive'");
+
+            var openMode = requestedMode == "additive" ? OpenSceneMode.Additive : OpenSceneMode.Single;
+            var existing = UnityEngine.SceneManagement.SceneManager.GetSceneByPath(scenePath);
+            bool alreadySatisfiesRequest = existing.IsValid() && existing.isLoaded &&
+                (openMode == OpenSceneMode.Additive || UnityEngine.SceneManagement.SceneManager.sceneCount == 1);
+
+            UnityEngine.SceneManagement.Scene openedScene;
+            if (alreadySatisfiesRequest)
+            {
+                openedScene = existing;
+            }
+            else
+            {
+                if (openMode == OpenSceneMode.Single)
+                    SaveDirtyOpenScenesOrThrow(cmd.saveModifiedScenes);
+                openedScene = EditorSceneManager.OpenScene(scenePath, openMode);
+            }
+
+            if (!openedScene.IsValid() || !openedScene.isLoaded)
+                throw new InvalidOperationException("Unity did not load scene: " + scenePath);
+            if (cmd.setActive && UnityEngine.SceneManagement.SceneManager.GetActiveScene() != openedScene &&
+                !UnityEngine.SceneManagement.SceneManager.SetActiveScene(openedScene))
+            {
+                throw new InvalidOperationException("Unity loaded the scene but could not make it active: " + scenePath);
+            }
+
+            ExportProjectState();
+            ExportSceneManagementResult(cmd.id, "Opened scene: " + scenePath);
+        }
+
+        private static void SaveDirtyOpenScenesOrThrow(bool saveModifiedScenes)
+        {
+            var dirtyScenes = new List<UnityEngine.SceneManagement.Scene>();
+            for (int index = 0; index < UnityEngine.SceneManagement.SceneManager.sceneCount; index++)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(index);
+                if (scene.isLoaded && scene.isDirty)
+                    dirtyScenes.Add(scene);
+            }
+
+            if (dirtyScenes.Count == 0)
+                return;
+            if (!saveModifiedScenes)
+            {
+                string names = string.Join(", ", dirtyScenes.Select(scene => string.IsNullOrWhiteSpace(scene.path) ? scene.name + " (unsaved)" : scene.path));
+                throw new InvalidOperationException("Opening a scene in Single mode would discard modified scenes: " + names + ". Save them first or set saveModifiedScenes=true.");
+            }
+
+            foreach (var scene in dirtyScenes)
+            {
+                if (string.IsNullOrWhiteSpace(scene.path))
+                    throw new InvalidOperationException("Cannot automatically save an untitled scene. Save it with save_unity_scene first.");
+                string fullPath = Path.Combine(ProjectRoot, scene.path);
+                if (File.Exists(fullPath) && (File.GetAttributes(fullPath) & FileAttributes.ReadOnly) != 0)
+                    throw new InvalidOperationException("Cannot automatically save a read-only scene: " + scene.path);
+            }
+
+            foreach (var scene in dirtyScenes)
+            {
+                if (!EditorSceneManager.SaveScene(scene))
+                    throw new InvalidOperationException("Unity could not save modified scene: " + scene.path);
+            }
+        }
+
+        private static void SetUnityBuildScenes(SetBuildScenesCommand cmd)
+        {
+            ValidateSceneCommand(cmd?.id);
+            EnsureSceneEditingReady();
+            if (cmd.scenes == null)
+                throw new InvalidOperationException("set_build_scenes requires an ordered scenes array");
+            if (cmd.scenes.Length > 500)
+                throw new InvalidOperationException("Build settings support at most 500 scenes per command");
+
+            var normalized = new List<EditorBuildSettingsScene>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (BuildSceneInput input in cmd.scenes)
+            {
+                string scenePath = NormalizeSceneAssetPath(input?.path, "scenes[].path");
+                if (!seen.Add(scenePath))
+                    throw new InvalidOperationException("Build settings contain a duplicate scene path: " + scenePath);
+                if (AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath) == null)
+                    throw new InvalidOperationException("Build settings scene asset was not found: " + scenePath);
+                normalized.Add(new EditorBuildSettingsScene(scenePath, input.enabled));
+            }
+
+            EditorBuildSettingsScene[] previous = EditorBuildSettings.scenes;
+            try
+            {
+                EditorBuildSettings.scenes = normalized.ToArray();
+                AssetDatabase.SaveAssets();
+            }
+            catch
+            {
+                EditorBuildSettings.scenes = previous;
+                throw;
+            }
+
+            ExportSceneManagementResult(cmd.id, "Replaced Unity build scene settings");
+        }
+
+        private static void EnsureSceneEditingReady()
+        {
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle.");
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+                throw new InvalidOperationException("Stop Play Mode before changing scenes or build settings.");
+            if (IsUnityTestRunActive())
+                throw new InvalidOperationException("Wait for the active Unity Test Runner job to finish.");
+        }
+
+        private static void ValidateSceneCommand(string commandId)
+        {
+            if (!IsSafeCorrelationId(commandId))
+                throw new InvalidOperationException("Scene command requires a safe correlation ID");
+        }
+
+        private static string NormalizeSceneAssetPath(string value, string label)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                throw new InvalidOperationException(label + " is required");
+
+            string normalized = value.Replace('\\', '/').Trim();
+            if (!normalized.StartsWith("Assets/", StringComparison.Ordinal) ||
+                !string.Equals(Path.GetExtension(normalized), ".unity", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(label + " must be an Assets/... path ending in .unity");
+            }
+            if (normalized.Split('/').Any(segment => segment.Length == 0 || segment == "." || segment == ".."))
+                throw new InvalidOperationException(label + " contains an invalid path segment");
+
+            string assetsRoot = Path.GetFullPath(Application.dataPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
+            if (!fullPath.StartsWith(assetsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(label + " must stay inside the project's Assets folder");
+
+            return normalized;
+        }
+
+        private static void ExportSceneManagementResult(string commandId, string message)
+        {
+            ValidateSceneCommand(commandId);
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            var result = new SceneManagementResult
+            {
+                commandId = commandId,
+                success = true,
+                message = message,
+                activeScenePath = activeScene.path,
+                activeSceneName = activeScene.name,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                openScenes = new List<OpenSceneEntry>(),
+                buildScenes = new List<BuildSceneEntry>()
+            };
+
+            for (int index = 0; index < UnityEngine.SceneManagement.SceneManager.sceneCount; index++)
+            {
+                var scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(index);
+                result.openScenes.Add(new OpenSceneEntry
+                {
+                    handle = scene.handle,
+                    name = scene.name,
+                    path = scene.path,
+                    guid = string.IsNullOrWhiteSpace(scene.path) ? null : AssetDatabase.AssetPathToGUID(scene.path),
+                    isLoaded = scene.isLoaded,
+                    isDirty = scene.isDirty,
+                    isActive = scene == activeScene,
+                    buildIndex = scene.buildIndex,
+                    rootCount = scene.isLoaded ? scene.rootCount : 0
+                });
+            }
+
+            EditorBuildSettingsScene[] buildScenes = EditorBuildSettings.scenes;
+            for (int index = 0; index < buildScenes.Length; index++)
+            {
+                EditorBuildSettingsScene scene = buildScenes[index];
+                result.buildScenes.Add(new BuildSceneEntry
+                {
+                    index = index,
+                    path = scene.path,
+                    guid = AssetDatabase.AssetPathToGUID(scene.path),
+                    enabled = scene.enabled
+                });
+            }
+
+            WriteAtomicText(Path.Combine(SceneResultsFolder, commandId + ".json"), JsonUtility.ToJson(result, true));
+            DeleteOldFiles(SceneResultsFolder, "*.json", 50);
         }
 
         private static void ModifyGameObject(ModifyGameObjectCommand cmd)
@@ -2989,6 +3264,85 @@ namespace BantworksMCP
             public string name;
             public string type;
             public bool isFolder;
+        }
+
+        [Serializable]
+        private class GetScenesCommand
+        {
+            public string id;
+            public string type;
+        }
+
+        [Serializable]
+        private class SaveSceneCommand
+        {
+            public string id;
+            public string type;
+            public string scenePath;
+            public string saveAsPath;
+            public bool overwrite;
+        }
+
+        [Serializable]
+        private class OpenSceneCommand
+        {
+            public string id;
+            public string type;
+            public string scenePath;
+            public string mode;
+            public bool saveModifiedScenes;
+            public bool setActive;
+        }
+
+        [Serializable]
+        private class SetBuildScenesCommand
+        {
+            public string id;
+            public string type;
+            public BuildSceneInput[] scenes;
+        }
+
+        [Serializable]
+        private class BuildSceneInput
+        {
+            public string path;
+            public bool enabled;
+        }
+
+        [Serializable]
+        private class SceneManagementResult
+        {
+            public string commandId;
+            public bool success;
+            public string message;
+            public string activeScenePath;
+            public string activeSceneName;
+            public long timestamp;
+            public List<OpenSceneEntry> openScenes;
+            public List<BuildSceneEntry> buildScenes;
+        }
+
+        [Serializable]
+        private class OpenSceneEntry
+        {
+            public int handle;
+            public string name;
+            public string path;
+            public string guid;
+            public bool isLoaded;
+            public bool isDirty;
+            public bool isActive;
+            public int buildIndex;
+            public int rootCount;
+        }
+
+        [Serializable]
+        private class BuildSceneEntry
+        {
+            public int index;
+            public string path;
+            public string guid;
+            public bool enabled;
         }
 
         [Serializable]

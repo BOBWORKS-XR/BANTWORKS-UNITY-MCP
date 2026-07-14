@@ -15,6 +15,7 @@ With `UNITY_PROJECT_PATH` set to a Unity project root, the bridge uses:
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
 | `.bantworks-mcp/state/asset-search-results/*.json` | Unity to MCP | Correlated AssetDatabase query results |
 | `.bantworks-mcp/state/test-runs/*.json` | Unity to MCP | Persisted Test Runner state and bounded case results |
+| `.bantworks-mcp/state/scene-results/*.json` | Unity to MCP | Correlated open-scene and build-settings results |
 
 The bridge directory is project-local and ignored by Git through its own `.gitignore` file.
 
@@ -122,6 +123,24 @@ reload. A call may stop waiting while the Unity job continues; use
 `get_unity_test_run` with the returned run ID. Per-case retention is bounded, old
 runs are pruned, and a zero-test run reports `noTests: true` and
 `testsPassed: false` rather than silently passing.
+
+## Scene Lifecycle and Build Settings
+
+`get_unity_scenes` returns every open scene plus the complete ordered
+`EditorBuildSettings.scenes` list. Results include active and dirty state, scene
+handles, asset GUIDs, build indices, and enabled flags.
+
+`save_unity_scene` saves the active scene or an identified open scene without an
+Editor dialog. Save As paths must remain under an existing `Assets/` folder, and
+an existing different scene is protected unless `overwrite=true`.
+
+`open_unity_scene` accepts Single or Additive mode. A Single-mode load fails if
+it would discard dirty scenes. `saveModifiedScenes=true` saves scenes that already
+have asset paths first; untitled scenes still require an explicit Save As.
+
+`set_unity_build_scenes` replaces the ordered build list. The bridge validates
+the entire bounded list, rejects duplicates and missing scene assets, and leaves
+the previous build settings untouched when preflight fails.
 
 ## Health Check
 

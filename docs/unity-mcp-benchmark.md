@@ -41,6 +41,7 @@ Strong today:
 - typed, validated inspector writes with legacy command compatibility;
 - domain-reload-aware Play Mode control and correlated PNG capture;
 - filtered Edit Mode and Play Mode Test Runner execution with persisted results;
+- fail-closed scene save/load workflows and preflighted build settings;
 - read-only package inventory and bounded AssetDatabase search;
 - Codex and Claude Code launcher configuration;
 - focused scene, component, prefab, bounds, console, and import tools;
@@ -73,8 +74,8 @@ Gaps that block a leadership claim:
 2. **Partial:** filtered Unity Test Runner execution, reload recovery, bounded
    case results, and status polling are complete; discovery and cancellation remain.
 3. **Complete:** Game camera and Scene View screenshots with correlated result files and MCP image output.
-4. **Partial:** AssetDatabase search and package inventory are complete; scene
-   save/load and build settings remain.
+4. **Complete:** AssetDatabase search, package inventory, scene save/load, and
+   ordered build settings with full preflight.
 5. **Pending:** stable project instance IDs and explicit per-session routing.
 
 ### P1 - Banter Advantage

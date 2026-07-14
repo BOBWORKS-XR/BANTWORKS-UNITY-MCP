@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isValidUnityTestRunId, playModeStateMatches, registerTools } from "../dist/tools/index.js";
+import {
+  isValidUnityTestRunId,
+  normalizeUnitySceneAssetPath,
+  playModeStateMatches,
+  registerTools,
+} from "../dist/tools/index.js";
 
 const tools = new Map(registerTools().map((tool) => [tool.name, tool]));
 
@@ -94,4 +99,20 @@ test("Unity Test Runner tools expose bounded filters and safe run IDs", () => {
   assert.deepEqual(status?.required, ["runId"]);
   assert.equal(isValidUnityTestRunId("2a2aa2d2-10ef-41c7-b852-fbc43a95f30c"), true);
   assert.equal(isValidUnityTestRunId("../outside"), false);
+});
+
+test("scene lifecycle tools expose explicit dirty-scene and build-list contracts", () => {
+  const open = tools.get("open_unity_scene")?.inputSchema;
+  assert.deepEqual(open?.properties.mode.enum, ["single", "additive"]);
+  assert.equal(open?.properties.saveModifiedScenes.default, false);
+  assert.deepEqual(open?.required, ["scenePath"]);
+
+  const build = tools.get("set_unity_build_scenes")?.inputSchema;
+  assert.equal(build?.properties.scenes.maxItems, 500);
+  assert.deepEqual(build?.properties.scenes.items.required, ["path", "enabled"]);
+
+  assert.equal(normalizeUnitySceneAssetPath("Assets/Scenes/Main.unity"), "Assets/Scenes/Main.unity");
+  assert.equal(normalizeUnitySceneAssetPath("Assets\\Scenes\\Main.unity"), "Assets/Scenes/Main.unity");
+  assert.equal(normalizeUnitySceneAssetPath("Assets/../Outside.unity"), undefined);
+  assert.equal(normalizeUnitySceneAssetPath("Packages/demo.unity"), undefined);
 });

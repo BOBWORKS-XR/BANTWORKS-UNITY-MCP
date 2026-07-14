@@ -332,6 +332,96 @@ Use this after a long test call returns status=running. This tool does not start
     },
 
     {
+      name: "get_unity_scenes",
+      description: `Read Unity's open scenes and ordered Editor build settings.
+Returns active/open scene paths, GUIDs, dirty state, handles, build indices, and enabled build scenes. Requires a running Unity Editor with BanterMCPBridge installed.`,
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+
+    {
+      name: "save_unity_scene",
+      description: `Save an open Unity scene without opening a dialog.
+Defaults to the active scene. Use scenePath to select another open scene or saveAsPath for an existing Assets/... folder. Existing scene assets are not replaced unless overwrite=true.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          scenePath: {
+            type: "string",
+            description: "Optional open Assets/.../*.unity scene; defaults to the active scene",
+          },
+          saveAsPath: {
+            type: "string",
+            description: "Optional new Assets/.../*.unity path in an existing folder",
+          },
+          overwrite: {
+            type: "boolean",
+            default: false,
+            description: "Allow saveAsPath to replace a different existing scene asset",
+          },
+        },
+      },
+    },
+
+    {
+      name: "open_unity_scene",
+      description: `Open a Unity scene in Single or Additive mode.
+Single mode fails rather than discarding dirty scenes. Set saveModifiedScenes=true to save already-named dirty scenes first; untitled scenes must be saved explicitly.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          scenePath: {
+            type: "string",
+            description: "Existing Assets/.../*.unity scene asset",
+          },
+          mode: {
+            type: "string",
+            enum: ["single", "additive"],
+            default: "single",
+            description: "How Unity opens the scene",
+          },
+          saveModifiedScenes: {
+            type: "boolean",
+            default: false,
+            description: "Save named dirty scenes before Single mode unloads them",
+          },
+          setActive: {
+            type: "boolean",
+            description: "Make the opened scene active; defaults true for Single and false for Additive",
+          },
+        },
+        required: ["scenePath"],
+      },
+    },
+
+    {
+      name: "set_unity_build_scenes",
+      description: `Replace Unity Editor build scenes with an explicit ordered list.
+Every path is preflighted as an existing Assets/.../*.unity asset and duplicate paths fail before ProjectSettings are changed. Read get_unity_scenes first when preserving existing entries.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          scenes: {
+            type: "array",
+            maxItems: 500,
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                enabled: { type: "boolean" },
+              },
+              required: ["path", "enabled"],
+            },
+            description: "Complete ordered build scene list; an empty list clears build settings",
+          },
+        },
+        required: ["scenes"],
+      },
+    },
+
+    {
       name: "query_project_state",
       description: `Query the current Unity project state.
 Returns scene hierarchy, components, and other project information.
@@ -1022,6 +1112,36 @@ export async function handleToolCall(
       result = getUnityTestRun(args.runId as string, config);
       break;
 
+    case "get_unity_scenes":
+      result = await executeUnitySceneCommand({ type: "get_scenes" }, config);
+      break;
+
+    case "save_unity_scene":
+      result = await saveUnityScene(
+        args.scenePath as string | undefined,
+        args.saveAsPath as string | undefined,
+        args.overwrite as boolean | undefined,
+        config
+      );
+      break;
+
+    case "open_unity_scene":
+      result = await openUnityScene(
+        args.scenePath as string,
+        args.mode as UnitySceneOpenMode | undefined,
+        args.saveModifiedScenes as boolean | undefined,
+        args.setActive as boolean | undefined,
+        config
+      );
+      break;
+
+    case "set_unity_build_scenes":
+      result = await setUnityBuildScenes(
+        args.scenes as UnityBuildSceneInput[],
+        config
+      );
+      break;
+
     case "check_import_status":
       result = await checkImportStatus(
         args.assetPath as string | undefined,
@@ -1700,6 +1820,157 @@ function consumeLateBridgeAcknowledgement(commandId: string, config: BanterMCPCo
   }
 
   return undefined;
+}
+
+type UnitySceneOpenMode = "single" | "additive";
+
+interface UnityBuildSceneInput {
+  path: string;
+  enabled: boolean;
+}
+
+async function saveUnityScene(
+  scenePath: string | undefined,
+  saveAsPath: string | undefined,
+  overwrite: boolean | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const normalizedScenePath = scenePath === undefined
+    ? undefined
+    : normalizeUnitySceneAssetPath(scenePath);
+  const normalizedSaveAsPath = saveAsPath === undefined
+    ? undefined
+    : normalizeUnitySceneAssetPath(saveAsPath);
+  if (scenePath !== undefined && !normalizedScenePath) {
+    return { success: false, error: "scenePath must be an Assets/... path ending in .unity." };
+  }
+  if (saveAsPath !== undefined && !normalizedSaveAsPath) {
+    return { success: false, error: "saveAsPath must be an Assets/... path ending in .unity." };
+  }
+
+  return executeUnitySceneCommand({
+    type: "save_scene",
+    scenePath: normalizedScenePath ?? null,
+    saveAsPath: normalizedSaveAsPath ?? null,
+    overwrite: overwrite === true,
+  }, config);
+}
+
+async function openUnityScene(
+  scenePath: string,
+  requestedMode: UnitySceneOpenMode | undefined,
+  saveModifiedScenes: boolean | undefined,
+  requestedSetActive: boolean | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const normalizedScenePath = normalizeUnitySceneAssetPath(scenePath);
+  const mode = requestedMode ?? "single";
+  if (!normalizedScenePath) {
+    return { success: false, error: "scenePath must be an Assets/... path ending in .unity." };
+  }
+  if (!["single", "additive"].includes(mode)) {
+    return { success: false, error: `Unknown scene open mode: ${mode}` };
+  }
+
+  return executeUnitySceneCommand({
+    type: "open_scene",
+    scenePath: normalizedScenePath,
+    mode,
+    saveModifiedScenes: saveModifiedScenes === true,
+    setActive: requestedSetActive ?? mode === "single",
+  }, config);
+}
+
+async function setUnityBuildScenes(
+  scenes: UnityBuildSceneInput[],
+  config: BanterMCPConfig
+): Promise<unknown> {
+  if (!Array.isArray(scenes) || scenes.length > 500) {
+    return { success: false, error: "scenes must be an array with at most 500 entries." };
+  }
+
+  const normalizedScenes: UnityBuildSceneInput[] = [];
+  const seen = new Set<string>();
+  for (const scene of scenes) {
+    const normalizedPath = normalizeUnitySceneAssetPath(scene?.path);
+    if (!normalizedPath || typeof scene?.enabled !== "boolean") {
+      return { success: false, error: "Each build scene requires a valid Assets/.../*.unity path and boolean enabled value." };
+    }
+    const duplicateKey = normalizedPath.toLowerCase();
+    if (seen.has(duplicateKey)) {
+      return { success: false, error: `Duplicate build scene path: ${normalizedPath}` };
+    }
+    seen.add(duplicateKey);
+    normalizedScenes.push({ path: normalizedPath, enabled: scene.enabled });
+  }
+
+  return executeUnitySceneCommand({
+    type: "set_build_scenes",
+    scenes: normalizedScenes,
+  }, config);
+}
+
+export function normalizeUnitySceneAssetPath(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 1024) {
+    return undefined;
+  }
+
+  const normalized = path.posix.normalize(value.replace(/\\/g, "/").trim());
+  if (!normalized.startsWith("Assets/") || !normalized.toLowerCase().endsWith(".unity")) {
+    return undefined;
+  }
+  return normalized;
+}
+
+async function executeUnitySceneCommand(
+  command: Record<string, unknown>,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const result = await sendUnityCommand(command, config);
+  if (!result.success || !result.commandId) {
+    return result;
+  }
+
+  const resultPath = path.join(config.mcpStatePath, "scene-results", `${result.commandId}.json`);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 30000) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const sceneResult = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
+        if (sceneResult.commandId === result.commandId) {
+          fs.unlinkSync(resultPath);
+          return sceneResult;
+        }
+      } catch {
+        // The bridge may still be atomically publishing the result.
+      }
+    }
+
+    if (!result.completed) {
+      const bridgeFailure = consumeLateBridgeAcknowledgement(result.commandId, config);
+      if (bridgeFailure) {
+        return bridgeFailure;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  if (!result.completed && fs.existsSync(path.join(config.mcpCommandsPath, `${result.commandId}.json`))) {
+    return {
+      success: true,
+      commandId: result.commandId,
+      status: "queued",
+      message: "Unity has not processed this scene command yet.",
+    };
+  }
+
+  return {
+    success: false,
+    commandId: result.commandId,
+    status: "result_timeout",
+    error: "Unity acknowledged the scene command but its correlated scene result was not available.",
+  };
 }
 
 interface UnityCommandResult {
