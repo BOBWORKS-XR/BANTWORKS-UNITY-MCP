@@ -48,13 +48,17 @@ Strong today:
 - Codex and Claude Code launcher configuration;
 - focused scene, component, prefab, bounds, console, and import tools;
 - read-only bridge health diagnostics;
-- Banter component, JavaScript, and Visual Scripting resources; and
+- Banter component, JavaScript, and Visual Scripting resources;
+- evidence-linked Banter workflows for synced objects, interaction, UI, audio,
+  networking, and WebRoot behavior, with catalogue/tool drift tests; and
 - captured Banter custom-node defaults, source hashes, selected-package
   provenance/coverage, fail-closed graph generation/validation/writes, and
   correlated Unity import/deserialization diagnostics.
 
 Gaps that block a leadership claim:
 
+- the bridge cannot yet assign project asset references to serialized component
+  fields, so a newly written ScriptGraphAsset cannot be attached automatically;
 - Banter graph output lacks a committed Banter-package import/open fixture suite; and
 - Unity-side smoke testing is not yet automated in CI.
 
@@ -103,8 +107,9 @@ its public cancellation API.
 4. **Complete:** `validate_banter_visual_scripting` invokes the SDK's public
    validator reflectively and returns bounded structured diagnostics. Positive
    and deliberately forbidden custom-unit fixtures verified both paths.
-5. Add focused Banter workflows for synced objects, interaction, UI, audio,
-   networking, and WebRoot behavior.
+5. **Complete:** add focused Banter workflows for synced objects, interaction,
+   UI, audio, networking, and WebRoot behavior, with implementation-surface
+   selection, validation gates, and catalogue/tool drift tests.
 
 ### P2 - Distribution and Scale
 

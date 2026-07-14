@@ -14,6 +14,7 @@ import { VS_GRAPH_INSTRUCTIONS } from "./vs-graph-instructions.js";
 import { UNITY_VS_JSON_MANUAL } from "./unity-vs-json-manual.js";
 import { UNITY_VS_JSON_ERRATA } from "./unity-vs-json-errata.js";
 import { BANTER_SDK_COMPATIBILITY } from "./banter-sdk-compatibility.js";
+import { BANTER_WORKFLOW_CONTRACT, BANTER_WORKFLOWS } from "./banter-workflows.js";
 import {
   ALWAYS_AVAILABLE_TOOLS,
   TOOL_GROUP_MEMBERSHIP,
@@ -50,10 +51,11 @@ invent an equivalent write path.
 
 When the user asks for something in their scene:
 
-1. **Query first** - Use \`query_project_state\` to see what exists
-2. **Create/modify** - Use your tools to make changes directly
-3. **Verify** - Use \`check_import_status\` or \`get_console_logs\` to confirm
-4. **Report** - Tell the user what you created/changed
+1. **Choose a contract** - Read \`banter://workflows\` for synced objects, interaction, UI, audio, networking, or WebRoot work
+2. **Query first** - Use \`get_bridge_status\`, \`get_banter_sdk_info\`, and \`query_project_state\`
+3. **Create/modify** - Use the smallest applicable implementation path
+4. **Verify** - Apply the workflow's import, SDK, console, and runtime gates
+5. **Report** - Give stable target IDs, exact changes, validation evidence, and remaining runtime tests
 
 ## Available Actions
 
@@ -88,7 +90,9 @@ Good: *Creates a sphere with position [0,1,0], creates a VS graph with OnGrab/On
 - BanterGrababble for VR interaction
 - A Visual Scripting graph that changes color when grabbed
 
-The ball is ready in your scene. Try grabbing it in VR!"
+The graph imported and passed Banter validation. I also verified whether its
+ScriptMachine reference is attached; if it is not, I report that remaining
+step instead of calling the interaction ready."
 
 **User: "Make it bigger"**
 
@@ -103,6 +107,7 @@ Good: *Uses modify_gameobject to set scale [2, 2, 2]*
 - Don't ask permission for simple changes
 - Create first, then explain what you created
 - Be specific about what you did ("created at position X" not "you could create")
+- Writing a ScriptGraphAsset does not attach it to a ScriptMachine; verify the reference or report the graph as unattached
 - Check your work with status/console tools
 - If something fails, fix it and try again
 
@@ -145,6 +150,12 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
       uri: "banter://tool-groups",
       name: "BANTWORKS Tool Groups",
       description: "Capability-group names, exact tool membership, presets, and filtering behavior",
+      mimeType: "application/json",
+    },
+    {
+      uri: "banter://workflows",
+      name: "Banter Workflow Contracts",
+      description: "Evidence-linked workflows for synced objects, interaction, UI, audio, networking, and WebRoot",
       mimeType: "application/json",
     },
     {
@@ -271,11 +282,18 @@ export function handleResourceRead(
         launcherProfiles: {
           full: "all",
           inspection: "read",
-          banterWorkflow: "read,banter",
+          banterWorkflow: "read,author,banter",
           unityAuthoring: "read,author",
           testing: "read,test",
           minimalRouting: "none",
         },
+      }, null, 2);
+      break;
+
+    case "banter://workflows":
+      content = JSON.stringify({
+        contract: BANTER_WORKFLOW_CONTRACT,
+        workflows: BANTER_WORKFLOWS,
       }, null, 2);
       break;
 

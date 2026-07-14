@@ -10,7 +10,7 @@ CI rows are enforced by the repository workflow.
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Node.js 18, 20, 22 | CI target | TypeScript build, 32 server tests, standalone esbuild bundle, and isolated no-`node_modules` smoke |
+| Node.js 18, 20, 22 | CI target | TypeScript build, 42 server tests, standalone esbuild bundle, and isolated no-`node_modules` smoke |
 | Codex desktop/CLI | Supported configuration | Launcher and `setup.ps1` write stdio configuration, project environment, 20-second startup timeout, and 600-second tool timeout |
 | Claude Code/Desktop | Supported configuration | Launcher and `setup.ps1` write the same stdio server and selected project environment |
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |

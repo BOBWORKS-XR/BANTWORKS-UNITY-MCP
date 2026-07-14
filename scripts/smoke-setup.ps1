@@ -52,14 +52,14 @@ try {
     $codexConfig = Get-Content (Join-Path $CodexDir "config.toml") -Raw
     if ($codexConfig -notmatch 'model = "existing"' -or
         $codexConfig -notmatch '\[mcp_servers\.banter\]' -or
-        $codexConfig -notmatch 'BANTWORKS_TOOL_GROUPS = "read,banter"') {
+        $codexConfig -notmatch 'BANTWORKS_TOOL_GROUPS = "read,author,banter"') {
         throw "Existing Codex configuration was not preserved and updated"
     }
 
     $claudeConfig = Get-Content (Join-Path $UserProfile ".claude.json") -Raw | ConvertFrom-Json
     if ($claudeConfig.keep -ne $true -or
         $null -eq $claudeConfig.mcpServers.other -or
-        $claudeConfig.mcpServers.banter.env.BANTWORKS_TOOL_GROUPS -ne "read,banter") {
+        $claudeConfig.mcpServers.banter.env.BANTWORKS_TOOL_GROUPS -ne "read,author,banter") {
         throw "Existing Claude configuration was not preserved and updated"
     }
 

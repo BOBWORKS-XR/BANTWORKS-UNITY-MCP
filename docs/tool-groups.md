@@ -26,7 +26,7 @@ silently starting with broader access.
 |---------|-------|
 | Full Unity + Banter | `all` |
 | Inspection | `read` |
-| Banter workflow | `read,banter` |
+| Banter workflow | `read,author,banter` |
 | Unity authoring | `read,author` |
 | Testing | `read,test` |
 | Minimal routing | `none` |
@@ -35,3 +35,8 @@ The Windows launcher and `setup.ps1` write the selected value to both Codex and
 Claude configuration. Other MCP clients can set the environment variable
 directly. `banter://tool-groups` returns the exact machine-readable membership
 from the running server build.
+
+The Banter workflow preset includes `author` because component setup and scene
+changes use the generic Unity authoring tools. A narrower `read,banter` custom
+selection remains useful for graph/WebRoot work that does not modify scene
+objects.

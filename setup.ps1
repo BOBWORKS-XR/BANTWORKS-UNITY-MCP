@@ -289,7 +289,7 @@ function Set-CapabilityProfile {
     $profiles = @{
         "1" = "all"
         "2" = "read"
-        "3" = "read,banter"
+        "3" = "read,author,banter"
         "4" = "read,author"
         "5" = "read,test"
         "6" = "none"

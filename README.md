@@ -18,6 +18,7 @@ The repository is intentionally generic. It contains no project-specific gamepla
 - **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
 - **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files using the bundled Unity Visual Scripting JSON manual and source-observed errata
 - **Banter Validation**: Invoke the selected SDK's own Visual Scripting allow-list validator and return bounded, structured diagnostics
+- **Evidence-Linked Banter Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
 - **Unity Integration**: Query project state, check import status, refresh assets
 - **Closed-Loop Workflow**: Validate → Write → Import and deserialize in Unity → Test
@@ -139,6 +140,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `banter://components` | 63 source-checked public scene components plus the `BanterObjectId` runtime helper |
 | `banter://sdk-compatibility` | Catalogue hashes, observed package profiles, and interpretation limits |
 | `banter://tool-groups` | Exact capability-group membership, special values, and launcher presets |
+| `banter://workflows` | Evidence-linked execution contracts for six focused Banter domains |
 | `banter://vs-nodes` | Hand-authored Banter node reference with port notes |
 | `banter://custom-vs-nodes` | Exact catalogue of 162 custom Banter node types extracted from a real graph asset |
 | `banter://custom-vs-node-log` | Markdown log with every captured custom node, category, and serialized default |
@@ -183,11 +185,15 @@ The complete command transport, identity, and inspector-value contract is docume
 
 | Prompt | Description |
 |--------|-------------|
-| `create_interactive_object` | Guide for making grabbable VR objects |
-| `create_vs_graph` | Step-by-step VS graph creation |
-| `banter_best_practices` | Development best practices |
-| `debug_vs_graph` | Help fix VS graph issues |
-| `multiplayer_sync` | Multiplayer synchronization guide |
+| `banter_workflow` | Execute one of the six evidence-linked workflow domains |
+| `banter_*_workflow` | Focused synced-object, interaction, UI, audio, networking, and WebRoot prompts |
+| `create_interactive_object` | Route object creation through the interaction contract |
+| `create_vs_graph` | Create a graph with server, Unity import, and SDK validation gates |
+| `debug_vs_graph` | Diagnose a graph through the same validation stack |
+| `multiplayer_sync` | Classify work as object sync, transient messaging, or persistent state |
+| `banter_best_practices` | Apply the source-checked workflow contract |
+
+See [docs/banter-workflows.md](docs/banter-workflows.md) for the workflow and completion gates.
 
 ## Example Workflow
 
