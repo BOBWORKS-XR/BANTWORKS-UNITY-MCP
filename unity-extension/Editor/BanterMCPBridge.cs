@@ -2747,10 +2747,30 @@ namespace BantworksMCP
 
                 string json = JsonUtility.ToJson(state, true);
                 WriteAtomicText(Path.Combine(StateFolder, "editor-state.json"), json);
+                ExportProjectInstance();
             }
             catch (Exception e)
             {
                 Debug.LogError($"[BANTWORKS MCP] Error exporting editor state: {e.Message}");
+            }
+        }
+
+        private static void ExportProjectInstance()
+        {
+            using (var process = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                DateTime processStart = process.StartTime.ToUniversalTime();
+                var instance = new ProjectInstanceState
+                {
+                    editorInstanceId = process.Id + "-" + processStart.Ticks.ToString("x16", CultureInfo.InvariantCulture),
+                    projectPath = ProjectRoot,
+                    projectName = Path.GetFileName(ProjectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                    unityVersion = Application.unityVersion,
+                    processId = process.Id,
+                    processStartedAt = new DateTimeOffset(processStart).ToUnixTimeMilliseconds(),
+                    updatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                WriteAtomicText(Path.Combine(StateFolder, "project-instance.json"), JsonUtility.ToJson(instance, true));
             }
         }
 
@@ -3560,6 +3580,18 @@ namespace BantworksMCP
             public bool hasErrors;
             public string errorMessage;
             public long timestamp;
+        }
+
+        [Serializable]
+        private class ProjectInstanceState
+        {
+            public string editorInstanceId;
+            public string projectPath;
+            public string projectName;
+            public string unityVersion;
+            public int processId;
+            public long processStartedAt;
+            public long updatedAt;
         }
 
         [Serializable]

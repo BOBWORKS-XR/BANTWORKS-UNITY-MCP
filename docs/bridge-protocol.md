@@ -4,12 +4,13 @@ BANTWORKS MCP uses a local, project-scoped file bridge. It does not open an HTTP
 
 ## Locations
 
-With `UNITY_PROJECT_PATH` set to a Unity project root, the bridge uses:
+With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the bridge uses:
 
 | Location | Direction | Purpose |
 |----------|-----------|---------|
 | `.bantworks-mcp/commands/*.json` | MCP to Unity | Scene, prefab, refresh, and state-export requests |
 | `.bantworks-mcp/state/*.json` | Unity to MCP | Hierarchy, editor state, console, import status, and prefab catalogue |
+| `.bantworks-mcp/state/project-instance.json` | Unity to MCP | Live editor process identity and heartbeat |
 | `.bantworks-mcp/state/command-results/*.json` | Unity to MCP | Per-command acknowledgement or failure |
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
@@ -26,6 +27,23 @@ The MCP server and Unity bridge publish JSON by writing a temporary file in the 
 Each mutating command receives a UUID. Unity writes an acknowledgement under that UUID, and bounds queries use the same UUID for their result file. This prevents one request from consuming a concurrent request's result.
 
 State-export requests also receive unique filenames, so simultaneous `query_project_state` calls do not overwrite each other before Unity reads them.
+
+## Project Routing
+
+`list_unity_projects` combines the initial `UNITY_PROJECT_PATH` with enabled or
+disabled launcher channels, deduplicates canonical project paths, and assigns a
+stable `unity-<hash>` route ID derived from each canonical path. It reports
+project validity, bridge installation, state freshness, launcher metadata, and
+the live editor identity when available.
+
+`select_unity_project` changes only the current MCP server session. It does not
+rewrite launcher, Codex, or Claude configuration. Every request receives an
+immutable snapshot of the selected project paths, so a concurrent route change
+cannot redirect an in-flight command or result poll.
+
+The Unity bridge updates `project-instance.json` with process ID, process start,
+Unity version, and a process-stable editor instance ID. That ID survives script
+and Play Mode domain reloads but changes when the Unity editor process restarts.
 
 ## Stable Object Identity
 
@@ -146,7 +164,7 @@ the previous build settings untouched when preflight fails.
 
 `get_bridge_status` is read-only. It reports:
 
-- whether `UNITY_PROJECT_PATH` points to a Unity project;
+- whether the currently selected route points to a Unity project;
 - whether `Assets/Editor/BanterMCPBridge.cs` is installed;
 - whether the bridge state and command directories exist;
 - which exported state files exist and their age; and

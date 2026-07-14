@@ -42,6 +42,7 @@ Strong today:
 - domain-reload-aware Play Mode control and correlated PNG capture;
 - filtered Edit Mode and Play Mode Test Runner execution with persisted results;
 - fail-closed scene save/load workflows and preflighted build settings;
+- session-local multi-project routing with live editor instance identity;
 - read-only package inventory and bounded AssetDatabase search;
 - Codex and Claude Code launcher configuration;
 - focused scene, component, prefab, bounds, console, and import tools;
@@ -52,7 +53,6 @@ Strong today:
 Gaps that block a leadership claim:
 
 - no first-class Test Runner discovery tree or cancellation workflow;
-- no session-level routing across multiple open Unity projects;
 - Banter graph output lacks a committed Unity import/open fixture suite; and
 - Unity-side smoke testing is still manual.
 
@@ -76,7 +76,8 @@ Gaps that block a leadership claim:
 3. **Complete:** Game camera and Scene View screenshots with correlated result files and MCP image output.
 4. **Complete:** AssetDatabase search, package inventory, scene save/load, and
    ordered build settings with full preflight.
-5. **Pending:** stable project instance IDs and explicit per-session routing.
+5. **Complete:** stable path-derived project IDs, process-stable editor instance
+   heartbeats, and explicit per-session routing with per-request config snapshots.
 
 ### P1 - Banter Advantage
 

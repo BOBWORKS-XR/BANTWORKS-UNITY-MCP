@@ -24,8 +24,9 @@ import { registerTools, handleToolCall } from "./tools/index.js";
 import { registerResources, handleResourceRead } from "./resources/index.js";
 import { registerPrompts, handlePromptGet } from "./prompts/index.js";
 import { getConfig } from "./lib/config.js";
+import { UnityProjectRouter } from "./lib/project-router.js";
 
-const config = getConfig();
+const projectRouter = new UnityProjectRouter(getConfig());
 
 // Create MCP server
 const server = new Server(
@@ -49,17 +50,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  return handleToolCall(request.params.name, request.params.arguments ?? {}, config);
+  const requestConfig = projectRouter.getActiveConfig();
+  return handleToolCall(request.params.name, request.params.arguments ?? {}, requestConfig, projectRouter);
 });
 
 // List available resources
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
-  return { resources: registerResources(config) };
+  return { resources: registerResources(projectRouter.getActiveConfig()) };
 });
 
 // Read resource content
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  return handleResourceRead(request.params.uri, config);
+  return handleResourceRead(request.params.uri, projectRouter.getActiveConfig());
 });
 
 // List available prompts

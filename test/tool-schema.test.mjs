@@ -15,6 +15,15 @@ test("tool names are unique", () => {
   assert.equal(new Set(names).size, names.length);
 });
 
+test("project routing exposes stable explicit session selection", () => {
+  const list = tools.get("list_unity_projects")?.inputSchema;
+  assert.ok(list);
+
+  const select = tools.get("select_unity_project")?.inputSchema;
+  assert.deepEqual(select?.required, ["projectId"]);
+  assert.equal(select?.properties.projectId.pattern, "^unity-[a-f0-9]{20}$");
+});
+
 test("scene tools expose stable ID selectors with path compatibility", () => {
   for (const name of ["delete_gameobject", "modify_gameobject", "add_component", "get_object_bounds"]) {
     const schema = tools.get(name)?.inputSchema;

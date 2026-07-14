@@ -15,6 +15,7 @@ import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
 import { getUnityPackages } from "./get-unity-packages.js";
 import { atomicWriteFileSync } from "../lib/files.js";
+import type { UnityProjectRouter } from "../lib/project-router.js";
 
 interface Tool {
   name: string;
@@ -190,6 +191,33 @@ Use BS.* API for all Banter functionality.`,
     },
 
     // Project State Tools
+    {
+      name: "list_unity_projects",
+      description: `List Unity projects available to this MCP session from UNITY_PROJECT_PATH and BANTWORKS launcher channels.
+Returns stable path-derived project IDs, bridge installation, live/stale Editor state, and editor process identity. This tool does not change the active project.`,
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+
+    {
+      name: "select_unity_project",
+      description: `Select a listed Unity project for subsequent tools and project resources in this MCP session.
+In-flight calls retain their original project snapshot. This does not rewrite launcher, Codex, or Claude configuration.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: {
+            type: "string",
+            pattern: "^unity-[a-f0-9]{20}$",
+            description: "Stable project ID from list_unity_projects",
+          },
+        },
+        required: ["projectId"],
+      },
+    },
+
     {
       name: "get_bridge_status",
       description: `Inspect BANTWORKS MCP bridge health without modifying the project.
@@ -1029,7 +1057,8 @@ Returns:
 export async function handleToolCall(
   name: string,
   args: Record<string, unknown>,
-  config: BanterMCPConfig
+  config: BanterMCPConfig,
+  projectRouter?: UnityProjectRouter
 ): Promise<{ content: Array<ToolTextContent | ToolImageContent> }> {
   let result: unknown;
 
@@ -1071,6 +1100,18 @@ export async function handleToolCall(
         args.filter as string | undefined,
         config
       );
+      break;
+
+    case "list_unity_projects":
+      result = projectRouter
+        ? projectRouter.listProjects()
+        : { success: false, error: "Project routing is not available in this server context." };
+      break;
+
+    case "select_unity_project":
+      result = projectRouter
+        ? projectRouter.selectProject(args.projectId as string)
+        : { success: false, error: "Project routing is not available in this server context." };
       break;
 
     case "get_bridge_status":

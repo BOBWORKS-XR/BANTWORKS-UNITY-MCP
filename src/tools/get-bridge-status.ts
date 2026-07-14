@@ -9,6 +9,7 @@ import type { BanterMCPConfig } from "../lib/config.js";
 const STATE_FILES = [
   "scene-hierarchy.json",
   "editor-state.json",
+  "project-instance.json",
   "console-log.json",
   "import-status.json",
   "prefab-catalog.json",
@@ -26,6 +27,7 @@ export interface BridgeStatusResult {
   ready?: boolean;
   error?: string;
   project?: {
+    id?: string;
     path: string;
     exists: boolean;
     assetsPath: string;
@@ -107,6 +109,7 @@ export function getBridgeStatus(config: BanterMCPConfig): BridgeStatusResult {
     success: true,
     ready,
     project: {
+      id: config.projectId,
       path: config.unityProjectPath,
       exists: projectExists,
       assetsPath: config.assetsPath,

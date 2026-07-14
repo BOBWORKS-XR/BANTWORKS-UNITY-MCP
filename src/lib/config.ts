@@ -6,6 +6,8 @@ import * as fs from "fs";
 import * as path from "path";
 
 export interface BanterMCPConfig {
+  /** Stable path-derived project route ID */
+  projectId?: string;
   /** Path to the Unity project root */
   unityProjectPath: string;
   /** Path to the MCP state directory within Unity project */
@@ -26,6 +28,13 @@ export interface BanterMCPConfig {
 export function getConfig(): BanterMCPConfig {
   const unityProjectPath = process.env.UNITY_PROJECT_PATH || process.env.BANTER_PROJECT_PATH || "";
 
+  return createConfigForProject(unityProjectPath);
+}
+
+/**
+ * Build an immutable per-request configuration for one Unity project.
+ */
+export function createConfigForProject(unityProjectPath: string, projectId?: string): BanterMCPConfig {
   const assetsPath = path.join(unityProjectPath, "Assets");
   const mcpRootPath = path.join(unityProjectPath, ".bantworks-mcp");
   const mcpStatePath = path.join(mcpRootPath, "state");
@@ -38,6 +47,7 @@ export function getConfig(): BanterMCPConfig {
     (fs.existsSync(unityBridgePath) || fs.existsSync(mcpStatePath));
 
   return {
+    projectId,
     unityProjectPath,
     mcpStatePath,
     mcpCommandsPath,

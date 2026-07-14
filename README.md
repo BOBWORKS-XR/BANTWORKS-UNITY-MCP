@@ -50,7 +50,7 @@ npm run build
 
 ### 2. Connect Codex or Claude Code
 
-Both clients launch the same MCP server. Set `UNITY_PROJECT_PATH` in the client configuration so the server knows which Unity project to inspect and modify.
+Both clients launch the same MCP server. Set `UNITY_PROJECT_PATH` to choose the initial project. When launcher channels exist, the server can also list and switch among them without restarting the MCP client.
 
 #### Codex
 
@@ -94,6 +94,8 @@ Restart the selected MCP client after changing its configuration.
 
 The BANTWORKS MCP launcher can manage multiple Unity scene channels and install the Unity bridge. Select a channel, then use **Apply to Codex** or **Apply to Claude Code**. With **Auto-configure Clients** enabled, changing the active channel updates both configurations.
 
+At runtime, call `list_unity_projects` and pass one of its stable IDs to `select_unity_project`. Selection affects subsequent calls in the current MCP session only; launcher and client configuration remain unchanged.
+
 `setup.ps1` offers the same workflow in PowerShell: use `[X] Apply to Codex` or `[C] Apply to Claude Code` after choosing an active project.
 
 ### 4. Install Unity Extension (Optional - for full feedback loop)
@@ -129,12 +131,13 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (32 focused actions available to MCP clients)
+### Tools (34 focused actions available to MCP clients)
 
 | Category | Tools |
 |----------|-------|
 | Visual Scripting | `generate_vs_graph`, `validate_vs_graph`, `write_vs_graph` |
 | Banter WebRoot | `write_webroot_js` |
+| Project routing | `list_unity_projects`, `select_unity_project` |
 | Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
 | Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot` |
 | Project and asset discovery | `get_unity_packages`, `search_unity_assets` |
@@ -151,6 +154,8 @@ Batch creation and prefab placement are preflighted and run as one Unity Undo tr
 Unity Test Framework runs support Edit Mode, Play Mode, exact names, regex groups, categories, and assembly filters. Results survive Play Mode domain reloads, remain queryable by run ID, and distinguish a completed runner operation from failed tests or a zero-test filter.
 
 Scene lifecycle tools expose open and build-scene state, save without dialogs, and support Single or Additive loading. Single-mode loads fail closed on dirty scenes unless saving is explicitly requested, and build settings are replaced only after every ordered scene entry passes preflight.
+
+Project routing deduplicates environment and launcher projects by canonical path, assigns stable path-derived IDs, and reports the live Unity editor process identity. Each tool call snapshots its selected project, so switching projects cannot redirect an already-running command.
 
 The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md).
 
@@ -238,7 +243,7 @@ No local-model host is bundled. Any local LLM client that supports stdio MCP can
 ## Troubleshooting
 
 ### "UNITY_PROJECT_PATH not set"
-Set the environment variable in the MCP client configuration. For a temporary PowerShell session:
+Set the environment variable in the MCP client configuration, or configure at least one enabled launcher channel. For a temporary PowerShell session:
 ```powershell
 $env:UNITY_PROJECT_PATH = "E:/unity/MyProject"
 ```
