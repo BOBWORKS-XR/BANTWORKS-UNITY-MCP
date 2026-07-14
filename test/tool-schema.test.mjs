@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   isValidUnityTestRunId,
+  normalizeUnityVisualScriptingAssetPath,
   normalizeUnitySceneAssetPath,
   playModeStateMatches,
   registerTools,
@@ -105,6 +106,19 @@ test("Visual Scripting write tools constrain asset names", () => {
     assert.equal(graphName.maxLength, 128);
     assert.ok(graphName.pattern);
   }
+
+  const unityValidation = tools.get("validate_vs_graph_in_unity")?.inputSchema;
+  assert.deepEqual(unityValidation?.required, ["assetPath"]);
+  assert.equal(unityValidation?.properties.assetPath.maxLength, 1024);
+  assert.equal(
+    normalizeUnityVisualScriptingAssetPath("Assets\\Graphs\\Respawn.asset"),
+    "Assets/Graphs/Respawn.asset"
+  );
+  assert.equal(normalizeUnityVisualScriptingAssetPath("Assets/../Outside.asset"), undefined);
+  assert.equal(normalizeUnityVisualScriptingAssetPath("Packages/Graph.asset"), undefined);
+
+  const banterValidation = tools.get("validate_banter_visual_scripting")?.inputSchema;
+  assert.deepEqual(banterValidation?.properties, {});
 });
 
 test("Unity Test Runner tools expose bounded filters and safe run IDs", () => {

@@ -207,6 +207,35 @@ Returns stable path-derived project IDs, bridge installation, live/stale Editor 
     },
 
     {
+      name: "validate_vs_graph_in_unity",
+      description: `Force Unity to import and deserialize a Visual Scripting Script Graph asset, then return its resolved graph type, element counts, element types, GUID, and dependency hash.
+This is the authoritative import check after write_vs_graph. It uses reflection so the bridge still compiles in projects without Visual Scripting, where the tool returns a clear validation failure.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: {
+            type: "string",
+            minLength: 14,
+            maxLength: 1024,
+            pattern: "^Assets/.+\\.asset$",
+            description: "Project-relative Script Graph path under Assets (for example, Assets/Graphs/Respawn.asset)",
+          },
+        },
+        required: ["assetPath"],
+      },
+    },
+
+    {
+      name: "validate_banter_visual_scripting",
+      description: `Run the selected Banter SDK's own Visual Scripting allow-list validator inside Unity.
+The SDK scans Script Graph and State Graph assets, embedded prefab graphs, and embedded graphs in the active scene. The bridge invokes the public validator through reflection, captures its [VisualScripting] diagnostics, and remains compilable in non-Banter projects. This is read-only apart from the SDK's AssetDatabase refresh and may take time in large projects.`,
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    },
+
+    {
       name: "select_unity_project",
       description: `Select a listed Unity project for subsequent tools and project resources in this MCP session.
 In-flight calls retain their original project snapshot. This does not rewrite launcher, Codex, or Claude configuration.`,
@@ -1171,6 +1200,14 @@ export async function handleToolCall(
       );
       break;
 
+    case "validate_vs_graph_in_unity":
+      result = await validateVSGraphInUnity(args.assetPath as string, config);
+      break;
+
+    case "validate_banter_visual_scripting":
+      result = await validateBanterVisualScripting(config);
+      break;
+
     case "list_unity_projects":
       result = projectRouter
         ? projectRouter.listProjects()
@@ -1791,6 +1828,115 @@ async function searchUnityAssets(
   };
 }
 
+async function validateVSGraphInUnity(
+  assetPath: string,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const normalizedPath = normalizeUnityVisualScriptingAssetPath(assetPath);
+  if (!normalizedPath) {
+    return { success: false, error: "assetPath must be an Assets/... path ending in .asset." };
+  }
+
+  const result = await sendUnityCommand({
+    type: "validate_vs_graph_asset",
+    assetPath: normalizedPath,
+  }, config);
+  if (!result.success || !result.commandId) {
+    return result;
+  }
+
+  const resultPath = path.join(config.mcpStatePath, "vs-validation-results", `${result.commandId}.json`);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 30000) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const validation = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
+        if (validation.commandId === result.commandId) {
+          fs.unlinkSync(resultPath);
+          return validation;
+        }
+      } catch {
+        // The bridge may still be atomically publishing the result.
+      }
+    }
+
+    if (!result.completed) {
+      const lateResult = consumeLateBridgeAcknowledgement(result.commandId, config);
+      if (lateResult) {
+        return {
+          ...lateResult,
+          assetPath: normalizedPath,
+        };
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return {
+    success: false,
+    commandId: result.commandId,
+    assetPath: normalizedPath,
+    error: "Timed out waiting for Unity's Visual Scripting graph validation result.",
+  };
+}
+
+export function normalizeUnityVisualScriptingAssetPath(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 1024) {
+    return undefined;
+  }
+
+  const normalized = path.posix.normalize(value.replace(/\\/g, "/").trim());
+  if (!normalized.startsWith("Assets/") || !normalized.toLowerCase().endsWith(".asset")) {
+    return undefined;
+  }
+  return normalized;
+}
+
+async function validateBanterVisualScripting(config: BanterMCPConfig): Promise<unknown> {
+  const result = await sendUnityCommand({
+    type: "validate_banter_visual_scripting",
+  }, config);
+  if (!result.success || !result.commandId) {
+    return result;
+  }
+
+  const resultPath = path.join(
+    config.mcpStatePath,
+    "banter-validation-results",
+    `${result.commandId}.json`
+  );
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 300000) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const validation = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
+        if (validation.commandId === result.commandId) {
+          fs.unlinkSync(resultPath);
+          return validation;
+        }
+      } catch {
+        // The bridge may still be atomically publishing the result.
+      }
+    }
+
+    if (!result.completed) {
+      const bridgeFailure = consumeLateBridgeAcknowledgement(result.commandId, config);
+      if (bridgeFailure) {
+        return bridgeFailure;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return {
+    success: false,
+    commandId: result.commandId,
+    error: "Timed out after 300000ms waiting for Banter's Visual Scripting validator.",
+  };
+}
+
 type UnityTestMode = "edit" | "play" | "all";
 
 async function discoverUnityTests(
@@ -1949,7 +2095,7 @@ async function runUnityTests(
     }
 
     if (!command.completed) {
-      const bridgeFailure = consumeLateBridgeAcknowledgement(command.commandId, config);
+      const bridgeFailure = consumeLateTestBridgeAcknowledgement(command.commandId, config);
       if (bridgeFailure) {
         return bridgeFailure;
       }
@@ -1979,7 +2125,7 @@ function getUnityTestRun(runId: string, config: BanterMCPConfig): unknown {
 
   const run = readUnityTestRun(runId, config);
   if (!run) {
-    const bridgeFailure = consumeLateBridgeAcknowledgement(runId, config);
+    const bridgeFailure = consumeLateTestBridgeAcknowledgement(runId, config);
     if (bridgeFailure) {
       return bridgeFailure;
     }
@@ -2032,9 +2178,8 @@ function consumeLateBridgeAcknowledgement(commandId: string, config: BanterMCPCo
       if (result.success === false) {
         return {
           success: false,
-          runId: commandId,
-          status: "failed",
-          error: result.error || "Unity failed to start the Test Runner job.",
+          commandId,
+          error: result.error || "Unity rejected the bridge command.",
         };
       }
     }
@@ -2043,6 +2188,22 @@ function consumeLateBridgeAcknowledgement(commandId: string, config: BanterMCPCo
   }
 
   return undefined;
+}
+
+function consumeLateTestBridgeAcknowledgement(
+  runId: string,
+  config: BanterMCPConfig
+): Record<string, unknown> | undefined {
+  const result = consumeLateBridgeAcknowledgement(runId, config);
+  if (!result) {
+    return undefined;
+  }
+
+  return {
+    ...result,
+    runId,
+    status: "failed",
+  };
 }
 
 type UnitySceneOpenMode = "single" | "additive";

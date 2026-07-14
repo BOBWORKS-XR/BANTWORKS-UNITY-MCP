@@ -47,9 +47,35 @@ export const BANTER_SDK_COMPATIBILITY = {
       matchedCatalogNodes: 162,
     },
   ],
+  observedUnityValidationProfiles: [
+    {
+      packageVersion: "3.2.2",
+      packageCacheFingerprint: "c893607975bb44f319445b533b421d184f6a5285",
+      unityVersion: "2022.3.39f1",
+      visualScriptingVersion: "1.9.4",
+      result: "package compilation failed",
+      evidence: [
+        "The package source references UnityEngine.PhysicsMaterial and PhysicsMaterialCombine, which are unavailable in this clean Unity 2022 project.",
+        "The package metadata declares Unity 2022.3.39f1, so metadata alone is not a sufficient compatibility guarantee for this fingerprint.",
+      ],
+    },
+    {
+      packageVersion: "3.2.2",
+      packageCacheFingerprint: "c893607975bb44f319445b533b421d184f6a5285",
+      unityVersion: "6000.3.2f1",
+      visualScriptingVersion: "1.9.9",
+      result: "passed",
+      evidence: [
+        "A BANTWORKS-generated Banter.VisualScripting.OnGrab graph imported with no missing elements.",
+        "Banter.SDKEditor.ValidateVisualScripting.CheckVsNodes returned true.",
+        "A disposable custom Unit imported successfully and produced Banter's exact forbidden-element diagnostics.",
+      ],
+    },
+  ],
   interpretation: [
     "Counts describe C# class presence in observed package source trees, not proof that every node imports or executes in a specific Unity project.",
     "Semantic version alone is not sufficient: observed git and registry builds with nearby versions contain different node sets.",
     "Use get_banter_sdk_info for the selected project's requested source, resolved package metadata, revision, and live source coverage.",
+    "Use validate_vs_graph_in_unity after writing a graph, then validate_banter_visual_scripting for the SDK's project-wide allow-list decision.",
   ],
 } as const;

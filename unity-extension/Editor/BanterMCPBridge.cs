@@ -32,6 +32,8 @@ namespace BantworksMCP
         private static readonly string BoundsResultsFolder = Path.Combine(StateFolder, "bounds-results");
         private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
         private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
+        private static readonly string VisualScriptingValidationResultsFolder = Path.Combine(StateFolder, "vs-validation-results");
+        private static readonly string BanterValidationResultsFolder = Path.Combine(StateFolder, "banter-validation-results");
         private static readonly string TestRunResultsFolder = Path.Combine(StateFolder, "test-runs");
         private static readonly string TestDiscoveryResultsFolder = Path.Combine(StateFolder, "test-discovery");
         private static readonly string SceneResultsFolder = Path.Combine(StateFolder, "scene-results");
@@ -127,6 +129,10 @@ namespace BantworksMCP
                 Directory.CreateDirectory(ScreenshotResultsFolder);
             if (!Directory.Exists(AssetSearchResultsFolder))
                 Directory.CreateDirectory(AssetSearchResultsFolder);
+            if (!Directory.Exists(VisualScriptingValidationResultsFolder))
+                Directory.CreateDirectory(VisualScriptingValidationResultsFolder);
+            if (!Directory.Exists(BanterValidationResultsFolder))
+                Directory.CreateDirectory(BanterValidationResultsFolder);
             if (!Directory.Exists(TestRunResultsFolder))
                 Directory.CreateDirectory(TestRunResultsFolder);
             if (!Directory.Exists(TestDiscoveryResultsFolder))
@@ -358,6 +364,16 @@ namespace BantworksMCP
                     var assetSearchCmd = JsonUtility.FromJson<AssetSearchCommand>(json);
                     SearchAssets(assetSearchCmd);
                     return $"Searched Unity assets: {assetSearchCmd.query}";
+
+                case "validate_vs_graph_asset":
+                    var validateGraphCmd = JsonUtility.FromJson<ValidateVSGraphAssetCommand>(json);
+                    ValidateVisualScriptingGraphAsset(validateGraphCmd);
+                    return $"Validated Visual Scripting graph asset: {validateGraphCmd.assetPath}";
+
+                case "validate_banter_visual_scripting":
+                    var validateBanterCmd = JsonUtility.FromJson<ValidateBanterVisualScriptingCommand>(json);
+                    ValidateBanterVisualScripting(validateBanterCmd);
+                    return "Ran Banter Visual Scripting validation";
 
                 case "run_tests":
                     var runTestsCmd = JsonUtility.FromJson<RunTestsCommand>(json);
@@ -763,6 +779,244 @@ namespace BantworksMCP
                 Path.Combine(AssetSearchResultsFolder, cmd.id + ".json"),
                 JsonUtility.ToJson(result, true));
             DeleteOldFiles(AssetSearchResultsFolder, "*.json", 50);
+        }
+
+        private static void ValidateVisualScriptingGraphAsset(ValidateVSGraphAssetCommand cmd)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Visual Scripting validation requires a safe correlation ID");
+
+            var result = new VSGraphAssetValidationResult
+            {
+                commandId = cmd.id,
+                success = false,
+                assetPath = cmd.assetPath,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                elementTypes = new List<string>(),
+                warnings = new List<string>()
+            };
+
+            try
+            {
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                    throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle.");
+
+                string assetPath = NormalizeVisualScriptingAssetPath(cmd.assetPath);
+                string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+                if (!File.Exists(fullPath))
+                    throw new FileNotFoundException("Visual Scripting graph asset does not exist", assetPath);
+
+                AssetDatabase.ImportAsset(
+                    assetPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+
+                UnityEngine.Object asset = AssetDatabase.LoadMainAssetAtPath(assetPath);
+                if (asset == null)
+                    throw new InvalidOperationException("Unity could not load the graph's main asset after import. Check the Console for deserialization errors.");
+
+                Type assetType = asset.GetType();
+                result.assetPath = assetPath;
+                result.assetGuid = AssetDatabase.AssetPathToGUID(assetPath);
+                result.assetType = assetType.FullName;
+                result.dependencyHash = AssetDatabase.GetAssetDependencyHash(assetPath).ToString();
+
+                if (!string.Equals(assetType.FullName, "Unity.VisualScripting.ScriptGraphAsset", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Expected Unity.VisualScripting.ScriptGraphAsset but Unity loaded {assetType.FullName}");
+                }
+
+                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                System.Reflection.PropertyInfo graphProperty = assetType.GetProperty("graph", flags);
+                FieldInfo graphField = graphProperty == null ? assetType.GetField("graph", flags) : null;
+                object graph = graphProperty != null ? graphProperty.GetValue(asset) : graphField?.GetValue(asset);
+                if (graph == null)
+                    throw new InvalidOperationException("Unity loaded the ScriptGraphAsset but its graph is null");
+
+                Type graphType = graph.GetType();
+                result.graphType = graphType.FullName;
+                System.Reflection.PropertyInfo elementsProperty = graphType.GetProperty("elements", flags);
+                FieldInfo elementsField = elementsProperty == null ? graphType.GetField("elements", flags) : null;
+                object elementsValue = elementsProperty != null
+                    ? elementsProperty.GetValue(graph)
+                    : elementsField?.GetValue(graph);
+                var elements = elementsValue as System.Collections.IEnumerable;
+                if (elements == null)
+                    throw new InvalidOperationException("Unity loaded the graph but did not expose an elements collection");
+
+                var elementTypes = new HashSet<string>(StringComparer.Ordinal);
+                foreach (object element in elements)
+                {
+                    result.elementCount++;
+                    if (element == null)
+                    {
+                        result.missingElementCount++;
+                        continue;
+                    }
+
+                    string typeName = element.GetType().FullName ?? element.GetType().Name;
+                    elementTypes.Add(typeName);
+                    if (typeName == "Unity.VisualScripting.ControlConnection")
+                        result.controlConnectionCount++;
+                    else if (typeName == "Unity.VisualScripting.ValueConnection")
+                        result.valueConnectionCount++;
+                    else if (typeName == "Unity.VisualScripting.GraphGroup")
+                        result.groupCount++;
+                    else
+                        result.nodeCount++;
+
+                    if (typeName.IndexOf("Missing", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        typeName.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        result.missingElementCount++;
+                    }
+                }
+
+                result.elementTypes = elementTypes.OrderBy(name => name, StringComparer.Ordinal).Take(200).ToList();
+                if (result.missingElementCount > 0)
+                    result.warnings.Add($"Unity exposed {result.missingElementCount} missing or unknown graph elements");
+
+                result.success = result.missingElementCount == 0;
+                if (!result.success)
+                    result.error = "The graph imported, but one or more elements could not be resolved";
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception is TargetInvocationException && exception.InnerException != null
+                    ? exception.InnerException
+                    : exception;
+                result.error = actual.Message;
+            }
+
+            WriteAtomicText(
+                Path.Combine(VisualScriptingValidationResultsFolder, cmd.id + ".json"),
+                JsonUtility.ToJson(result, true));
+            DeleteOldFiles(VisualScriptingValidationResultsFolder, "*.json", 50);
+        }
+
+        private static string NormalizeVisualScriptingAssetPath(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                throw new InvalidOperationException("assetPath is required");
+
+            string normalized = value.Replace('\\', '/').Trim();
+            if (!normalized.StartsWith("Assets/", StringComparison.Ordinal) ||
+                !string.Equals(Path.GetExtension(normalized), ".asset", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("assetPath must be an Assets/... path ending in .asset");
+            }
+            if (normalized.Split('/').Any(segment => segment.Length == 0 || segment == "." || segment == ".."))
+                throw new InvalidOperationException("assetPath contains an invalid path segment");
+
+            string assetsRoot = Path.GetFullPath(Application.dataPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
+            if (!fullPath.StartsWith(assetsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("assetPath must stay inside the project's Assets folder");
+
+            return normalized;
+        }
+
+        private static void ValidateBanterVisualScripting(ValidateBanterVisualScriptingCommand cmd)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Banter Visual Scripting validation requires a safe correlation ID");
+
+            const int maxDiagnostics = 200;
+            const int maxDiagnosticStackTraceLength = 2048;
+            var result = new BanterVisualScriptingValidationResult
+            {
+                commandId = cmd.id,
+                success = false,
+                validatorAvailable = false,
+                validationCompleted = false,
+                validationPassed = false,
+                diagnostics = new List<ConsoleLogEntry>(),
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+            int observedDiagnosticCount = 0;
+            Application.LogCallback diagnosticCapture = null;
+
+            try
+            {
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                    throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle.");
+
+                const string validatorTypeName = "Banter.SDKEditor.ValidateVisualScripting";
+                Type validatorType = Type.GetType(validatorTypeName + ", Banter.SDKEditor", false) ??
+                    AppDomain.CurrentDomain.GetAssemblies()
+                        .Select(assembly => assembly.GetType(validatorTypeName, false))
+                        .FirstOrDefault(candidate => candidate != null);
+                if (validatorType == null)
+                {
+                    throw new InvalidOperationException(
+                        "Banter's Visual Scripting validator is unavailable. Install a compatible Banter SDK and Unity Visual Scripting package, then wait for compilation to finish.");
+                }
+
+                MethodInfo validatorMethod = validatorType.GetMethod(
+                    "CheckVsNodes",
+                    BindingFlags.Public | BindingFlags.Static,
+                    null,
+                    Type.EmptyTypes,
+                    null);
+                if (validatorMethod == null || validatorMethod.ReturnType != typeof(bool))
+                    throw new MissingMethodException(validatorType.FullName, "public static bool CheckVsNodes()");
+
+                result.validatorAvailable = true;
+                result.validatorType = validatorType.FullName;
+                result.validatorAssembly = validatorType.Assembly.GetName().Name;
+                result.validatorMethod = validatorMethod.Name;
+
+                diagnosticCapture = (condition, stackTrace, logType) =>
+                {
+                    if (string.IsNullOrEmpty(condition) ||
+                        !condition.StartsWith("[VisualScripting]", StringComparison.Ordinal))
+                    {
+                        return;
+                    }
+
+                    observedDiagnosticCount++;
+                    if (result.diagnostics.Count >= maxDiagnostics)
+                        return;
+
+                    result.diagnostics.Add(new ConsoleLogEntry
+                    {
+                        level = logType.ToString(),
+                        message = condition,
+                        stackTrace = string.IsNullOrEmpty(stackTrace)
+                            ? ""
+                            : stackTrace.Substring(0, Math.Min(stackTrace.Length, maxDiagnosticStackTraceLength)),
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    });
+                };
+                Application.logMessageReceived += diagnosticCapture;
+
+                object validatorReturn = validatorMethod.Invoke(null, null);
+                result.validationPassed = validatorReturn is bool && (bool)validatorReturn;
+                result.validationCompleted = true;
+                result.success = result.validationPassed;
+                if (!result.validationPassed)
+                    result.error = "Banter's Visual Scripting validator reported one or more errors.";
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception is TargetInvocationException && exception.InnerException != null
+                    ? exception.InnerException
+                    : exception;
+                result.error = actual.Message;
+            }
+            finally
+            {
+                if (diagnosticCapture != null)
+                    Application.logMessageReceived -= diagnosticCapture;
+            }
+
+            result.diagnosticCount = observedDiagnosticCount;
+            result.diagnosticsTruncated = observedDiagnosticCount > result.diagnostics.Count;
+            WriteAtomicText(
+                Path.Combine(BanterValidationResultsFolder, cmd.id + ".json"),
+                JsonUtility.ToJson(result, true));
+            DeleteOldFiles(BanterValidationResultsFolder, "*.json", 50);
         }
 
         private static void RunUnityTests(RunTestsCommand cmd)
@@ -3555,6 +3809,61 @@ namespace BantworksMCP
             public string name;
             public string type;
             public bool isFolder;
+        }
+
+        [Serializable]
+        private class ValidateVSGraphAssetCommand
+        {
+            public string id;
+            public string type;
+            public string assetPath;
+        }
+
+        [Serializable]
+        private class VSGraphAssetValidationResult
+        {
+            public string commandId;
+            public bool success;
+            public string assetPath;
+            public string assetGuid;
+            public string assetType;
+            public string graphType;
+            public string dependencyHash;
+            public int elementCount;
+            public int nodeCount;
+            public int controlConnectionCount;
+            public int valueConnectionCount;
+            public int groupCount;
+            public int missingElementCount;
+            public string error;
+            public long timestamp;
+            public List<string> elementTypes;
+            public List<string> warnings;
+        }
+
+        [Serializable]
+        private class ValidateBanterVisualScriptingCommand
+        {
+            public string id;
+            public string type;
+        }
+
+        [Serializable]
+        private class BanterVisualScriptingValidationResult
+        {
+            public string commandId;
+            public bool success;
+            public bool validatorAvailable;
+            public bool validationCompleted;
+            public bool validationPassed;
+            public string validatorType;
+            public string validatorAssembly;
+            public string validatorMethod;
+            public int diagnosticCount;
+            public bool diagnosticsTruncated;
+            public List<ConsoleLogEntry> diagnostics;
+            public string error;
+            public long timestamp;
         }
 
         [Serializable]

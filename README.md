@@ -17,9 +17,10 @@ The repository is intentionally generic. It contains no project-specific gamepla
 
 - **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
 - **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files using the bundled Unity Visual Scripting JSON manual and source-observed errata
+- **Banter Validation**: Invoke the selected SDK's own Visual Scripting allow-list validator and return bounded, structured diagnostics
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
 - **Unity Integration**: Query project state, check import status, refresh assets
-- **Closed-Loop Workflow**: Validate → Write → Verify
+- **Closed-Loop Workflow**: Validate → Write → Import and deserialize in Unity → Test
 
 ## Banter Visual Scripting Expertise
 
@@ -29,8 +30,9 @@ BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not j
 - **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, then compares its C# source classes with the embedded node and component catalogues. This matters because observed git and registry builds with nearby semantic versions contain different node sets.
 - **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 is preceded by source-observed compatibility errata. Canonical output uses `graph.elements`; referenced nodes use string `$id` values; Visual Scripting 1.9.x may omit `$version` on connections.
 - **Generation, validation, and writing:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split layouts, checks node-reference integrity, and avoids rejecting valid unreferenced nodes. `write_vs_graph` validates again before writing, emits the ScriptGraphAsset class identifier and `NativeFormatImporter`, and preserves an existing asset GUID while migrating old MCP metadata.
+- **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph. `validate_banter_visual_scripting` then invokes the installed SDK's public `CheckVsNodes()` validator across graph assets, embedded prefab graphs, and the active scene, returning the SDK's exact allow-list diagnostics.
 
-This knowledge improves graph generation and review, but source-class coverage is not proof of Unity import or runtime behavior. Generated graphs should still be imported and tested in the target Unity and Banter SDK version.
+This knowledge improves graph generation and review, but source-class coverage is not proof of runtime behavior. `validate_vs_graph_in_unity` provides an authoritative import and deserialization check in the selected Editor; generated graphs must still be exercised in the target Unity and Banter SDK version.
 
 ## Requirements
 
@@ -133,11 +135,11 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (37 focused actions available to MCP clients)
+### Tools (39 focused actions available to MCP clients)
 
 | Category | Tools |
 |----------|-------|
-| Visual Scripting | `generate_vs_graph`, `validate_vs_graph`, `write_vs_graph` |
+| Visual Scripting | `generate_vs_graph`, `validate_vs_graph`, `write_vs_graph`, `validate_vs_graph_in_unity`, `validate_banter_visual_scripting` |
 | Banter WebRoot | `write_webroot_js` |
 | Project routing | `list_unity_projects`, `select_unity_project` |
 | Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
@@ -182,8 +184,10 @@ Codex or Claude Code:
 3. Uses generate_vs_graph to create the logic
 4. Uses validate_vs_graph to check for errors
 5. Uses write_vs_graph to validate again and save to Unity
-6. Uses check_import_status to verify it worked
-7. Reports success with the asset path
+6. Uses validate_vs_graph_in_unity to force import and verify deserialization
+7. Uses validate_banter_visual_scripting to run the SDK allow-list scan
+8. Runs the relevant Unity or Banter behavior test
+9. Reports the verified asset path and target SDK identity
 ```
 
 ## Project Structure

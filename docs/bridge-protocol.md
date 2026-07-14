@@ -15,6 +15,8 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
 | `.bantworks-mcp/state/asset-search-results/*.json` | Unity to MCP | Correlated AssetDatabase query results |
+| `.bantworks-mcp/state/vs-validation-results/*.json` | Unity to MCP | Correlated Visual Scripting import and deserialization results |
+| `.bantworks-mcp/state/banter-validation-results/*.json` | Unity to MCP | Correlated Banter SDK allow-list validation results |
 | `.bantworks-mcp/state/test-discovery/*.json` | Unity to MCP | Correlated, bounded Test Runner discovery results |
 | `.bantworks-mcp/state/test-runs/*.json` | Unity to MCP | Persisted Test Runner state and bounded case results |
 | `.bantworks-mcp/state/scene-results/*.json` | Unity to MCP | Correlated open-scene and build-settings results |
@@ -133,6 +135,26 @@ locates the selected package source, reports git revision or package-cache
 identity, and compares Visual Scripting and scene-component C# classes with the
 embedded source-hashed catalogues. These counts prove source presence only;
 Unity import and Banter build validation remain authoritative.
+
+`validate_vs_graph_in_unity` accepts only an `Assets/.../*.asset` path. The
+bridge forces a synchronous AssetDatabase import, loads the main asset, verifies
+that it is a `Unity.VisualScripting.ScriptGraphAsset`, and reflects its graph
+elements without introducing a compile-time Visual Scripting dependency. The
+correlated result includes the Unity asset GUID, concrete asset and graph types,
+dependency hash, element counts and types, and missing-element diagnostics.
+Projects without Visual Scripting return an explicit validation failure while
+the bridge itself continues to compile.
+
+`validate_banter_visual_scripting` reflectively locates
+`Banter.SDKEditor.ValidateVisualScripting.CheckVsNodes()` so the bridge has no
+compile-time Banter dependency. The SDK performs its own AssetDatabase refresh
+and scans Script Graph assets, State Graph assets, embedded prefab graphs, and
+embedded graphs in the active scene. Results distinguish validator availability,
+completion, and pass/fail state. Up to 200 `[VisualScripting]` diagnostics are
+returned with bounded stack traces; `diagnosticCount` and
+`diagnosticsTruncated` preserve the total and truncation state. Projects without
+a compatible Banter validator fail explicitly without breaking the generic
+Unity bridge.
 
 ## Unity Test Runner
 
