@@ -113,7 +113,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     {
       uri: "banter://system-prompt",
       name: "Banter MCP System Prompt",
-      description: "IMPORTANT: Read this first! Instructions for how Claude should behave when helping with Banter development",
+      description: "IMPORTANT: Read this first! Instructions for how connected MCP clients should help with Banter development",
       mimeType: "text/markdown",
     },
     // Static Banter knowledge

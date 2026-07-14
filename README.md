@@ -15,11 +15,21 @@ The repository is intentionally generic. It contains no project-specific gamepla
 
 ## Features
 
-- **Banter SDK Knowledge**: Complete reference for all 68 components, 164 VS nodes, and JavaScript API
-- **Visual Scripting Generation**: Create and validate VS graph `.asset` files
+- **Banter SDK Knowledge**: 68 SDK components, 163 unique captured Banter Visual Scripting node types, and the BS.* JavaScript API
+- **Visual Scripting Authoring**: Create and validate VS graph `.asset` files using the bundled Unity Visual Scripting JSON manual
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
 - **Unity Integration**: Query project state, check import status, refresh assets
 - **Closed-Loop Workflow**: Validate → Write → Verify
+
+## Banter Visual Scripting Expertise
+
+BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not just generic Unity graph syntax:
+
+- **Node catalogue:** 163 unique Banter node types are represented across the bundled references. This includes 162 exact custom node types extracted from a real Banter `AllCustomNodes.asset`, with categories, serialized defaults, sample GUIDs, and event metadata.
+- **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 covers the YAML wrapper, graph structure, node IDs, real GUID generation, `$version: "A"`, control/value connections, variables, port names, Banter sandbox restrictions, troubleshooting, and complete examples.
+- **Generation and validation:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split-connection graph shapes, and checks the structural rules required for Unity to import the graph.
+
+This knowledge improves graph generation and review, but a generated graph should still be imported and tested in the target Unity and Banter SDK version.
 
 ## Quick Start
 
@@ -96,9 +106,12 @@ Unity will compile it automatically and start exporting project state to `YourPr
 | Resource | Description |
 |----------|-------------|
 | `banter://components` | All 68 Banter components with properties |
-| `banter://vs-nodes` | All 164 Visual Scripting nodes |
+| `banter://vs-nodes` | Hand-authored Banter node reference with port notes |
+| `banter://custom-vs-nodes` | Exact catalogue of 162 custom Banter node types extracted from a real graph asset |
+| `banter://custom-vs-node-log` | Markdown log with every captured custom node, category, and serialized default |
 | `banter://js-api` | Complete BS.* JavaScript API |
-| `banter://vs-instructions` | How to create VS graph files |
+| `banter://vs-instructions` | How to create Banter Visual Scripting graph files |
+| `banter://unity-vs-json-manual` | Unity Visual Scripting JSON manual v2.2 with patterns, restrictions, and troubleshooting |
 | `unity://types` | Unity fundamentals (Vector3, Quaternion, etc.) |
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
