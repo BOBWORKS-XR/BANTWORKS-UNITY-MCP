@@ -32,14 +32,19 @@ namespace BantworksMCP
         private static readonly string BoundsResultsFolder = Path.Combine(StateFolder, "bounds-results");
         private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
         private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
+        private static readonly string TestRunResultsFolder = Path.Combine(StateFolder, "test-runs");
 
         private static double lastCommandCheck = 0;
         private static double lastStateExport = 0;
         private static double lastLauncherSettingsCheck = 0;
+        private static double lastTestRunCheck = 0;
         private static readonly double CommandCheckInterval = 0.5; // seconds
         private static readonly double StateExportInterval = 2.0; // seconds
         private static readonly double LauncherSettingsCheckInterval = 1.0; // seconds
         private static DateTime lastLauncherSettingsWriteTime = DateTime.MinValue;
+        private static string activeTestRunId;
+        private static object activeTestRunnerApi;
+        private static object activeTestRunnerCallback;
 
         // Public status for window
         public static bool IsConnected { get; private set; }
@@ -92,6 +97,7 @@ namespace BantworksMCP
             EditorApplication.delayCall += () => {
                 ScanAndExportPrefabCatalog();
             };
+            EditorApplication.delayCall += ResumePendingTestRun;
 
             IsConnected = true;
             LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Initialized";
@@ -118,6 +124,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(ScreenshotResultsFolder);
             if (!Directory.Exists(AssetSearchResultsFolder))
                 Directory.CreateDirectory(AssetSearchResultsFolder);
+            if (!Directory.Exists(TestRunResultsFolder))
+                Directory.CreateDirectory(TestRunResultsFolder);
 
             string ignorePath = Path.Combine(MCPFolder, ".gitignore");
             if (!File.Exists(ignorePath))
@@ -147,6 +155,12 @@ namespace BantworksMCP
             {
                 lastLauncherSettingsCheck = time;
                 LoadLauncherSettingsIfChanged();
+            }
+
+            if (time - lastTestRunCheck > 1.0)
+            {
+                lastTestRunCheck = time;
+                CheckActiveTestRunDeadline();
             }
         }
 
@@ -337,6 +351,11 @@ namespace BantworksMCP
                     var assetSearchCmd = JsonUtility.FromJson<AssetSearchCommand>(json);
                     SearchAssets(assetSearchCmd);
                     return $"Searched Unity assets: {assetSearchCmd.query}";
+
+                case "run_tests":
+                    var runTestsCmd = JsonUtility.FromJson<RunTestsCommand>(json);
+                    RunUnityTests(runTestsCmd);
+                    return $"Started Unity {runTestsCmd.mode} tests";
 
                 case "create_gameobject":
                     var createCmd = JsonUtility.FromJson<CreateGameObjectCommand>(json);
@@ -707,6 +726,471 @@ namespace BantworksMCP
                 Path.Combine(AssetSearchResultsFolder, cmd.id + ".json"),
                 JsonUtility.ToJson(result, true));
             DeleteOldFiles(AssetSearchResultsFolder, "*.json", 50);
+        }
+
+        private static void RunUnityTests(RunTestsCommand cmd)
+        {
+            if (cmd == null || string.IsNullOrWhiteSpace(cmd.id))
+                throw new InvalidOperationException("Unity test command requires an ID");
+            if (!IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Unity test command ID contains unsupported characters");
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle before running tests.");
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+                throw new InvalidOperationException("Stop Play Mode before starting a Unity Test Runner job.");
+
+            string mode = string.IsNullOrWhiteSpace(cmd.mode)
+                ? "edit"
+                : cmd.mode.Trim().ToLowerInvariant();
+            if (mode != "edit" && mode != "play" && mode != "all")
+                throw new InvalidOperationException("Unity test mode must be 'edit', 'play', or 'all'");
+
+            int maxResults = cmd.maxResults == 0 ? 500 : cmd.maxResults;
+            if (maxResults < 1 || maxResults > 5000)
+                throw new InvalidOperationException("Unity test maxResults must be between 1 and 5000");
+
+            int timeoutMs = cmd.timeoutMs == 0 ? 120000 : cmd.timeoutMs;
+            if (timeoutMs < 1000 || timeoutMs > 600000)
+                throw new InvalidOperationException("Unity test timeoutMs must be between 1000 and 600000");
+
+            if (FindPendingTestRun() != null || IsUnityTestRunActive())
+                throw new InvalidOperationException("A Unity Test Runner job is already active");
+
+            Type apiType = FindTestRunnerType("TestRunnerApi");
+            Type callbackType = FindTestRunnerType("ICallbacks");
+            Type filterType = FindTestRunnerType("Filter");
+            Type executionSettingsType = FindTestRunnerType("ExecutionSettings");
+            Type testModeType = FindTestRunnerType("TestMode");
+            if (apiType == null || callbackType == null || filterType == null ||
+                executionSettingsType == null || testModeType == null)
+            {
+                throw new InvalidOperationException(
+                    "Unity Test Framework is not available. Add com.unity.test-framework to this project first.");
+            }
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var run = new UnityTestRunResult
+            {
+                commandId = cmd.id,
+                success = false,
+                testsPassed = false,
+                status = "starting",
+                mode = mode,
+                startedAt = now,
+                updatedAt = now,
+                deadline = now + Math.Max(timeoutMs + 120000L, 1800000L),
+                maxResults = maxResults,
+                testNames = CleanFilterValues(cmd.testNames),
+                groupNames = CleanFilterValues(cmd.groupNames),
+                categoryNames = CleanFilterValues(cmd.categoryNames),
+                assemblyNames = CleanFilterValues(cmd.assemblyNames),
+                tests = new List<UnityTestCaseResult>()
+            };
+            SaveTestRunResult(run);
+
+            try
+            {
+                object filter = Activator.CreateInstance(filterType);
+                SetTestRunnerField(filterType, filter, "testMode", ParseTestMode(testModeType, mode));
+                SetTestRunnerField(filterType, filter, "testNames", EmptyToNull(run.testNames));
+                SetTestRunnerField(filterType, filter, "groupNames", EmptyToNull(run.groupNames));
+                SetTestRunnerField(filterType, filter, "categoryNames", EmptyToNull(run.categoryNames));
+                SetTestRunnerField(filterType, filter, "assemblyNames", EmptyToNull(run.assemblyNames));
+
+                Array filters = Array.CreateInstance(filterType, 1);
+                filters.SetValue(filter, 0);
+                ConstructorInfo settingsConstructor = executionSettingsType.GetConstructor(new[] { filters.GetType() });
+                if (settingsConstructor == null)
+                    throw new MissingMethodException(executionSettingsType.FullName, ".ctor(Filter[])");
+
+                object executionSettings = settingsConstructor.Invoke(new object[] { filters });
+                SetTestRunnerField(executionSettingsType, executionSettings, "runSynchronously", false);
+
+                RegisterTestRunnerCallback(cmd.id, apiType, callbackType);
+                MethodInfo executeMethod = apiType.GetMethod("Execute", new[] { executionSettingsType });
+                if (executeMethod == null)
+                    throw new MissingMethodException(apiType.FullName, "Execute");
+
+                object jobId = executeMethod.Invoke(activeTestRunnerApi, new[] { executionSettings });
+                run = LoadTestRunResult(cmd.id) ?? run;
+                run.jobId = jobId?.ToString();
+                run.status = "running";
+                run.updatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                SaveTestRunResult(run);
+                DeleteOldFiles(TestRunResultsFolder, "*.json", 20);
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception is TargetInvocationException && exception.InnerException != null
+                    ? exception.InnerException
+                    : exception;
+                run = LoadTestRunResult(cmd.id) ?? run;
+                run.status = "failed";
+                run.error = actual.Message;
+                run.finishedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                run.updatedAt = run.finishedAt;
+                SaveTestRunResult(run);
+                UnregisterActiveTestRunnerCallback();
+                throw new InvalidOperationException("Unity Test Framework could not start: " + actual.Message, actual);
+            }
+        }
+
+        private static Type FindTestRunnerType(string typeName)
+        {
+            string fullName = "UnityEditor.TestTools.TestRunner.Api." + typeName;
+            Type type = Type.GetType(fullName + ", UnityEditor.TestRunner", false);
+            if (type != null)
+                return type;
+
+            return AppDomain.CurrentDomain.GetAssemblies()
+                .Select(assembly => assembly.GetType(fullName, false))
+                .FirstOrDefault(candidate => candidate != null);
+        }
+
+        private static object ParseTestMode(Type testModeType, string mode)
+        {
+            if (mode == "all")
+            {
+                int edit = Convert.ToInt32(Enum.Parse(testModeType, "EditMode"), CultureInfo.InvariantCulture);
+                int play = Convert.ToInt32(Enum.Parse(testModeType, "PlayMode"), CultureInfo.InvariantCulture);
+                return Enum.ToObject(testModeType, edit | play);
+            }
+
+            return Enum.Parse(testModeType, mode == "play" ? "PlayMode" : "EditMode");
+        }
+
+        private static void SetTestRunnerField(Type ownerType, object owner, string fieldName, object value)
+        {
+            FieldInfo field = ownerType.GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
+            if (field == null)
+                throw new MissingFieldException(ownerType.FullName, fieldName);
+            field.SetValue(owner, value);
+        }
+
+        private static string[] CleanFilterValues(string[] values)
+        {
+            string[] cleaned = values == null
+                ? new string[0]
+                : values.Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+            if (cleaned.Length > 200 || cleaned.Any(value => value.Length > 512))
+                throw new InvalidOperationException("Unity test filters allow at most 200 values of at most 512 characters each");
+            return cleaned;
+        }
+
+        private static bool IsSafeCorrelationId(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) && value.Length <= 128 &&
+                value.All(character => char.IsLetterOrDigit(character) || character == '-');
+        }
+
+        private static string[] EmptyToNull(string[] values)
+        {
+            return values != null && values.Length > 0 ? values : null;
+        }
+
+        private static void RegisterTestRunnerCallback(string runId, Type apiType = null, Type callbackType = null)
+        {
+            if (activeTestRunId == runId && activeTestRunnerCallback != null)
+                return;
+
+            UnregisterActiveTestRunnerCallback();
+            apiType = apiType ?? FindTestRunnerType("TestRunnerApi");
+            callbackType = callbackType ?? FindTestRunnerType("ICallbacks");
+            if (apiType == null || callbackType == null)
+                throw new InvalidOperationException("Unity Test Framework callback API is unavailable");
+
+            MethodInfo createProxy = typeof(DispatchProxy).GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(method => method.Name == "Create" && method.IsGenericMethodDefinition &&
+                    method.GetGenericArguments().Length == 2 && method.GetParameters().Length == 0);
+            if (createProxy == null)
+                throw new MissingMethodException(typeof(DispatchProxy).FullName, "Create<T,TProxy>");
+
+            object callback = createProxy
+                .MakeGenericMethod(callbackType, typeof(TestRunnerCallbackProxy))
+                .Invoke(null, null);
+            ((TestRunnerCallbackProxy)callback).RunId = runId;
+
+            object api = ScriptableObject.CreateInstance(apiType);
+            MethodInfo register = apiType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(method => method.Name == "RegisterCallbacks" && method.IsGenericMethodDefinition);
+            if (register == null)
+                throw new MissingMethodException(apiType.FullName, "RegisterCallbacks");
+
+            register.MakeGenericMethod(callbackType).Invoke(api, new[] { callback, (object)0 });
+            activeTestRunId = runId;
+            activeTestRunnerApi = api;
+            activeTestRunnerCallback = callback;
+        }
+
+        private static void UnregisterActiveTestRunnerCallback()
+        {
+            if (activeTestRunnerApi != null && activeTestRunnerCallback != null)
+            {
+                try
+                {
+                    Type apiType = activeTestRunnerApi.GetType();
+                    Type callbackType = FindTestRunnerType("ICallbacks");
+                    MethodInfo unregister = apiType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                        .FirstOrDefault(method => method.Name == "UnregisterCallbacks" && method.IsGenericMethodDefinition);
+                    unregister?.MakeGenericMethod(callbackType).Invoke(
+                        activeTestRunnerApi,
+                        new[] { activeTestRunnerCallback });
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogWarning("[BANTWORKS MCP] Could not unregister Test Runner callback: " + exception.Message);
+                }
+
+                if (activeTestRunnerApi is UnityEngine.Object unityObject)
+                    UnityEngine.Object.DestroyImmediate(unityObject);
+            }
+
+            activeTestRunId = null;
+            activeTestRunnerApi = null;
+            activeTestRunnerCallback = null;
+        }
+
+        private static void ResumePendingTestRun()
+        {
+            if (!string.IsNullOrWhiteSpace(activeTestRunId))
+                return;
+
+            UnityTestRunResult pending = FindPendingTestRun();
+            if (pending == null)
+                return;
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (pending.deadline > 0 && now > pending.deadline)
+            {
+                FailTestRun(pending, "The persisted Unity test run expired before a completion callback was received.");
+                return;
+            }
+
+            try
+            {
+                RegisterTestRunnerCallback(pending.commandId);
+                Debug.Log("[BANTWORKS MCP] Restored Test Runner callback for " + pending.commandId);
+            }
+            catch (Exception exception)
+            {
+                FailTestRun(pending, "Could not restore Unity Test Runner callback: " + exception.Message);
+            }
+        }
+
+        private static UnityTestRunResult FindPendingTestRun()
+        {
+            if (!Directory.Exists(TestRunResultsFolder))
+                return null;
+
+            foreach (string file in Directory.GetFiles(TestRunResultsFolder, "*.json")
+                .OrderByDescending(File.GetLastWriteTimeUtc))
+            {
+                try
+                {
+                    var result = JsonUtility.FromJson<UnityTestRunResult>(File.ReadAllText(file));
+                    if (result != null && (result.status == "starting" || result.status == "running"))
+                        return result;
+                }
+                catch
+                {
+                    // Ignore incomplete or unrelated files and continue to the next run.
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsUnityTestRunActive()
+        {
+            Type apiType = FindTestRunnerType("TestRunnerApi");
+            MethodInfo method = apiType?.GetMethod("IsRunActive", BindingFlags.NonPublic | BindingFlags.Static);
+            if (method == null)
+                return false;
+
+            try
+            {
+                return method.Invoke(null, null) is bool active && active;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void CheckActiveTestRunDeadline()
+        {
+            if (string.IsNullOrWhiteSpace(activeTestRunId))
+                return;
+
+            UnityTestRunResult run = LoadTestRunResult(activeTestRunId);
+            if (run == null || run.status == "completed" || run.status == "failed")
+            {
+                UnregisterActiveTestRunnerCallback();
+                return;
+            }
+
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (run.deadline > 0 && now > run.deadline)
+            {
+                FailTestRun(run, "Unity Test Runner did not finish before the safety deadline.");
+                UnregisterActiveTestRunnerCallback();
+            }
+        }
+
+        private static void HandleTestRunnerCallback(string runId, string callbackName, object argument)
+        {
+            UnityTestRunResult run = LoadTestRunResult(runId);
+            if (run == null || run.status == "completed" || run.status == "failed")
+                return;
+
+            try
+            {
+                switch (callbackName)
+                {
+                    case "RunStarted":
+                        run.status = "running";
+                        run.loadedTestCount = ReadReflectedValue(argument, "TestCaseCount", run.loadedTestCount);
+                        break;
+
+                    case "TestFinished":
+                        object test = ReadReflectedObject(argument, "Test");
+                        bool isSuite = test != null && ReadReflectedValue(test, "IsSuite", false);
+                        if (!isSuite)
+                        {
+                            if (run.tests == null)
+                                run.tests = new List<UnityTestCaseResult>();
+
+                            if (run.tests.Count < run.maxResults)
+                            {
+                                run.tests.Add(new UnityTestCaseResult
+                                {
+                                    name = ReadReflectedValue(argument, "Name", ""),
+                                    fullName = ReadReflectedValue(argument, "FullName", ""),
+                                    resultState = ReadReflectedValue(argument, "ResultState", ""),
+                                    status = ReadReflectedObject(argument, "TestStatus")?.ToString(),
+                                    duration = ReadReflectedValue(argument, "Duration", 0d),
+                                    message = ReadReflectedValue(argument, "Message", ""),
+                                    stackTrace = ReadReflectedValue(argument, "StackTrace", ""),
+                                    output = ReadReflectedValue(argument, "Output", "")
+                                });
+                            }
+                            else
+                            {
+                                run.truncated = true;
+                            }
+                            run.completedCount++;
+                        }
+                        break;
+
+                    case "RunFinished":
+                        run.status = "completed";
+                        run.success = true;
+                        run.passed = ReadReflectedValue(argument, "PassCount", 0);
+                        run.failed = ReadReflectedValue(argument, "FailCount", 0);
+                        run.skipped = ReadReflectedValue(argument, "SkipCount", 0);
+                        run.inconclusive = ReadReflectedValue(argument, "InconclusiveCount", 0);
+                        run.total = run.passed + run.failed + run.skipped + run.inconclusive;
+                        run.completedCount = run.total;
+                        run.duration = ReadReflectedValue(argument, "Duration", 0d);
+                        run.noTests = run.total == 0;
+                        run.testsPassed = !run.noTests && run.failed == 0;
+                        run.finishedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        break;
+                }
+
+                run.updatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                SaveTestRunResult(run);
+
+                if (callbackName == "RunFinished")
+                    UnregisterActiveTestRunnerCallback();
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError("[BANTWORKS MCP] Test Runner callback failed: " + exception);
+                FailTestRun(run, "Could not serialize Unity Test Runner result: " + exception.Message);
+                UnregisterActiveTestRunnerCallback();
+            }
+        }
+
+        private static object ReadReflectedObject(object source, string propertyName)
+        {
+            if (source == null)
+                return null;
+            return source.GetType().GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance)?.GetValue(source, null);
+        }
+
+        private static T ReadReflectedValue<T>(object source, string propertyName, T fallback)
+        {
+            object value = ReadReflectedObject(source, propertyName);
+            if (value == null)
+                return fallback;
+            if (value is T typed)
+                return typed;
+
+            try
+            {
+                return (T)Convert.ChangeType(value, typeof(T), CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return fallback;
+            }
+        }
+
+        private static UnityTestRunResult LoadTestRunResult(string runId)
+        {
+            if (string.IsNullOrWhiteSpace(runId))
+                return null;
+
+            string resultPath = Path.Combine(TestRunResultsFolder, runId + ".json");
+            if (!File.Exists(resultPath))
+                return null;
+
+            try
+            {
+                return JsonUtility.FromJson<UnityTestRunResult>(File.ReadAllText(resultPath));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static void SaveTestRunResult(UnityTestRunResult run)
+        {
+            if (run == null || string.IsNullOrWhiteSpace(run.commandId))
+                return;
+            WriteAtomicText(
+                Path.Combine(TestRunResultsFolder, run.commandId + ".json"),
+                JsonUtility.ToJson(run, true));
+        }
+
+        private static void FailTestRun(UnityTestRunResult run, string error)
+        {
+            if (run == null)
+                return;
+            run.status = "failed";
+            run.success = false;
+            run.testsPassed = false;
+            run.error = error;
+            run.finishedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            run.updatedAt = run.finishedAt;
+            SaveTestRunResult(run);
+        }
+
+        public class TestRunnerCallbackProxy : DispatchProxy
+        {
+            public string RunId { get; set; }
+
+            protected override object Invoke(MethodInfo targetMethod, object[] args)
+            {
+                if (targetMethod != null)
+                    HandleTestRunnerCallback(RunId, targetMethod.Name, args != null && args.Length > 0 ? args[0] : null);
+                return null;
+            }
         }
 
         private static void ModifyGameObject(ModifyGameObjectCommand cmd)
@@ -2505,6 +2989,65 @@ namespace BantworksMCP
             public string name;
             public string type;
             public bool isFolder;
+        }
+
+        [Serializable]
+        private class RunTestsCommand
+        {
+            public string id;
+            public string type;
+            public string mode;
+            public string[] testNames;
+            public string[] groupNames;
+            public string[] categoryNames;
+            public string[] assemblyNames;
+            public int timeoutMs;
+            public int maxResults;
+        }
+
+        [Serializable]
+        private class UnityTestRunResult
+        {
+            public string commandId;
+            public string jobId;
+            public bool success;
+            public bool testsPassed;
+            public bool noTests;
+            public string status;
+            public string mode;
+            public string error;
+            public long startedAt;
+            public long updatedAt;
+            public long finishedAt;
+            public long deadline;
+            public int maxResults;
+            public int loadedTestCount;
+            public int completedCount;
+            public int total;
+            public int passed;
+            public int failed;
+            public int skipped;
+            public int inconclusive;
+            public double duration;
+            public bool truncated;
+            public string[] testNames;
+            public string[] groupNames;
+            public string[] categoryNames;
+            public string[] assemblyNames;
+            public List<UnityTestCaseResult> tests;
+        }
+
+        [Serializable]
+        private class UnityTestCaseResult
+        {
+            public string name;
+            public string fullName;
+            public string resultState;
+            public string status;
+            public double duration;
+            public string message;
+            public string stackTrace;
+            public string output;
         }
 
         [Serializable]

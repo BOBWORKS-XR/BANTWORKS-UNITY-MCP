@@ -129,7 +129,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
 
-### Tools (26 focused actions available to MCP clients)
+### Tools (28 focused actions available to MCP clients)
 
 | Category | Tools |
 |----------|-------|
@@ -138,6 +138,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
 | Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot` |
 | Project and asset discovery | `get_unity_packages`, `search_unity_assets` |
+| Unity tests | `run_unity_tests`, `get_unity_test_run` |
 | Scene operations | `create_gameobject`, `delete_gameobject`, `modify_gameobject`, `get_object_bounds` |
 | Components and references | `add_component`, `remove_component`, `set_component_property`, `set_object_reference` |
 | Prefabs and batches | `batch_create`, `instantiate_prefab`, `batch_instantiate_prefabs`, `get_prefab_catalog`, `scan_prefabs` |
@@ -145,6 +146,8 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 Scene-mutating tools run through the Unity bridge and return an explicit Unity acknowledgement when one arrives. Scene state exports stable Unity `globalObjectId` values for GameObjects and components; mutation tools prefer those IDs while retaining path selectors for older clients. Typed inspector writes support scalars, vectors, colors, enums, Rects, and Bounds with explicit validation. Ambiguous or stale selectors fail closed rather than modifying an arbitrary object.
 
 Batch creation and prefab placement are preflighted and run as one Unity Undo transaction. They roll back on failure by default; partial progress requires the explicit `continueOnError` option.
+
+Unity Test Framework runs support Edit Mode, Play Mode, exact names, regex groups, categories, and assembly filters. Results survive Play Mode domain reloads, remain queryable by run ID, and distinguish a completed runner operation from failed tests or a zero-test filter.
 
 The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md).
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playModeStateMatches, registerTools } from "../dist/tools/index.js";
+import { isValidUnityTestRunId, playModeStateMatches, registerTools } from "../dist/tools/index.js";
 
 const tools = new Map(registerTools().map((tool) => [tool.name, tool]));
 
@@ -81,4 +81,17 @@ test("project discovery exposes packages and bounded AssetDatabase search", () =
   assert.deepEqual(assets?.required, ["query"]);
   assert.equal(assets?.properties.limit.maximum, 500);
   assert.equal(assets?.properties.includePackages.default, false);
+});
+
+test("Unity Test Runner tools expose bounded filters and safe run IDs", () => {
+  const run = tools.get("run_unity_tests")?.inputSchema;
+  assert.deepEqual(run?.properties.mode.enum, ["edit", "play", "all"]);
+  assert.equal(run?.properties.timeoutMs.maximum, 600000);
+  assert.equal(run?.properties.maxResults.maximum, 5000);
+  assert.equal(run?.properties.testNames.maxItems, 200);
+
+  const status = tools.get("get_unity_test_run")?.inputSchema;
+  assert.deepEqual(status?.required, ["runId"]);
+  assert.equal(isValidUnityTestRunId("2a2aa2d2-10ef-41c7-b852-fbc43a95f30c"), true);
+  assert.equal(isValidUnityTestRunId("../outside"), false);
 });

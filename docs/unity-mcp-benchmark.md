@@ -40,6 +40,7 @@ Strong today:
 - stable Unity global IDs for GameObjects and components with path fallback;
 - typed, validated inspector writes with legacy command compatibility;
 - domain-reload-aware Play Mode control and correlated PNG capture;
+- filtered Edit Mode and Play Mode Test Runner execution with persisted results;
 - read-only package inventory and bounded AssetDatabase search;
 - Codex and Claude Code launcher configuration;
 - focused scene, component, prefab, bounds, console, and import tools;
@@ -49,7 +50,7 @@ Strong today:
 
 Gaps that block a leadership claim:
 
-- no first-class Unity Test Runner workflow;
+- no first-class Test Runner discovery tree or cancellation workflow;
 - no session-level routing across multiple open Unity projects;
 - Banter graph output lacks a committed Unity import/open fixture suite; and
 - Unity-side smoke testing is still manual.
@@ -69,7 +70,8 @@ Gaps that block a leadership claim:
 ### P1 - General Unity Workflows
 
 1. **Complete:** Play, pause, resume, stop, compilation, and domain-reload-aware readiness.
-2. **Next:** Unity Test Runner discovery, filtered execution, progress, and results.
+2. **Partial:** filtered Unity Test Runner execution, reload recovery, bounded
+   case results, and status polling are complete; discovery and cancellation remain.
 3. **Complete:** Game camera and Scene View screenshots with correlated result files and MCP image output.
 4. **Partial:** AssetDatabase search and package inventory are complete; scene
    save/load and build settings remain.

@@ -14,6 +14,7 @@ With `UNITY_PROJECT_PATH` set to a Unity project root, the bridge uses:
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
 | `.bantworks-mcp/state/asset-search-results/*.json` | Unity to MCP | Correlated AssetDatabase query results |
+| `.bantworks-mcp/state/test-runs/*.json` | Unity to MCP | Persisted Test Runner state and bounded case results |
 
 The bridge directory is project-local and ignored by Git through its own `.gitignore` file.
 
@@ -107,6 +108,20 @@ JSON result containing GUIDs, paths, names, and main asset types. Searches are
 bounded to 500 results and default to the `Assets` tree; package search requires
 an explicit option. `get_unity_packages` is read-only and parses the project's
 package manifest, lock file, and Unity version without requiring a running Editor.
+
+## Unity Test Runner
+
+`run_unity_tests` uses the optional `com.unity.test-framework` package through
+reflection, so projects without that package still compile the bridge. It supports
+Edit Mode, Play Mode, exact test names, regex group names, categories, and assembly
+filters. The Editor must be out of Play Mode and finished compiling/importing.
+
+The bridge writes each run to `state/test-runs/<runId>.json`, updates the file as
+individual cases finish, and re-registers its callback after a Play Mode domain
+reload. A call may stop waiting while the Unity job continues; use
+`get_unity_test_run` with the returned run ID. Per-case retention is bounded, old
+runs are pruned, and a zero-test run reports `noTests: true` and
+`testsPassed: false` rather than silently passing.
 
 ## Health Check
 

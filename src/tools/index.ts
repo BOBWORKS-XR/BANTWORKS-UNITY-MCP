@@ -258,6 +258,80 @@ Examples: "t:Prefab chair", "t:Scene", or "l:environment". Returns GUIDs, asset 
     },
 
     {
+      name: "run_unity_tests",
+      description: `Run Unity Test Framework tests in Edit Mode, Play Mode, or both.
+Supports exact test names, regex group names, categories, and assembly filters. Results are persisted across Play Mode domain reloads and include bounded per-test failures and output. Test failures are reported with testsPassed=false; they do not make a completed runner operation fail.
+Requires com.unity.test-framework and a running Unity Editor with BanterMCPBridge installed.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["edit", "play", "all"],
+            default: "edit",
+            description: "Test mode to execute",
+          },
+          testNames: {
+            type: "array",
+            items: { type: "string", maxLength: 512 },
+            maxItems: 200,
+            description: "Optional exact full test names",
+          },
+          groupNames: {
+            type: "array",
+            items: { type: "string", maxLength: 512 },
+            maxItems: 200,
+            description: "Optional Unity Test Framework group-name regex filters",
+          },
+          categoryNames: {
+            type: "array",
+            items: { type: "string", maxLength: 512 },
+            maxItems: 200,
+            description: "Optional NUnit category filters",
+          },
+          assemblyNames: {
+            type: "array",
+            items: { type: "string", maxLength: 512 },
+            maxItems: 200,
+            description: "Optional test assembly names without .dll",
+          },
+          timeoutMs: {
+            type: "number",
+            minimum: 1000,
+            maximum: 600000,
+            default: 120000,
+            description: "How long this MCP call waits; the run remains queryable if still active",
+          },
+          maxResults: {
+            type: "number",
+            minimum: 1,
+            maximum: 5000,
+            default: 500,
+            description: "Maximum individual test-case results to retain",
+          },
+        },
+      },
+    },
+
+    {
+      name: "get_unity_test_run",
+      description: `Read a persisted Unity test run by the runId returned from run_unity_tests.
+Use this after a long test call returns status=running. This tool does not start or alter tests.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          runId: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            description: "Test run ID returned by run_unity_tests",
+          },
+        },
+        required: ["runId"],
+      },
+    },
+
+    {
       name: "query_project_state",
       description: `Query the current Unity project state.
 Returns scene hierarchy, components, and other project information.
@@ -931,6 +1005,23 @@ export async function handleToolCall(
       );
       break;
 
+    case "run_unity_tests":
+      result = await runUnityTests(
+        args.mode as UnityTestMode | undefined,
+        args.testNames as string[] | undefined,
+        args.groupNames as string[] | undefined,
+        args.categoryNames as string[] | undefined,
+        args.assemblyNames as string[] | undefined,
+        args.timeoutMs as number | undefined,
+        args.maxResults as number | undefined,
+        config
+      );
+      break;
+
+    case "get_unity_test_run":
+      result = getUnityTestRun(args.runId as string, config);
+      break;
+
     case "check_import_status":
       result = await checkImportStatus(
         args.assetPath as string | undefined,
@@ -1450,6 +1541,165 @@ async function searchUnityAssets(
     commandId: result.commandId,
     error: "Timed out waiting for the AssetDatabase search result from Unity.",
   };
+}
+
+type UnityTestMode = "edit" | "play" | "all";
+
+interface UnityTestRunSnapshot extends Record<string, unknown> {
+  commandId?: string;
+  success?: boolean;
+  testsPassed?: boolean;
+  status?: "queued" | "starting" | "running" | "completed" | "failed";
+  error?: string;
+}
+
+async function runUnityTests(
+  requestedMode: UnityTestMode | undefined,
+  testNames: string[] | undefined,
+  groupNames: string[] | undefined,
+  categoryNames: string[] | undefined,
+  assemblyNames: string[] | undefined,
+  requestedTimeoutMs: number | undefined,
+  requestedMaxResults: number | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const mode = requestedMode ?? "edit";
+  const timeoutMs = requestedTimeoutMs ?? 120000;
+  const maxResults = requestedMaxResults ?? 500;
+
+  if (!["edit", "play", "all"].includes(mode)) {
+    return { success: false, error: `Unknown Unity test mode: ${mode}` };
+  }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000) {
+    return { success: false, error: "Unity test timeoutMs must be a whole number between 1000 and 600000." };
+  }
+  if (!Number.isInteger(maxResults) || maxResults < 1 || maxResults > 5000) {
+    return { success: false, error: "Unity test maxResults must be a whole number between 1 and 5000." };
+  }
+
+  const filterGroups = { testNames, groupNames, categoryNames, assemblyNames };
+  for (const [name, values] of Object.entries(filterGroups)) {
+    if (values !== undefined && (!Array.isArray(values) || values.length > 200 || values.some((value) => typeof value !== "string" || value.length > 512))) {
+      return { success: false, error: `${name} must contain at most 200 strings of at most 512 characters each.` };
+    }
+  }
+
+  const command = await sendUnityCommand({
+    type: "run_tests",
+    mode,
+    testNames: testNames ?? [],
+    groupNames: groupNames ?? [],
+    categoryNames: categoryNames ?? [],
+    assemblyNames: assemblyNames ?? [],
+    timeoutMs,
+    maxResults,
+  }, config);
+  if (!command.success || !command.commandId) {
+    return command;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const run = readUnityTestRun(command.commandId, config);
+    if (run?.status === "completed" || run?.status === "failed") {
+      return presentUnityTestRun(run);
+    }
+
+    if (!command.completed) {
+      const bridgeFailure = consumeLateBridgeAcknowledgement(command.commandId, config);
+      if (bridgeFailure) {
+        return bridgeFailure;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  const run = readUnityTestRun(command.commandId, config);
+  const status = run?.status ?? "queued";
+  return {
+    ...(run ?? {}),
+    success: true,
+    status,
+    runId: command.commandId,
+    timedOut: true,
+    message: status === "queued"
+      ? `Unity has not started the queued test command after ${timeoutMs}ms. Use get_unity_test_run with this runId.`
+      : `Unity tests are still running after ${timeoutMs}ms. Use get_unity_test_run with this runId.`,
+  };
+}
+
+function getUnityTestRun(runId: string, config: BanterMCPConfig): unknown {
+  if (!isValidUnityTestRunId(runId)) {
+    return { success: false, error: "runId must contain only letters, numbers, and hyphens." };
+  }
+
+  const run = readUnityTestRun(runId, config);
+  if (!run) {
+    const bridgeFailure = consumeLateBridgeAcknowledgement(runId, config);
+    if (bridgeFailure) {
+      return bridgeFailure;
+    }
+
+    if (fs.existsSync(path.join(config.mcpCommandsPath, `${runId}.json`))) {
+      return { success: true, runId, status: "queued", message: "Unity has not processed this test command yet." };
+    }
+    return { success: false, runId, error: "Unity test run was not found." };
+  }
+
+  return presentUnityTestRun(run);
+}
+
+export function isValidUnityTestRunId(runId: string): boolean {
+  return typeof runId === "string" && /^[A-Za-z0-9-]{1,128}$/.test(runId);
+}
+
+function readUnityTestRun(runId: string, config: BanterMCPConfig): UnityTestRunSnapshot | undefined {
+  if (!isValidUnityTestRunId(runId)) {
+    return undefined;
+  }
+
+  const resultPath = path.join(config.mcpStatePath, "test-runs", `${runId}.json`);
+  try {
+    const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as UnityTestRunSnapshot;
+    return result.commandId === runId ? result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function presentUnityTestRun(run: UnityTestRunSnapshot): UnityTestRunSnapshot {
+  return {
+    ...run,
+    success: run.status === "starting" || run.status === "running" ? true : run.success === true,
+    runId: run.commandId,
+  };
+}
+
+function consumeLateBridgeAcknowledgement(commandId: string, config: BanterMCPConfig): Record<string, unknown> | undefined {
+  const resultPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
+  if (!fs.existsSync(resultPath)) {
+    return undefined;
+  }
+
+  try {
+    const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as BridgeCommandResult;
+    if (result.commandId === commandId) {
+      fs.unlinkSync(resultPath);
+      if (result.success === false) {
+        return {
+          success: false,
+          runId: commandId,
+          status: "failed",
+          error: result.error || "Unity failed to start the Test Runner job.",
+        };
+      }
+    }
+  } catch {
+    // The bridge may still be atomically publishing the result.
+  }
+
+  return undefined;
 }
 
 interface UnityCommandResult {
