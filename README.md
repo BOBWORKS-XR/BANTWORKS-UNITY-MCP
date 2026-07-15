@@ -132,6 +132,8 @@ Use the launcher's **Install Unity Extension** action or the PowerShell setup me
 
 Unity will compile it automatically and start exporting project state to `YourProject/.bantworks-mcp/state`.
 
+Automatic full-state export remains active in Edit mode, but is disabled during Play mode by default to avoid main-thread hierarchy and `SerializedObject` traversal hitches. Command polling and explicit exports remain active during Play mode. Use **BANTWORKS MCP > Refresh State** or the `export-state` bridge command for an on-demand snapshot, or opt in to periodic Play-mode snapshots with the checkable **BANTWORKS MCP > Background State Export In Play Mode** menu item. The opt-in is persisted in Unity `EditorPrefs`.
+
 ### 5. Verify the Bridge
 
 Ask the MCP client to call `get_bridge_status`. A ready bridge reports `ready: true` and `stateStatus: "fresh"`. If it is not ready, the result contains a specific next step instead of requiring a guess at which part of setup failed.

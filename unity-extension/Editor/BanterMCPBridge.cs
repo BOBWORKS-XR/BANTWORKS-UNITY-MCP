@@ -7,6 +7,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using Unity.Profiling;
 
 namespace BantworksMCP
 {
@@ -46,6 +47,12 @@ namespace BantworksMCP
         private static readonly double CommandCheckInterval = 0.5; // seconds
         private static readonly double StateExportInterval = 2.0; // seconds
         private static readonly double LauncherSettingsCheckInterval = 1.0; // seconds
+        private const string BackgroundStateExportMenuItem = "BANTWORKS MCP/Background State Export In Play Mode";
+        private const string BackgroundStateExportKey = "BantworksMCP_BackgroundStateExportInPlayMode";
+        private static readonly ProfilerMarker AutomaticStateExportProfilerMarker =
+            new ProfilerMarker("BANTWORKS MCP.AutomaticStateExport");
+        private static readonly ProfilerMarker FullStateExportProfilerMarker =
+            new ProfilerMarker("BANTWORKS MCP.ExportProjectState");
         private static DateTime lastLauncherSettingsWriteTime = DateTime.MinValue;
         private static string activeTestRunId;
         private static object activeTestRunnerApi;
@@ -71,6 +78,15 @@ namespace BantworksMCP
             set => EditorPrefs.SetBool(EnableCustomScriptsKey, value);
         }
 
+        private static bool BackgroundStateExportInPlayMode
+        {
+            get => EditorPrefs.GetBool(BackgroundStateExportKey, false);
+            set => EditorPrefs.SetBool(BackgroundStateExportKey, value);
+        }
+
+        private static bool AutomaticStateExportAllowed =>
+            !EditorApplication.isPlayingOrWillChangePlaymode || BackgroundStateExportInPlayMode;
+
         // Console log capture
         private static readonly List<ConsoleLogEntry> capturedLogs = new List<ConsoleLogEntry>();
         private static readonly int MaxLogEntries = 500;
@@ -95,8 +111,8 @@ namespace BantworksMCP
             // Subscribe to console log events
             Application.logMessageReceived += OnLogMessageReceived;
 
-            // Initial state export
-            ExportProjectState();
+            // Initial full export follows the same Play-mode policy as periodic exports.
+            ExportProjectStateAutomatically();
 
             // Scan prefabs on startup (delayed to not block editor)
             EditorApplication.delayCall += () => {
@@ -156,11 +172,11 @@ namespace BantworksMCP
                 ProcessCommands();
             }
 
-            // Export state periodically
+            // Full hierarchy serialization is intentionally opt-in during Play mode.
             if (time - lastStateExport > StateExportInterval)
             {
                 lastStateExport = time;
-                ExportProjectState();
+                ExportProjectStateAutomatically();
             }
 
             // Pick up launcher settings changes while Unity is open
@@ -174,6 +190,17 @@ namespace BantworksMCP
             {
                 lastTestRunCheck = time;
                 CheckActiveTestRunDeadline();
+            }
+        }
+
+        private static void ExportProjectStateAutomatically()
+        {
+            if (!AutomaticStateExportAllowed)
+                return;
+
+            using (AutomaticStateExportProfilerMarker.Auto())
+            {
+                ExportProjectState();
             }
         }
 
@@ -213,12 +240,12 @@ namespace BantworksMCP
 
         private static void OnSceneOpened(UnityEngine.SceneManagement.Scene scene, OpenSceneMode mode)
         {
-            ExportSceneHierarchy();
+            ExportProjectStateAutomatically();
         }
 
         private static void OnSceneSaved(UnityEngine.SceneManagement.Scene scene)
         {
-            ExportSceneHierarchy();
+            ExportProjectStateAutomatically();
         }
 
         private static void OnImportCompleted(string packageName)
@@ -267,6 +294,24 @@ namespace BantworksMCP
             ExportProjectState();
             LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Manual refresh";
             Debug.Log("[BANTWORKS MCP] State refreshed manually");
+        }
+
+        [MenuItem(BackgroundStateExportMenuItem)]
+        private static void ToggleBackgroundStateExportInPlayMode()
+        {
+            bool enabled = !BackgroundStateExportInPlayMode;
+            BackgroundStateExportInPlayMode = enabled;
+            Menu.SetChecked(BackgroundStateExportMenuItem, enabled);
+            LastActivity = DateTime.Now.ToString("HH:mm:ss") +
+                (enabled ? " - Play-mode background export enabled" : " - Play-mode background export disabled");
+            Debug.Log($"[BANTWORKS MCP] Play-mode background state export {(enabled ? "enabled" : "disabled")}");
+        }
+
+        [MenuItem(BackgroundStateExportMenuItem, true)]
+        private static bool ValidateBackgroundStateExportInPlayMode()
+        {
+            Menu.SetChecked(BackgroundStateExportMenuItem, BackgroundStateExportInPlayMode);
+            return true;
         }
 
         [MenuItem("BANTWORKS MCP/Open MCP Folder")]
@@ -3374,9 +3419,12 @@ namespace BantworksMCP
 
         private static void ExportProjectState()
         {
-            ExportSceneHierarchy();
-            ExportEditorState();
-            ExportConsoleLogs();
+            using (FullStateExportProfilerMarker.Auto())
+            {
+                ExportSceneHierarchy();
+                ExportEditorState();
+                ExportConsoleLogs();
+            }
         }
 
         private static void ExportSceneHierarchy()

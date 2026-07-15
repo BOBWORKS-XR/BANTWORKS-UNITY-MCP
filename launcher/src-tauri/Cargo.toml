@@ -1,6 +1,6 @@
 [package]
 name = "bantworks-mcp-launcher"
-version = "1.9.0"
+version = "1.9.1"
 description = "BANTWORKS MCP Configuration Launcher"
 authors = ["BOBWORKS"]
 edition = "2021"
