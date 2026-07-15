@@ -177,9 +177,7 @@ export const BANTER_VS_NODES: Record<string, VSNode> = {
     inputs: [],
     outputs: [
       { name: "trigger", type: "control" },
-      { name: "fromId", type: "value", valueType: "string" },
-      { name: "fromAdmin", type: "value", valueType: "bool" },
-      { name: "data", type: "value", valueType: "string" },
+      { name: "Data", type: "value", valueType: "string" },
     ],
     properties: { coroutine: false },
   },
@@ -189,10 +187,13 @@ export const BANTER_VS_NODES: Record<string, VSNode> = {
     fullType: "Banter.VisualScripting.OnSpaceStatePropsChanged",
     category: "Events",
     description: "Triggered when shared space state changes.",
-    inputs: [],
+    inputs: [
+      { name: "Property Name", type: "value", valueType: "string" },
+    ],
     outputs: [
       { name: "trigger", type: "control" },
-      { name: "changes", type: "value", valueType: "object" },
+      { name: "New Value", type: "value", valueType: "string" },
+      { name: "is Public Property?", type: "value", valueType: "bool" },
     ],
     properties: { coroutine: false },
   },
@@ -441,23 +442,59 @@ export const BANTER_VS_NODES: Record<string, VSNode> = {
     category: "Space",
     description: "Broadcast a message to all users in the space.",
     inputs: [
-      { name: "enter", type: "control" },
-      { name: "data", type: "value", valueType: "string" },
+      { name: "", type: "control" },
+      { name: "Data", type: "value", valueType: "string" },
+      { name: "All Instances", type: "value", valueType: "bool" },
     ],
-    outputs: [{ name: "exit", type: "control" }],
+    outputs: [{ name: "", type: "control" }],
   },
 
-  SetSpaceStateProps: {
-    name: "SetSpaceStateProps",
-    fullType: "Banter.VisualScripting.SetSpaceStateProps",
+  SetSpaceStateProp: {
+    name: "SetSpaceStateProp",
+    fullType: "Banter.VisualScripting.SetSpaceStateProp",
     category: "Space",
-    description: "Set shared space state properties.",
+    description: "Set one protected or public shared space state property.",
     inputs: [
-      { name: "enter", type: "control" },
-      { name: "key", type: "value", valueType: "string" },
-      { name: "value", type: "value", valueType: "object" },
+      { name: "", type: "control" },
+      { name: "Property Name", type: "value", valueType: "string" },
+      { name: "Value", type: "value", valueType: "string" },
+      { name: "Is Public Property?", type: "value", valueType: "bool" },
     ],
-    outputs: [{ name: "exit", type: "control" }],
+    outputs: [{ name: "", type: "control" }],
+  },
+
+  LoadTextUrl: {
+    name: "LoadTextUrl",
+    fullType: "Banter.VisualScripting.LoadTextUrl",
+    category: "Networking",
+    description: "Load text from an HTTP or HTTPS URL on a coroutine flow.",
+    inputs: [
+      { name: "Load", type: "control" },
+      { name: "URL", type: "value", valueType: "string" },
+      { name: "Method", type: "value", valueType: "string" },
+      { name: "Body", type: "value", valueType: "string" },
+      { name: "ContentType", type: "value", valueType: "string" },
+    ],
+    outputs: [
+      { name: "Loaded", type: "control" },
+      { name: "Failed", type: "control" },
+      { name: "Text", type: "value", valueType: "string" },
+    ],
+    notes: ["The upstream SDK 3.1.2 implementation sends method POST with UnityWebRequest.Put."],
+  },
+
+  LoadGltfUrl: {
+    name: "LoadGltfUrl",
+    fullType: "Banter.VisualScripting.LoadGltfUrl",
+    category: "Networking",
+    description: "Set a BanterGLTF component URL.",
+    inputs: [
+      { name: "", type: "control" },
+      { name: "URL", type: "value", valueType: "string" },
+      { name: "BanterGltf", type: "value", valueType: "BanterGLTF" },
+    ],
+    outputs: [{ name: "", type: "control" }],
+    notes: ["Obsolete in Banter SDK 3.1.2; prefer setting BanterGLTF.Url when possible."],
   },
 
   StartSTT: {
@@ -630,8 +667,9 @@ export const VS_NODE_CATEGORIES = {
   ],
   Space: [
     "AiImage", "AiModel", "SetScore", "SendOneShot",
-    "SetSpaceStateProps", "StartSTT", "StopSTT",
+    "SetSpaceStateProp", "StartSTT", "StopSTT",
   ],
+  Networking: ["LoadTextUrl", "LoadGltfUrl"],
   User: ["GetLocalUserState"],
   UI: [
     "CreateUIButton", "CreateUILabel", "CreateUITextField",
@@ -643,7 +681,8 @@ export const VS_NODE_CATEGORIES = {
 // Critical notes for VS graph generation
 export const VS_CRITICAL_NOTES = {
   namespace: "Banter.VisualScripting (NOT Banter.VisualScripting.Events or similar)",
-  eventNodes: "All event nodes require 'coroutine': false",
+  eventNodes: "Event nodes require a boolean 'coroutine' flag; use true when a reachable flow enters a wait or coroutine URL loader",
+  emptyControlPorts: "Many Banter action nodes use the empty string as both control input and output port",
   outputPorts: {
     OnCollisionEnter: "'data' (not 'collision')",
     Greater: "'comparison' (not 'greater')",

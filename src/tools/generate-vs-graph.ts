@@ -88,6 +88,7 @@ const NODE_TYPE_MAP: Record<string, string> = {
   OnUserJoined: "Banter.VisualScripting.OnUserJoined",
   OnUserLeft: "Banter.VisualScripting.OnUserLeft",
   OnOneShot: "Banter.VisualScripting.OnOneShot",
+  OnSpaceStatePropsChanged: "Banter.VisualScripting.OnSpaceStatePropsChanged",
   GetLocalUserState: "Banter.VisualScripting.GetLocalUserState",
 
   // Banter player control
@@ -98,12 +99,17 @@ const NODE_TYPE_MAP: Record<string, string> = {
   SetCanTeleport: "Banter.VisualScripting.SetCanTeleport",
 
   // Banter space
+  LoadGltfUrl: "Banter.VisualScripting.LoadGltfUrl",
+  LoadTextUrl: "Banter.VisualScripting.LoadTextUrl",
   SendOneShot: "Banter.VisualScripting.SendOneShot",
-  SetSpaceStateProps: "Banter.VisualScripting.SetSpaceStateProps",
+  SetSpaceStateProp: "Banter.VisualScripting.SetSpaceStateProp",
+  // Backwards-compatible shorthand for the old MCP spelling.
+  SetSpaceStateProps: "Banter.VisualScripting.SetSpaceStateProp",
   AiImage: "Banter.VisualScripting.AiImage",
   AiModel: "Banter.VisualScripting.AiModel",
 
   // Unity events
+  CustomEvent: "Unity.VisualScripting.CustomEvent",
   Start: "Unity.VisualScripting.Start",
   Update: "Unity.VisualScripting.Update",
   OnCollisionEnter: "Unity.VisualScripting.OnCollisionEnter",
@@ -115,6 +121,12 @@ const NODE_TYPE_MAP: Record<string, string> = {
   Sequence: "Unity.VisualScripting.Sequence",
   While: "Unity.VisualScripting.While",
   For: "Unity.VisualScripting.For",
+  WaitForEndOfFrameUnit: "Unity.VisualScripting.WaitForEndOfFrameUnit",
+  WaitForNextFrameUnit: "Unity.VisualScripting.WaitForNextFrameUnit",
+  WaitForSeconds: "Unity.VisualScripting.WaitForSecondsUnit",
+  WaitForSecondsUnit: "Unity.VisualScripting.WaitForSecondsUnit",
+  WaitUntilUnit: "Unity.VisualScripting.WaitUntilUnit",
+  WaitWhileUnit: "Unity.VisualScripting.WaitWhileUnit",
 
   // Unity variables
   SetVariable: "Unity.VisualScripting.SetVariable",
@@ -144,7 +156,7 @@ const NODE_TYPE_MAP: Record<string, string> = {
   Debug: "Unity.VisualScripting.Debug",
 };
 
-// Event nodes that require coroutine: false
+// Event nodes that serialize Unity Visual Scripting's coroutine flag.
 const EVENT_NODES = new Set([
   "Banter.VisualScripting.OnGrab",
   "Banter.VisualScripting.OnRelease",
@@ -153,6 +165,8 @@ const EVENT_NODES = new Set([
   "Banter.VisualScripting.OnUserJoined",
   "Banter.VisualScripting.OnUserLeft",
   "Banter.VisualScripting.OnOneShot",
+  "Banter.VisualScripting.OnSpaceStatePropsChanged",
+  "Unity.VisualScripting.CustomEvent",
   "Unity.VisualScripting.Start",
   "Unity.VisualScripting.Update",
   "Unity.VisualScripting.OnCollisionEnter",
@@ -160,6 +174,18 @@ const EVENT_NODES = new Set([
   ...Object.values(BANTER_CUSTOM_VS_NODES)
     .filter((node) => node.isEvent)
     .map((node) => node.fullType),
+]);
+
+const COROUTINE_UNIT_TYPES = new Set([
+  "Banter.VisualScripting.LoadAudioUrl",
+  "Banter.VisualScripting.LoadTextUrl",
+  "Banter.VisualScripting.LoadTextureUrl",
+  "Unity.VisualScripting.WaitForEndOfFrameUnit",
+  "Unity.VisualScripting.WaitForFlow",
+  "Unity.VisualScripting.WaitForNextFrameUnit",
+  "Unity.VisualScripting.WaitForSecondsUnit",
+  "Unity.VisualScripting.WaitUntilUnit",
+  "Unity.VisualScripting.WaitWhileUnit",
 ]);
 
 /**
@@ -170,6 +196,7 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
     const nodes = (params.nodes || []) as NodeSpec[];
     const connections = (params.connections || []) as ConnectionSpec[];
     const variables = (params.variables || []) as VariableSpec[];
+    const coroutineEventIds = inferCoroutineEventIds(nodes, connections);
 
     // Generate node objects
     const nodeObjects: unknown[] = [];
@@ -181,7 +208,13 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
       nodeIdMap.set(node.id, $id);
 
       const fullType = NODE_TYPE_MAP[node.type] || node.type;
-      const nodeObj = createNodeObject(fullType, $id, node.position, node.properties);
+      const nodeObj = createNodeObject(
+        fullType,
+        $id,
+        node.position,
+        node.properties,
+        coroutineEventIds.has(node.id)
+      );
       nodeObjects.push(nodeObj);
     }
 
@@ -259,7 +292,8 @@ function createNodeObject(
   type: string,
   $id: string,
   position?: { x: number; y: number },
-  properties?: Record<string, unknown>
+  properties?: Record<string, unknown>,
+  inferredCoroutine = false
 ): Record<string, unknown> {
   const customNode = BANTER_CUSTOM_NODES_BY_FULL_TYPE.get(type);
   const node: Record<string, unknown> = {
@@ -270,9 +304,11 @@ function createNodeObject(
     $id,
   };
 
-  // Add coroutine: false for event nodes
+  // Coroutine events are required when any reachable control path enters a wait/loader.
   if (EVENT_NODES.has(type)) {
-    node.coroutine = false;
+    node.coroutine = typeof properties?.coroutine === "boolean"
+      ? properties.coroutine
+      : inferredCoroutine;
     node.defaultValues = properties?.defaultValues || {};
   }
 
@@ -345,6 +381,43 @@ function createNodeObject(
   }
 
   return node;
+}
+
+function inferCoroutineEventIds(nodes: NodeSpec[], connections: ConnectionSpec[]): Set<string> {
+  const typeById = new Map(
+    nodes.map((node) => [node.id, NODE_TYPE_MAP[node.type] || node.type])
+  );
+  const outgoing = new Map<string, string[]>();
+
+  for (const connection of connections) {
+    if (connection.type !== "control") continue;
+    const destinations = outgoing.get(connection.from) || [];
+    destinations.push(connection.to);
+    outgoing.set(connection.from, destinations);
+  }
+
+  const coroutineEvents = new Set<string>();
+  for (const node of nodes) {
+    const nodeType = typeById.get(node.id);
+    if (!nodeType || !EVENT_NODES.has(nodeType)) continue;
+
+    const visited = new Set<string>([node.id]);
+    const pending = [...(outgoing.get(node.id) || [])];
+    while (pending.length > 0) {
+      const nodeId = pending.shift()!;
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
+
+      const reachableType = typeById.get(nodeId);
+      if (reachableType && COROUTINE_UNIT_TYPES.has(reachableType)) {
+        coroutineEvents.add(node.id);
+        break;
+      }
+      pending.push(...(outgoing.get(nodeId) || []));
+    }
+  }
+
+  return coroutineEvents;
 }
 
 function customDefaultValuesToSerializedDefaults(

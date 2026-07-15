@@ -24,7 +24,7 @@ const BANTER_NODE_TYPES = new Set(
   ]
 );
 
-// Event nodes that require coroutine: false
+// Event nodes that serialize Unity Visual Scripting's coroutine flag.
 const EVENT_NODES = new Set([
   "Banter.VisualScripting.OnGrab",
   "Banter.VisualScripting.OnRelease",
@@ -42,6 +42,7 @@ const EVENT_NODES = new Set([
   "Banter.VisualScripting.OnSTT",
   "Banter.VisualScripting.OnAiImage",
   "Banter.VisualScripting.OnAiModel",
+  "Unity.VisualScripting.CustomEvent",
   "Unity.VisualScripting.Start",
   "Unity.VisualScripting.Update",
   "Unity.VisualScripting.OnCollisionEnter",
@@ -51,6 +52,19 @@ const EVENT_NODES = new Set([
   ...Object.values(BANTER_CUSTOM_VS_NODES)
     .filter((node) => node.isEvent)
     .map((node) => node.fullType),
+]);
+
+// Units whose control input can only run from a coroutine-enabled event path.
+const COROUTINE_UNIT_TYPES = new Set([
+  "Banter.VisualScripting.LoadAudioUrl",
+  "Banter.VisualScripting.LoadTextUrl",
+  "Banter.VisualScripting.LoadTextureUrl",
+  "Unity.VisualScripting.WaitForEndOfFrameUnit",
+  "Unity.VisualScripting.WaitForFlow",
+  "Unity.VisualScripting.WaitForNextFrameUnit",
+  "Unity.VisualScripting.WaitForSecondsUnit",
+  "Unity.VisualScripting.WaitUntilUnit",
+  "Unity.VisualScripting.WaitWhileUnit",
 ]);
 
 // GUID validation regex
@@ -114,6 +128,7 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
     for (const { conn, type } of connections) {
       validateConnection(conn, type, nodeIds, errors, warnings);
     }
+    validateCoroutinePaths(nodes, connections, errors);
 
     // Validate variables
     if (graphData.variables && graphData.variables.collection) {
@@ -254,10 +269,10 @@ function validateNode(
     }
   }
 
-  // Check event nodes for coroutine: false
+  // Event units must serialize the flag, but true is required for coroutine paths.
   if (EVENT_NODES.has(nodeType)) {
-    if (node.coroutine !== false) {
-      errors.push(`Event node ${nodeId} (${nodeType}) missing 'coroutine: false'`);
+    if (typeof node.coroutine !== "boolean") {
+      errors.push(`Event node ${nodeId} (${nodeType}) missing boolean 'coroutine' flag`);
     }
   }
 
@@ -330,10 +345,11 @@ function validateConnection(
   } else if (!nodeIds.has(destinationRef)) {
     errors.push(`Connection references missing destination node $id: ${destinationRef}`);
   }
-  if (!conn.sourceKey) {
+  // Banter deliberately uses an empty string for flow ports on many action units.
+  if (typeof conn.sourceKey !== "string") {
     errors.push(`Connection missing sourceKey`);
   }
-  if (!conn.destinationKey) {
+  if (typeof conn.destinationKey !== "string") {
     errors.push(`Connection missing destinationKey`);
   }
 
@@ -344,6 +360,64 @@ function validateConnection(
   }
   if (sourceKey === "greater") {
     warnings.push(`Port name 'greater' is wrong - Greater node outputs 'comparison', not 'greater'`);
+  }
+}
+
+function validateCoroutinePaths(
+  nodes: Array<Record<string, unknown>>,
+  connections: Array<{ conn: Record<string, unknown>; type: "control" | "value" }>,
+  errors: string[]
+): void {
+  const nodesById = new Map<string, Record<string, unknown>>();
+  const outgoing = new Map<string, string[]>();
+
+  for (const node of nodes) {
+    if (typeof node.$id === "string") {
+      nodesById.set(node.$id, node);
+    }
+  }
+
+  for (const { conn, type } of connections) {
+    if (type !== "control") continue;
+    const source = (conn.sourceUnit as Record<string, unknown> | undefined)?.$ref;
+    const destination = (conn.destinationUnit as Record<string, unknown> | undefined)?.$ref;
+    if (typeof source !== "string" || typeof destination !== "string") continue;
+    const destinations = outgoing.get(source) || [];
+    destinations.push(destination);
+    outgoing.set(source, destinations);
+  }
+
+  for (const eventNode of nodes) {
+    const eventId = eventNode.$id;
+    const eventType = eventNode.$type;
+    if (
+      typeof eventId !== "string" ||
+      typeof eventType !== "string" ||
+      !EVENT_NODES.has(eventType) ||
+      eventNode.coroutine !== false
+    ) {
+      continue;
+    }
+
+    const visited = new Set<string>([eventId]);
+    const pending = [...(outgoing.get(eventId) || [])];
+    while (pending.length > 0) {
+      const nodeId = pending.shift()!;
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
+
+      const node = nodesById.get(nodeId);
+      const nodeType = node?.$type;
+      if (typeof nodeType === "string" && COROUTINE_UNIT_TYPES.has(nodeType)) {
+        errors.push(
+          `Event node ${eventId} (${eventType}) has 'coroutine: false' but reaches coroutine unit ` +
+          `${nodeId} (${nodeType}); set 'coroutine: true'`
+        );
+        break;
+      }
+
+      pending.push(...(outgoing.get(nodeId) || []));
+    }
   }
 }
 

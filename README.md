@@ -179,7 +179,7 @@ Scene lifecycle tools expose open and build-scene state, save without dialogs, a
 
 Project routing deduplicates environment and launcher projects by canonical path, assigns stable path-derived IDs, and reports the live Unity editor process identity. Each tool call snapshots its selected project, so switching projects cannot redirect an already-running command.
 
-The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md). The versions exercised in release checks and their known limits are documented in [docs/compatibility.md](docs/compatibility.md).
+The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md). The versions exercised in release checks and their known limits are documented in [docs/compatibility.md](docs/compatibility.md). The latest Visual Scripting and desktop integration findings are in [docs/visual-scripting-audit-2026-07-15.md](docs/visual-scripting-audit-2026-07-15.md).
 
 ### Prompts (Guided workflows)
 

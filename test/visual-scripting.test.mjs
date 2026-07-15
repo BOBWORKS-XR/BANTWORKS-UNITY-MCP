@@ -65,6 +65,68 @@ test("generator emits canonical elements and versionless connections", () => {
   assert.match(result.assetContent, /m_EditorClassIdentifier: Unity\.VisualScripting\.Flow::Unity\.VisualScripting\.ScriptGraphAsset/);
 });
 
+test("generator uses the singular space-state type and valid empty Banter flow ports", () => {
+  const result = generateVSGraph({
+    graphName: "Networking",
+    nodes: [
+      { type: "SetSpaceStateProps", id: "state" },
+      { type: "SendOneShot", id: "send" },
+    ],
+    connections: [
+      { from: "state", fromPort: "", to: "send", toPort: "", type: "control" },
+    ],
+  });
+
+  assert.equal(result.success, true);
+  const generated = JSON.parse(result.graphJson);
+  const stateNode = generated.graph.elements.find((element) => element.$id === "1");
+  const connection = generated.graph.elements.find((element) => element.$type.endsWith("ControlConnection"));
+  assert.equal(stateNode.$type, "Banter.VisualScripting.SetSpaceStateProp");
+  assert.equal(connection.sourceKey, "");
+  assert.equal(connection.destinationKey, "");
+  assert.equal(validateVSGraph(result.graphJson).valid, true);
+});
+
+test("generator enables coroutine events when their flow reaches a coroutine unit", () => {
+  const result = generateVSGraph({
+    graphName: "HTTP Loader",
+    nodes: [
+      { type: "Start", id: "start" },
+      { type: "LoadTextUrl", id: "load" },
+    ],
+    connections: [
+      { from: "start", fromPort: "trigger", to: "load", toPort: "Load", type: "control" },
+    ],
+  });
+
+  assert.equal(result.success, true);
+  const generated = JSON.parse(result.graphJson);
+  const startNode = generated.graph.elements.find((element) => element.$id === "1");
+  assert.equal(startNode.coroutine, true);
+  assert.equal(validateVSGraph(result.graphJson).valid, true);
+});
+
+test("validator rejects a non-coroutine event that reaches a coroutine unit", () => {
+  const start = node("1", UUIDS.one, "Unity.VisualScripting.Start");
+  start.coroutine = false;
+  const graphJson = graphWith([
+    start,
+    node("2", UUIDS.two, "Unity.VisualScripting.WaitForSecondsUnit"),
+    {
+      sourceUnit: { $ref: "1" },
+      sourceKey: "trigger",
+      destinationUnit: { $ref: "2" },
+      destinationKey: "enter",
+      guid: UUIDS.three,
+      $type: "Unity.VisualScripting.ControlConnection",
+    },
+  ]);
+
+  const validation = validateVSGraph(graphJson);
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => error.includes("reaches coroutine unit")));
+});
+
 test("validator accepts Unity 1.9 serialization details", () => {
   const graphJson = graphWith([
     node("1", UUIDS.one, "Unity.VisualScripting.This"),
