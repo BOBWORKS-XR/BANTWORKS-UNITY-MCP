@@ -1,0 +1,14 @@
+{
+  "name": "Bantworks.Compatibility.Runtime",
+  "rootNamespace": "Bantworks.Compatibility",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

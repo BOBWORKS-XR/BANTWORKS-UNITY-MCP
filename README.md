@@ -11,7 +11,7 @@ BANTWORKS MCP uses the standard stdio MCP transport. Codex is a first-class supp
 - The launcher can keep Claude Code and Codex synchronized when a scene channel changes.
 - Other stdio-compatible MCP clients can launch the standalone `banter-mcp.mjs` bundle or the source build at `dist/index.js` with the `UNITY_PROJECT_PATH` environment variable.
 
-The repository is intentionally generic. It contains no project-specific gameplay, respawn, or scene logic; those belong in the Unity project using the bridge.
+The repository is intentionally generic. Product-specific gameplay and scene logic belong in the Unity project using the bridge. Its only runtime scene logic is a self-contained compatibility fixture that creates a new marked test project and has no dependency on a user's game project or assets.
 
 ## Features
 
@@ -23,6 +23,7 @@ The repository is intentionally generic. It contains no project-specific gamepla
 - **Unity Integration**: Query project state, check import status, refresh assets
 - **Closed-Loop Workflow**: Validate → Write → Import and deserialize in Unity → Test
 - **Capability Profiles**: Limit the exposed tool surface to inspection, authoring, testing, Banter workflows, or minimal project routing
+- **Cross-Version Unity Harness**: Provision a deterministic obstacle course that validates physics, serialized scenes, generated Visual Scripting graphs, bridge attachment, Play Mode tests, and optional Banter sync/allow-list behavior
 
 ## Banter Visual Scripting Expertise
 
@@ -36,12 +37,18 @@ BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not j
 
 This knowledge improves graph generation and review, but source-class coverage is not proof of runtime behavior. `validate_vs_graph_in_unity` provides an authoritative import and deserialization check in the selected Editor; generated graphs must still be exercised in the target Unity and Banter SDK version.
 
+## Cross-Version Obstacle Course
+
+`scripts/setup-unity-obstacle-course.ps1` creates or updates only a marked fixture project. It builds moving platforms, rotating hazards, deterministic pivot doors, paired rolling-ball ramps, world-space respawn with motion reset, and optional local asset dressing. When Banter is pinned, it also writes a separate integration scene with two synced balls.
+
+The provisioner generates a plain Unity or Banter event graph through the MCP code, validates its real Unity import through the bridge, attaches it to a `ScriptMachine`, saves and reloads the scene, invokes Banter's validator when available, and runs four Play Mode tests. Optional Asset Store packages remain local and are not committed or required. See [docs/obstacle-course-compatibility.md](docs/obstacle-course-compatibility.md) for the command, safety contract, and exercised matrix.
+
 ## Requirements
 
 - Node.js 18 or later.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
-- Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
+- Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
 
 ## Quick Start
 
@@ -244,6 +251,10 @@ banter-mcp/
 │       └── index.ts
 ├── test/                     # Node built-in test suite
 ├── docs/                     # Audit, protocol, and node reference material
+├── compatibility/
+│   └── obstacle-course/      # Cross-version Unity integration fixture
+├── scripts/
+│   └── setup-unity-obstacle-course.ps1
 ├── unity-extension/
 │   └── Editor/
 │       └── BanterMCPBridge.cs  # Unity Editor extension
@@ -305,6 +316,7 @@ npm test
 ./scripts/smoke-unity-asset-reference.ps1
 ./scripts/smoke-unity-banter-vs.ps1
 ./scripts/smoke-unity-banter-matrix.ps1
+./scripts/setup-unity-obstacle-course.ps1 -UnityEditorPath <path-to-Unity.exe> -ProjectPath <fixture-project> -RunTests
 cd launcher/src-tauri
 cargo check
 ```

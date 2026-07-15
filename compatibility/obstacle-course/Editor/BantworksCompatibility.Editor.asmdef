@@ -1,0 +1,20 @@
+{
+  "name": "Bantworks.Compatibility.Editor",
+  "rootNamespace": "Bantworks.Compatibility.Editor",
+  "references": [
+    "Bantworks.Compatibility.Runtime",
+    "Unity.VisualScripting.Core",
+    "Unity.VisualScripting.Flow"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

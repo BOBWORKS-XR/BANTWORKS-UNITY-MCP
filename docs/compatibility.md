@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Reviewed: 2026-07-14
+Reviewed: 2026-07-15
 
 This matrix records exercised combinations, not assumptions based only on
 package metadata. A row marked "manual" was run in a disposable local project,
@@ -11,7 +11,7 @@ enforced by the repository workflow.
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Node.js 18, 20, 22, 24 | CI target | TypeScript build, 47 server tests, standalone esbuild bundle, and isolated no-`node_modules` smoke |
+| Node.js 18, 20, 22, 24 | CI target | TypeScript build, server test suite, standalone esbuild bundle, and isolated no-`node_modules` smoke |
 | Codex desktop/CLI | Supported configuration | Launcher and `setup.ps1` write stdio configuration, project environment, 20-second startup timeout, and 600-second tool timeout |
 | Claude Code/Desktop | Supported configuration | Launcher and `setup.ps1` write the same stdio server and selected project environment |
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |
@@ -32,6 +32,9 @@ the default remains `all` for backward compatibility.
 | 6000.3.2f1 | 1.9.9 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Automated expected incompatibility: package compilation failed with `CS0619`, `CS0029`, and `CS0266` for legacy `PhysicMaterial` APIs |
 | 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Automated local matrix: generated `OnGrab` imported; `ScriptMachine` assignment survived scene reload; SDK allow-list positive, forbidden-unit negative, and recovery checks passed |
 | 6000.3.10f1 | 1.9.9 | None | Automated local disposable fixture: bridge compiled; path/GUID assignment, clear, type mismatch, incompatible type, traversal, and non-reference rejection passed; a real `ScriptGraphAsset` attached to and cleared from `ScriptMachine.nest.macro` |
+| 6000.3.10f1 | 1.9.9 | None | Persistent obstacle fixture: generic course compiled; MCP-generated `Start` graph imported and persisted through the bridge; 4/4 Play Mode tests passed |
+| 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
+| 2022.3.39f1 | 1.9.4 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
 
 The observed Banter 3.2.2 package declares Unity 2022.3.39f1 metadata, but its
 source references Unity 6 `PhysicsMaterial` and `PhysicsMaterialCombine` types.
@@ -56,6 +59,9 @@ package version, and editor combination.
 `validate_banter_visual_scripting` invokes the installed SDK's public allow-list
 validator. These checks should be run in the target project before treating a
 generated graph as ready.
+
+The repeatable obstacle fixture and its safety boundary are documented in
+[obstacle-course-compatibility.md](obstacle-course-compatibility.md).
 
 ## Unity Test Framework
 

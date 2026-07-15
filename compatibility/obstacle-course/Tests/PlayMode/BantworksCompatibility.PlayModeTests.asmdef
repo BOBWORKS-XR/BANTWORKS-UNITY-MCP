@@ -1,0 +1,21 @@
+{
+  "name": "Bantworks.Compatibility.PlayModeTests",
+  "rootNamespace": "Bantworks.Compatibility.Tests",
+  "references": [
+    "Bantworks.Compatibility.Runtime"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false,
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
