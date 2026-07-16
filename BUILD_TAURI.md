@@ -47,6 +47,10 @@ Run `cargo fmt --check` and `cargo test` in `launcher/src-tauri` before creating
 
 Version tags matching `v<package version>` run the release workflow. It creates draft NSIS/MSI installers and a standalone Node 18+ ZIP. Version metadata must agree across `package.json`, the MCP handshake, Cargo, and Tauri configuration; verify it with `npm run check:version`.
 
+## Windows Signing
+
+The repository does not contain an Authenticode certificate or signing secrets. Local builds and the default release workflow are therefore unsigned and may trigger **Unknown publisher** or Microsoft Defender SmartScreen warnings. Before broad public distribution, sign the launcher and installer artifacts with the publisher's code-signing certificate and a trusted timestamp, then verify them with `Get-AuthenticodeSignature`. Continue publishing `SHA256SUMS.txt`; checksums verify artifact integrity but do not establish publisher identity.
+
 ## Development Mode
 
 For development with hot-reload:

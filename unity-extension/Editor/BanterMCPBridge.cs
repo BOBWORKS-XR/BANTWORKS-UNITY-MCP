@@ -41,11 +41,19 @@ namespace BantworksMCP
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
 
         private static double lastCommandCheck = 0;
-        private static double lastStateExport = 0;
+        private static double lastLightweightStateExport = 0;
+        private static double lastPeriodicPlayModeStateExport = 0;
+        private static double lastConsoleExport = 0;
         private static double lastLauncherSettingsCheck = 0;
         private static double lastTestRunCheck = 0;
+        private static double automaticStateExportNotBefore = 0;
+        private static bool automaticStateExportPending;
+        private static volatile bool consoleExportPending;
         private static readonly double CommandCheckInterval = 0.5; // seconds
-        private static readonly double StateExportInterval = 2.0; // seconds
+        private static readonly double LightweightStateExportInterval = 1.0; // seconds
+        private static readonly double PeriodicPlayModeStateExportInterval = 2.0; // seconds
+        private static readonly double AutomaticStateExportDebounce = 0.5; // seconds
+        private static readonly double ConsoleExportDebounce = 0.25; // seconds
         private static readonly double LauncherSettingsCheckInterval = 1.0; // seconds
         private const string BackgroundStateExportMenuItem = "BANTWORKS MCP/Background State Export In Play Mode";
         private const string BackgroundStateExportKey = "BantworksMCP_BackgroundStateExportInPlayMode";
@@ -100,7 +108,12 @@ namespace BantworksMCP
 
             // Subscribe to editor events
             EditorApplication.update += OnEditorUpdate;
+            EditorApplication.hierarchyChanged += OnHierarchyChanged;
+            EditorApplication.projectChanged += OnProjectChanged;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
+            Selection.selectionChanged += OnSelectionChanged;
+            Undo.undoRedoPerformed += OnUndoRedoPerformed;
+            Undo.postprocessModifications += OnPostprocessModifications;
             EditorSceneManager.sceneOpened += OnSceneOpened;
             EditorSceneManager.sceneSaved += OnSceneSaved;
 
@@ -111,8 +124,8 @@ namespace BantworksMCP
             // Subscribe to console log events
             Application.logMessageReceived += OnLogMessageReceived;
 
-            // Initial full export follows the same Play-mode policy as periodic exports.
-            ExportProjectStateAutomatically();
+            // Defer the initial full export until Unity has settled after the domain reload.
+            ScheduleAutomaticStateExport();
 
             // Scan prefabs on startup (delayed to not block editor)
             EditorApplication.delayCall += () => {
@@ -172,10 +185,33 @@ namespace BantworksMCP
                 ProcessCommands();
             }
 
-            // Full hierarchy serialization is intentionally opt-in during Play mode.
-            if (time - lastStateExport > StateExportInterval)
+            // Keep editor status fresh without traversing the scene hierarchy.
+            if (time - lastLightweightStateExport > LightweightStateExportInterval)
             {
-                lastStateExport = time;
+                lastLightweightStateExport = time;
+                ExportEditorState();
+            }
+
+            if (consoleExportPending && time - lastConsoleExport > ConsoleExportDebounce)
+            {
+                consoleExportPending = false;
+                lastConsoleExport = time;
+                ExportConsoleLogs();
+            }
+
+            bool fullStateExported = false;
+            if (automaticStateExportPending && time >= automaticStateExportNotBefore)
+            {
+                automaticStateExportPending = false;
+                ExportProjectStateAutomatically();
+                fullStateExported = true;
+            }
+
+            // Periodic full snapshots remain an explicit Play-mode opt-in.
+            if (!fullStateExported && EditorApplication.isPlaying && BackgroundStateExportInPlayMode &&
+                time - lastPeriodicPlayModeStateExport > PeriodicPlayModeStateExportInterval)
+            {
+                lastPeriodicPlayModeStateExport = time;
                 ExportProjectStateAutomatically();
             }
 
@@ -202,6 +238,16 @@ namespace BantworksMCP
             {
                 ExportProjectState();
             }
+        }
+
+        private static void ScheduleAutomaticStateExport(double delay = -1)
+        {
+            if (!AutomaticStateExportAllowed)
+                return;
+
+            double debounce = delay < 0 ? AutomaticStateExportDebounce : delay;
+            automaticStateExportPending = true;
+            automaticStateExportNotBefore = EditorApplication.timeSinceStartup + debounce;
         }
 
         private static void LoadLauncherSettingsIfChanged()
@@ -236,16 +282,52 @@ namespace BantworksMCP
         private static void OnPlayModeChanged(PlayModeStateChange state)
         {
             ExportEditorState();
+
+            if (state == PlayModeStateChange.EnteredEditMode)
+            {
+                ScheduleAutomaticStateExport();
+            }
+            else if (state == PlayModeStateChange.EnteredPlayMode && BackgroundStateExportInPlayMode)
+            {
+                lastPeriodicPlayModeStateExport = EditorApplication.timeSinceStartup;
+                ScheduleAutomaticStateExport(0);
+            }
+        }
+
+        private static void OnHierarchyChanged()
+        {
+            ScheduleAutomaticStateExport();
+        }
+
+        private static void OnProjectChanged()
+        {
+            ScheduleAutomaticStateExport();
+        }
+
+        private static void OnSelectionChanged()
+        {
+            ExportEditorState();
+        }
+
+        private static void OnUndoRedoPerformed()
+        {
+            ScheduleAutomaticStateExport();
+        }
+
+        private static UndoPropertyModification[] OnPostprocessModifications(UndoPropertyModification[] modifications)
+        {
+            ScheduleAutomaticStateExport();
+            return modifications;
         }
 
         private static void OnSceneOpened(UnityEngine.SceneManagement.Scene scene, OpenSceneMode mode)
         {
-            ExportProjectStateAutomatically();
+            ScheduleAutomaticStateExport();
         }
 
         private static void OnSceneSaved(UnityEngine.SceneManagement.Scene scene)
         {
-            ExportProjectStateAutomatically();
+            ScheduleAutomaticStateExport();
         }
 
         private static void OnImportCompleted(string packageName)
@@ -277,6 +359,8 @@ namespace BantworksMCP
                 {
                     capturedLogs.RemoveAt(0);
                 }
+
+                consoleExportPending = true;
             }
         }
 
@@ -302,6 +386,18 @@ namespace BantworksMCP
             bool enabled = !BackgroundStateExportInPlayMode;
             BackgroundStateExportInPlayMode = enabled;
             Menu.SetChecked(BackgroundStateExportMenuItem, enabled);
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                if (enabled)
+                {
+                    lastPeriodicPlayModeStateExport = EditorApplication.timeSinceStartup;
+                    ScheduleAutomaticStateExport(0);
+                }
+                else
+                {
+                    automaticStateExportPending = false;
+                }
+            }
             LastActivity = DateTime.Now.ToString("HH:mm:ss") +
                 (enabled ? " - Play-mode background export enabled" : " - Play-mode background export disabled");
             Debug.Log($"[BANTWORKS MCP] Play-mode background state export {(enabled ? "enabled" : "disabled")}");

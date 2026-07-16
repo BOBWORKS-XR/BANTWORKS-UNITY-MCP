@@ -57,6 +57,8 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 
 Download and run the Windows setup executable from the latest GitHub release. It includes the versioned MCP server, Unity bridge, and a checksum-verified private Node.js runtime; a separate Node.js installation and source checkout are not required.
 
+Verify downloaded artifacts against the release's `SHA256SUMS.txt`. Builds that are not Authenticode-signed can show an **Unknown publisher** or Microsoft Defender SmartScreen warning; a matching checksum verifies file integrity but does not replace publisher identity signing.
+
 Open **BANTWORKS MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up BANTWORKS MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports project, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
 
 Bridge copies are project-local. The launcher compares every configured project against its bundled bridge, labels stale copies as **Update available**, and provides **Update Bridges** to back up and refresh all configured projects in one action.
@@ -141,7 +143,7 @@ The guided setup installs the bridge automatically. For a manual install, use th
 
 Unity will compile it automatically and start exporting project state to `YourProject/.bantworks-mcp/state`.
 
-Automatic full-state export remains active in Edit mode, but is disabled during Play mode by default to avoid main-thread hierarchy and `SerializedObject` traversal hitches. Command polling and explicit exports remain active during Play mode. Use **BANTWORKS MCP > Refresh State** or the `export-state` bridge command for an on-demand snapshot, or opt in to periodic Play-mode snapshots with the checkable **BANTWORKS MCP > Background State Export In Play Mode** menu item. The opt-in is persisted in Unity `EditorPrefs`.
+In Edit mode, the bridge keeps a lightweight editor-status heartbeat and debounces full-state exports after actual hierarchy, project, property, undo, scene-open, and scene-save changes. It does not repeatedly traverse an unchanged scene. Automatic full-state export is disabled during Play mode by default to avoid main-thread hierarchy and `SerializedObject` traversal hitches. Command polling and explicit exports remain active during Play mode. Use **BANTWORKS MCP > Refresh State** or the `export-state` bridge command for an on-demand snapshot, or opt in to periodic Play-mode snapshots with the checkable **BANTWORKS MCP > Background State Export In Play Mode** menu item. The opt-in is persisted in Unity `EditorPrefs`.
 
 ### 5. Verify the Bridge
 

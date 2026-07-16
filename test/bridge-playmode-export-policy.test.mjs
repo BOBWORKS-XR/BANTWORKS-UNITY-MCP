@@ -41,16 +41,40 @@ test("automatic full-state export is disabled throughout Play-mode transitions b
     "private static void OnSceneSaved",
   ]) {
     const body = blockStartingAt(callback);
-    assert.match(body, /ExportProjectStateAutomatically\(\);/);
+    assert.match(body, /ScheduleAutomaticStateExport\(\);/);
     assert.doesNotMatch(body, /ExportProjectState\(\);/);
     assert.doesNotMatch(body, /ExportSceneHierarchy\(\);/);
   }
 });
 
-test("Play mode keeps command polling and explicit full exports operational", () => {
+test("Edit mode uses lightweight heartbeats and event-driven full exports", () => {
   const update = blockStartingAt("private static void OnEditorUpdate()");
   assert.match(update, /ProcessCommands\(\);/);
+  assert.match(update, /ExportEditorState\(\);/);
+  assert.match(update, /automaticStateExportPending/);
   assert.match(update, /ExportProjectStateAutomatically\(\);/);
+  assert.doesNotMatch(
+    bridge,
+    /private static readonly double StateExportInterval\s*=\s*2\.0/
+  );
+  assert.match(bridge, /PeriodicPlayModeStateExportInterval\s*=\s*2\.0/);
+  assert.match(
+    update,
+    /EditorApplication\.isPlaying\s*&&\s*BackgroundStateExportInPlayMode/
+  );
+
+  for (const callback of [
+    "private static void OnHierarchyChanged",
+    "private static void OnProjectChanged",
+    "private static void OnUndoRedoPerformed",
+    "private static UndoPropertyModification[] OnPostprocessModifications",
+  ]) {
+    assert.match(blockStartingAt(callback), /ScheduleAutomaticStateExport\(\);/);
+  }
+});
+
+test("Play mode keeps command polling and explicit full exports operational", () => {
+  const update = blockStartingAt("private static void OnEditorUpdate()");
   assert.ok(
     update.indexOf("ProcessCommands();") < update.indexOf("ExportProjectStateAutomatically();"),
     "Command polling must remain independent of the automatic export policy"
