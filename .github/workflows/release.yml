@@ -59,4 +59,16 @@ jobs:
           }
           $checksumPath = Join-Path $PWD "release\SHA256SUMS.txt"
           [System.IO.File]::WriteAllLines($checksumPath, $checksums, [System.Text.UTF8Encoding]::new($false))
-          gh release upload "${{ github.ref_name }}" $standalone.FullName $checksumPath --clobber
+          $maxAttempts = 5
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            gh release upload "${{ github.ref_name }}" $standalone.FullName $checksumPath --clobber --repo "${{ github.repository }}"
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+            if ($attempt -eq $maxAttempts) {
+              throw "Release asset upload failed after $maxAttempts attempts."
+            }
+            $delaySeconds = 5 * [math]::Pow(2, $attempt - 1)
+            Write-Warning "Release asset upload attempt $attempt failed; retrying in $delaySeconds seconds."
+            Start-Sleep -Seconds $delaySeconds
+          }
