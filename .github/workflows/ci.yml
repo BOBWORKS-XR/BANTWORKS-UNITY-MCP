@@ -40,7 +40,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run release:server
+      - run: npm run release:launcher
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-standalone.ps1
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-setup.ps1
       - run: cargo fmt --check

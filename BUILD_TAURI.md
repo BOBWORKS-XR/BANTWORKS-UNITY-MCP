@@ -1,6 +1,6 @@
 # Building the BANTWORKS MCP Launcher
 
-The Tauri launcher provides a native Windows GUI for managing Unity scene channels and configuring BANTWORKS MCP for Codex or Claude Code.
+The Tauri launcher provides a native Windows GUI for discovering Unity projects, installing the bridge, and configuring BANTWORKS MCP for Codex or Claude Code.
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ The Tauri launcher provides a native Windows GUI for managing Unity scene channe
 ```powershell
 Set-Location <path-to-bantworks-mcp>
 npm ci
-npm run release:server
+npm run release:launcher
 
 # Install Tauri CLI
 cargo install tauri-cli --version "^2"
@@ -41,7 +41,7 @@ The built executable will be at:
 launcher\src-tauri\target\release\bantworks-mcp-launcher.exe
 ```
 
-The build runs the standalone server bundle and smoke test again, then packages that server, the Unity bridge, `LICENSE`, and `THIRD_PARTY_NOTICES.md` as Tauri resources. The launcher resolves those installed resources dynamically and does not require a `C:/tools/banter-mcp` checkout.
+The build runs the standalone server bundle and smoke test, downloads the pinned official Node.js 24.17.0 Windows x64 archive, verifies the archive and extracted executable hashes, and packages the private runtime with the server, Unity bridge, `LICENSE`, and `THIRD_PARTY_NOTICES.md`. The launcher resolves those installed resources dynamically and does not require a `C:/tools/banter-mcp` checkout or system Node.js installation.
 
 Run `cargo fmt --check` and `cargo test` in `launcher/src-tauri` before creating a release build. Building the launcher does not update an already installed copy under `%LOCALAPPDATA%`; distribute or install the newly built artifact deliberately.
 
@@ -56,11 +56,12 @@ cargo tauri dev
 
 ## What the App Does
 
-- **Manage multiple Unity projects** as "channels"
-- **One-click switching** between projects
+- **Discover Unity Hub projects** and select a project folder directly
+- **Set up a first project and detected clients** in one action
+- **Manage and switch between multiple Unity projects**
 - **Configure Codex** (`~/.codex/config.toml`) and Claude Code (`~/.claude.json`)
-- **Install Unity extension** with one click
-- **Shows extension status** for each project
+- **Install or update the Unity bridge** and show live readiness status
+- **Use a private packaged Node.js runtime** for launcher-managed clients
 
 ## Alternative: PowerShell Setup
 

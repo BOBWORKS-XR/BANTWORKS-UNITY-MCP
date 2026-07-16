@@ -70,5 +70,9 @@ test("launcher and setup package the source-of-truth bridge", () => {
     tauri,
     /"\.\.\/\.\.\/unity-extension\/Editor\/BanterMCPBridge\.cs"\s*:\s*"server\/unity-extension\/Editor\/BanterMCPBridge\.cs"/
   );
+  assert.match(
+    tauri,
+    /"\.\.\/\.\.\/release\/runtime\/node\.exe"\s*:\s*"server\/runtime\/node\.exe"/
+  );
   assert.match(setup, /unity-extension\\Editor\\BanterMCPBridge\.cs/);
 });

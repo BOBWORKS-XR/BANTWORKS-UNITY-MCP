@@ -45,7 +45,8 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 
 ## Requirements
 
-- Node.js 18 or later.
+- Windows 10 or 11 for the guided launcher. The installer includes a private Node.js 24 LTS runtime.
+- Node.js 18 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
 - Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
@@ -54,7 +55,13 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 
 ### 1. Install BANTWORKS MCP
 
-For a release build, either install the Windows launcher or extract the standalone ZIP. Both contain a versioned MCP server and Unity bridge and do not depend on a checkout at `C:/tools`. Node.js 18 or newer is still required to run the MCP server. Tagged releases include `SHA256SUMS.txt` for artifact verification.
+Download and run the Windows setup executable from the latest GitHub release. It includes the versioned MCP server, Unity bridge, and a checksum-verified private Node.js runtime; a separate Node.js installation and source checkout are not required.
+
+Open **BANTWORKS MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up BANTWORKS MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports project, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
+
+Bridge copies are project-local. The launcher compares every configured project against its bundled bridge, labels stale copies as **Update available**, and provides **Update Bridges** to back up and refresh all configured projects in one action.
+
+The MSI and standalone ZIP remain available for managed or manual deployments. Tagged releases include `SHA256SUMS.txt` for artifact verification. The standalone ZIP requires Node.js 18 or newer.
 
 From an extracted standalone ZIP, validate the included server with:
 
@@ -70,7 +77,13 @@ npm ci
 npm run release:server
 ```
 
-### 2. Connect Codex or Claude Code
+### 2. Restart the Configured MCP Client
+
+Codex and Claude Code read MCP server configuration at startup. Restart a client that was already open, then ask it to call `get_bridge_status`. A ready bridge reports `ready: true` and `stateStatus: "fresh"`.
+
+The launcher keeps existing multi-project configuration compatible. Selecting an active project can update clients that already have BANTWORKS MCP configured; it does not create configuration for an unselected client.
+
+### 3. Manual or Standalone Configuration
 
 Both clients launch the same MCP server. Set `UNITY_PROJECT_PATH` to choose the initial project. When launcher channels exist, the server can also list and switch among them without restarting the MCP client.
 
@@ -114,17 +127,13 @@ Or add the server directly to `.claude.json`:
 
 Restart the selected MCP client after changing its configuration.
 
-### 3. Configure Through the Windows Launcher (Optional)
-
-The BANTWORKS MCP launcher can manage multiple Unity scene channels, choose a capability profile, and install the Unity bridge. Select a channel, then use **Apply to Codex** or **Apply to Claude Code**. With **Auto-configure Clients** enabled, changing the active channel or capability profile updates both configurations.
-
 At runtime, call `list_unity_projects` and pass one of its stable IDs to `select_unity_project`. Selection affects subsequent calls in the current MCP session only; launcher and client configuration remain unchanged.
 
 `setup.ps1` offers the same workflow in PowerShell: use `[X] Apply to Codex` or `[C] Apply to Claude Code` after choosing an active project.
 
-### 4. Install Unity Extension (Optional - for full feedback loop)
+### 4. Manual Unity Bridge Installation
 
-Use the launcher's **Install Unity Extension** action or the PowerShell setup menu. For a manual install, copy the included bridge to your project:
+The guided setup installs the bridge automatically. For a manual install, use the PowerShell setup menu or copy the included bridge to your project:
 ```
 <BANTWORKS-MCP>/unity-extension/Editor/BanterMCPBridge.cs
   → YourProject/Assets/Editor/BanterMCPBridge.cs

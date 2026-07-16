@@ -1,15 +1,17 @@
 {
   "name": "banter-mcp",
-  "version": "1.9.1",
+  "version": "2.0.0",
   "description": "Codex, Claude Code, and MCP-compatible Unity integration for Banter SDK development",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "bundle:server": "npm run build && esbuild dist/index.js --bundle --platform=node --format=esm --target=node18 --outfile=release/banter-mcp.mjs",
+    "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-node-runtime.ps1",
     "check:version": "node scripts/check-version-sync.mjs",
     "test:bundle": "node scripts/smoke-release-bundle.mjs",
     "release:server": "npm run bundle:server && npm run test:bundle",
+    "release:launcher": "npm run release:server && npm run stage:runtime",
     "test": "npm run build && node --test test/*.test.mjs",
     "watch": "tsc --watch",
     "start": "node dist/index.js",

@@ -11,7 +11,8 @@ enforced by the repository workflow.
 
 | Surface | Status | Verification |
 |---------|--------|--------------|
-| Node.js 18, 20, 22, 24 | CI target | TypeScript build, server test suite, standalone esbuild bundle, and isolated no-`node_modules` smoke |
+| Bundled Node.js 24 LTS | Windows launcher runtime | The installer packages a checksum-verified official Windows x64 executable and writes its absolute path to managed clients |
+| Node.js 18, 20, 22, 24 | Standalone/source CI target | TypeScript build, server test suite, standalone esbuild bundle, and isolated no-`node_modules` smoke |
 | Codex desktop/CLI | Supported configuration | Launcher and `setup.ps1` write stdio configuration, project environment, 20-second startup timeout, and 600-second tool timeout |
 | Claude Code/Desktop | Supported configuration | Launcher and `setup.ps1` write the same stdio server and selected project environment |
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |

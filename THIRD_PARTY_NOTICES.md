@@ -6,6 +6,8 @@ No code from the Unity MCP projects listed below is copied, vendored, or linked 
 
 The Node dependency graph is tracked in `package-lock.json`; its direct runtime MCP dependency is `@modelcontextprotocol/sdk`. The release bundle is produced with [esbuild](https://github.com/evanw/esbuild), which is MIT-licensed. Review locked package metadata and licenses when redistributing a bundled build.
 
+The Windows launcher bundles the unmodified official Node.js 24.17.0 Windows x64 executable so MCP clients do not require a separate Node.js installation. Node.js is distributed under the MIT license and includes third-party software under the terms recorded in the `LICENSE` file packaged beside the runtime. The release build verifies both the official archive and extracted executable with pinned SHA-256 checksums before packaging.
+
 The Windows launcher uses [Tauri](https://github.com/tauri-apps/tauri), distributed under Apache-2.0 and MIT terms. GitHub release packaging uses the official [Tauri Action](https://github.com/tauri-apps/tauri-action); the action is CI infrastructure and is not shipped in the application.
 
 ## Unity MCP Research

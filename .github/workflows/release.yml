@@ -23,7 +23,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run check:version
-      - run: npm run release:server
+      - run: npm run release:launcher
       - run: npm audit --audit-level=low
       - run: cargo test
         working-directory: launcher/src-tauri
@@ -39,7 +39,7 @@ jobs:
           projectPath: launcher
           tagName: ${{ github.ref_name }}
           releaseName: "BANTWORKS MCP __VERSION__"
-          releaseBody: "Windows launcher installers and a standalone Node 18+ MCP bundle. The launcher includes the MCP server and Unity bridge as versioned resources. Install Node.js 18 or newer before connecting an MCP client."
+          releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. The standalone ZIP remains available for manual Node.js 18+ deployments."
           releaseDraft: true
           prerelease: false
           args: "--bundles nsis,msi"

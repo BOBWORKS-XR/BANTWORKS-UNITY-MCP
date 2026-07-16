@@ -2,8 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use tauri::path::BaseDirectory;
 use tauri::Manager;
 
@@ -31,6 +34,78 @@ struct LauncherConfig {
     enable_custom_scripts: bool,
     #[serde(default = "default_tool_groups")]
     tool_groups: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveredProject {
+    name: String,
+    path: String,
+    unity_version: Option<String>,
+    last_modified: Option<i64>,
+    source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientStatus {
+    id: String,
+    name: String,
+    detected: bool,
+    configured: bool,
+    config_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeStatus {
+    ready: bool,
+    bundled: bool,
+    command: Option<String>,
+    version: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSetupStatus {
+    valid: bool,
+    bridge_installed: bool,
+    bridge_current: bool,
+    state_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnityExtensionStatus {
+    installed: bool,
+    current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeUpdateSummary {
+    checked: usize,
+    updated: usize,
+    current: usize,
+    failed: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnboardingStatus {
+    runtime: RuntimeStatus,
+    clients: Vec<ClientStatus>,
+    project: Option<ProjectSetupStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupResult {
+    channel: ProjectChannel,
+    bridge_installed: bool,
+    codex_configured: bool,
+    claude_configured: bool,
+    runtime_command: String,
 }
 
 fn default_tool_groups() -> String {
@@ -106,7 +181,15 @@ fn is_valid_mcp_root(root: &Path) -> bool {
 }
 
 fn normalized_existing_path(path: PathBuf) -> PathBuf {
-    fs::canonicalize(&path).unwrap_or(path)
+    let canonical = fs::canonicalize(&path).unwrap_or(path);
+    let value = canonical.to_string_lossy();
+    if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", rest));
+    }
+    if let Some(rest) = value.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    canonical
 }
 
 fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -158,6 +241,50 @@ fn default_mcp_server_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             root.display()
         )
     })
+}
+
+fn bundled_node_path(root: &Path) -> PathBuf {
+    root.join("runtime").join("node.exe")
+}
+
+fn find_command_on_path(command: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    let candidates = if cfg!(windows) {
+        vec![
+            format!("{}.exe", command),
+            format!("{}.cmd", command),
+            command.to_string(),
+        ]
+    } else {
+        vec![command.to_string()]
+    };
+
+    env::split_paths(&path).find_map(|directory| {
+        candidates
+            .iter()
+            .map(|candidate| directory.join(candidate))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+fn resolve_node_command(app: &tauri::AppHandle) -> Result<(PathBuf, bool), String> {
+    let root = resolve_mcp_root(app)?;
+    let bundled = [
+        bundled_node_path(&root),
+        root.join("release").join("runtime").join("node.exe"),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file());
+    if let Some(bundled) = bundled {
+        return Ok((normalized_existing_path(bundled), true));
+    }
+
+    find_command_on_path("node")
+        .map(|path| (normalized_existing_path(path), false))
+        .ok_or_else(|| {
+            "The bundled Node runtime is missing and Node.js was not found on PATH. Reinstall BANTWORKS MCP."
+                .to_string()
+        })
 }
 
 fn is_legacy_server_path(value: &str) -> bool {
@@ -370,6 +497,136 @@ fn add_channel(name: String, scene_path: String) -> Result<ProjectChannel, Strin
     Ok(channel)
 }
 
+fn is_valid_unity_project(path: &Path) -> bool {
+    path.is_dir() && path.join("Assets").is_dir() && path.join("ProjectSettings").is_dir()
+}
+
+fn project_path_key(path: &Path) -> String {
+    normalized_existing_path(path.to_path_buf())
+        .to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn channel_for_project(project_path: &Path) -> Result<ProjectChannel, String> {
+    if !is_valid_unity_project(project_path) {
+        return Err(format!(
+            "Not a Unity project (Assets and ProjectSettings folders are required): {}",
+            project_path.display()
+        ));
+    }
+
+    let project_path = normalized_existing_path(project_path.to_path_buf());
+    let name = project_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("Unity Project")
+        .to_string();
+
+    Ok(ProjectChannel {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        unity_project_path: project_path.to_string_lossy().to_string(),
+        scene_path: None,
+        enabled: true,
+    })
+}
+
+#[tauri::command]
+fn add_project(project_path: String) -> Result<ProjectChannel, String> {
+    channel_for_project(Path::new(&project_path))
+}
+
+fn projects_from_unity_hub(path: &Path) -> Vec<DiscoveredProject> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    let Some(data) = root.get("data").and_then(serde_json::Value::as_object) else {
+        return Vec::new();
+    };
+
+    data.values()
+        .filter_map(|entry| {
+            let project_path = entry.get("path")?.as_str()?;
+            let project_path = PathBuf::from(project_path);
+            if !is_valid_unity_project(&project_path) {
+                return None;
+            }
+
+            let project_path = normalized_existing_path(project_path);
+            let name = entry
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    project_path
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .map(ToString::to_string)
+                })
+                .unwrap_or_else(|| "Unity Project".to_string());
+
+            Some(DiscoveredProject {
+                name,
+                path: project_path.to_string_lossy().to_string(),
+                unity_version: entry
+                    .get("version")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
+                last_modified: entry
+                    .get("lastModified")
+                    .and_then(serde_json::Value::as_i64),
+                source: "Unity Hub".to_string(),
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn discover_unity_projects(app: tauri::AppHandle) -> Result<Vec<DiscoveredProject>, String> {
+    let config = load_config(app)?;
+    let mut projects = Vec::new();
+    let mut seen = HashSet::new();
+
+    for channel in config.channels {
+        let path = PathBuf::from(&channel.unity_project_path);
+        if !is_valid_unity_project(&path) || !seen.insert(project_path_key(&path)) {
+            continue;
+        }
+        projects.push(DiscoveredProject {
+            name: channel.name,
+            path: normalized_existing_path(path).to_string_lossy().to_string(),
+            unity_version: None,
+            last_modified: None,
+            source: "BANTWORKS MCP".to_string(),
+        });
+    }
+
+    if let Some(config_dir) = dirs::config_dir() {
+        let hub_projects = config_dir.join("UnityHub").join("projects-v1.json");
+        for project in projects_from_unity_hub(&hub_projects) {
+            if seen.insert(project_path_key(Path::new(&project.path))) {
+                projects.push(project);
+            }
+        }
+    }
+
+    projects.sort_by(|left, right| {
+        right
+            .last_modified
+            .unwrap_or_default()
+            .cmp(&left.last_modified.unwrap_or_default())
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+    Ok(projects)
+}
+
 /// Validate a Unity scene file path
 #[tauri::command]
 fn validate_unity_scene(path: String) -> Result<bool, String> {
@@ -421,6 +678,7 @@ fn get_claude_mcp_config() -> Result<serde_json::Value, String> {
 fn build_claude_mcp_config(
     mut config: serde_json::Value,
     channel: &ProjectChannel,
+    node_command: &str,
     mcp_server_path: &str,
     tool_groups: &str,
 ) -> Result<serde_json::Value, String> {
@@ -442,7 +700,7 @@ fn build_claude_mcp_config(
     }
 
     config["mcpServers"]["banter"] = serde_json::json!({
-        "command": "node",
+        "command": node_command,
         "args": [mcp_server_path],
         "env": env
     });
@@ -452,6 +710,7 @@ fn build_claude_mcp_config(
 /// Update Claude Code MCP configuration for a channel
 #[tauri::command]
 fn update_claude_mcp_config(
+    app: tauri::AppHandle,
     channel: ProjectChannel,
     mcp_server_path: String,
     tool_groups: String,
@@ -475,7 +734,14 @@ fn update_claude_mcp_config(
         serde_json::json!({})
     };
 
-    let config = build_claude_mcp_config(config, &channel, &mcp_server_path, &tool_groups)?;
+    let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let config = build_claude_mcp_config(
+        config,
+        &channel,
+        &node_command,
+        &mcp_server_path,
+        &tool_groups,
+    )?;
 
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize Claude config: {}", e))?;
@@ -486,6 +752,7 @@ fn update_claude_mcp_config(
 fn build_codex_mcp_config(
     existing: &str,
     channel: &ProjectChannel,
+    node_command: &str,
     mcp_server_path: &str,
     tool_groups: &str,
 ) -> Result<String, String> {
@@ -498,7 +765,10 @@ fn build_codex_mcp_config(
     }
 
     content.push_str("\n[mcp_servers.banter]\n");
-    content.push_str("command = \"node\"\n");
+    content.push_str(&format!(
+        "command = \"{}\"\n",
+        escape_toml_string(&node_command.replace("\\", "/"))
+    ));
     content.push_str(&format!(
         "args = [\"{}\"]\n",
         escape_toml_string(mcp_server_path)
@@ -553,6 +823,7 @@ fn remove_claude_mcp_config() -> Result<(), String> {
 /// Update Codex MCP configuration for a channel
 #[tauri::command]
 fn update_codex_mcp_config(
+    app: tauri::AppHandle,
     channel: ProjectChannel,
     mcp_server_path: String,
     tool_groups: String,
@@ -574,7 +845,14 @@ fn update_codex_mcp_config(
         String::new()
     };
 
-    let content = build_codex_mcp_config(&existing, &channel, &mcp_server_path, &tool_groups)?;
+    let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let content = build_codex_mcp_config(
+        &existing,
+        &channel,
+        &node_command,
+        &mcp_server_path,
+        &tool_groups,
+    )?;
 
     atomic_write(&config_path, &content)
 }
@@ -633,12 +911,40 @@ fn escape_toml_string(value: &str) -> String {
 /// Check if Unity extension is installed in a project
 #[tauri::command]
 fn check_unity_extension(unity_project_path: String) -> Result<bool, String> {
-    let extension_path = PathBuf::from(&unity_project_path)
-        .join("Assets")
-        .join("Editor")
-        .join("BanterMCPBridge.cs");
+    let extension_path = unity_bridge_destination(Path::new(&unity_project_path));
 
     Ok(extension_path.exists())
+}
+
+fn unity_bridge_destination(project_path: &Path) -> PathBuf {
+    project_path
+        .join("Assets")
+        .join("Editor")
+        .join("BanterMCPBridge.cs")
+}
+
+fn unity_extension_status(source: &Path, project_path: &Path) -> UnityExtensionStatus {
+    let destination = unity_bridge_destination(project_path);
+    let installed = destination.is_file();
+    let current = installed
+        && fs::read(source)
+            .and_then(|source_bytes| {
+                fs::read(&destination).map(|destination_bytes| source_bytes == destination_bytes)
+            })
+            .unwrap_or(false);
+    UnityExtensionStatus { installed, current }
+}
+
+#[tauri::command]
+fn get_unity_extension_status(
+    app: tauri::AppHandle,
+    unity_project_path: String,
+) -> Result<UnityExtensionStatus, String> {
+    let source = unity_bridge_path(&resolve_mcp_root(&app)?);
+    Ok(unity_extension_status(
+        &source,
+        Path::new(&unity_project_path),
+    ))
 }
 
 /// Install Unity extension to a project
@@ -694,10 +1000,231 @@ fn install_unity_extension(
     Ok(())
 }
 
+#[tauri::command]
+fn update_configured_unity_extensions(
+    app: tauri::AppHandle,
+) -> Result<BridgeUpdateSummary, String> {
+    let config = load_config(app.clone())?;
+    let source = unity_bridge_path(&resolve_mcp_root(&app)?);
+    let mut summary = BridgeUpdateSummary {
+        checked: 0,
+        updated: 0,
+        current: 0,
+        failed: Vec::new(),
+    };
+    let mut seen = HashSet::new();
+
+    for channel in config.channels {
+        let project_path = PathBuf::from(&channel.unity_project_path);
+        if !is_valid_unity_project(&project_path) || !seen.insert(project_path_key(&project_path)) {
+            continue;
+        }
+
+        summary.checked += 1;
+        if unity_extension_status(&source, &project_path).current {
+            summary.current += 1;
+            continue;
+        }
+
+        match install_unity_extension(app.clone(), channel.unity_project_path.clone()) {
+            Ok(()) => summary.updated += 1,
+            Err(error) => summary.failed.push(format!("{}: {}", channel.name, error)),
+        }
+    }
+
+    Ok(summary)
+}
+
 /// Get the MCP root directory
 #[tauri::command]
 fn get_mcp_root(app: tauri::AppHandle) -> Result<String, String> {
     Ok(resolve_mcp_root(&app)?.to_string_lossy().to_string())
+}
+
+fn command_is_available(command: &str) -> bool {
+    find_command_on_path(command).is_some()
+}
+
+fn codex_is_configured() -> bool {
+    fs::read_to_string(get_codex_config_path())
+        .map(|content| {
+            content
+                .lines()
+                .any(|line| line.trim() == "[mcp_servers.banter]")
+        })
+        .unwrap_or(false)
+}
+
+fn claude_is_configured() -> bool {
+    fs::read_to_string(get_claude_config_path())
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .and_then(|config| config.get("mcpServers")?.get("banter").cloned())
+        .is_some()
+}
+
+fn client_statuses() -> Vec<ClientStatus> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    vec![
+        ClientStatus {
+            id: "codex".to_string(),
+            name: "Codex".to_string(),
+            detected: home.join(".codex").is_dir() || command_is_available("codex"),
+            configured: codex_is_configured(),
+            config_path: get_codex_config_path().to_string_lossy().to_string(),
+        },
+        ClientStatus {
+            id: "claude".to_string(),
+            name: "Claude Code".to_string(),
+            detected: home.join(".claude").is_dir()
+                || get_claude_config_path().is_file()
+                || command_is_available("claude"),
+            configured: claude_is_configured(),
+            config_path: get_claude_config_path().to_string_lossy().to_string(),
+        },
+    ]
+}
+
+fn project_setup_status(source_bridge: Option<&Path>, project_path: &Path) -> ProjectSetupStatus {
+    let valid = is_valid_unity_project(project_path);
+    let extension = source_bridge
+        .map(|source| unity_extension_status(source, project_path))
+        .unwrap_or(UnityExtensionStatus {
+            installed: unity_bridge_destination(project_path).is_file(),
+            current: false,
+        });
+    let state_dir = project_path.join(".bantworks-mcp").join("state");
+    let state_files = [
+        "scene-hierarchy.json",
+        "editor-state.json",
+        "project-instance.json",
+        "console-log.json",
+        "import-status.json",
+        "prefab-catalog.json",
+    ];
+    let newest_modified = state_files
+        .iter()
+        .filter_map(|name| fs::metadata(state_dir.join(name)).ok()?.modified().ok())
+        .max();
+    let state_status = match newest_modified {
+        None => "missing",
+        Some(modified) => {
+            let age = SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or_default();
+            if age.as_secs() <= 10 {
+                "fresh"
+            } else {
+                "stale"
+            }
+        }
+    };
+
+    ProjectSetupStatus {
+        valid,
+        bridge_installed: extension.installed,
+        bridge_current: extension.current,
+        state_status: state_status.to_string(),
+    }
+}
+
+#[tauri::command]
+fn get_onboarding_status(
+    app: tauri::AppHandle,
+    unity_project_path: Option<String>,
+) -> OnboardingStatus {
+    let source_bridge = resolve_mcp_root(&app)
+        .ok()
+        .map(|root| unity_bridge_path(&root));
+    let runtime = match resolve_node_command(&app) {
+        Ok((command, bundled)) => RuntimeStatus {
+            ready: true,
+            bundled,
+            command: Some(command.to_string_lossy().to_string()),
+            version: if bundled {
+                "Node.js 24 LTS".to_string()
+            } else {
+                "System Node.js".to_string()
+            },
+        },
+        Err(_) => RuntimeStatus {
+            ready: false,
+            bundled: false,
+            command: None,
+            version: "Unavailable".to_string(),
+        },
+    };
+
+    OnboardingStatus {
+        runtime,
+        clients: client_statuses(),
+        project: unity_project_path
+            .filter(|path| !path.trim().is_empty())
+            .map(|path| project_setup_status(source_bridge.as_deref(), Path::new(&path))),
+    }
+}
+
+#[tauri::command]
+fn one_click_setup(
+    app: tauri::AppHandle,
+    unity_project_path: String,
+    configure_codex: bool,
+    configure_claude: bool,
+    tool_groups: String,
+    enable_custom_scripts: bool,
+) -> Result<SetupResult, String> {
+    let candidate = channel_for_project(Path::new(&unity_project_path))?;
+    let mcp_server_path = default_mcp_server_path(&app)?.to_string_lossy().to_string();
+    let runtime_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let tool_groups = normalize_tool_groups(&tool_groups)?;
+
+    if configure_claude {
+        get_claude_mcp_config()?;
+    }
+
+    let mut config = load_config(app.clone())?;
+    let key = project_path_key(Path::new(&candidate.unity_project_path));
+    let channel = if let Some(existing) = config
+        .channels
+        .iter_mut()
+        .find(|channel| project_path_key(Path::new(&channel.unity_project_path)) == key)
+    {
+        existing.enabled = true;
+        existing.clone()
+    } else {
+        config.channels.push(candidate.clone());
+        candidate
+    };
+
+    config.active_channel_id = Some(channel.id.clone());
+    config.mcp_server_path = mcp_server_path.clone();
+    config.auto_start = true;
+    config.enable_custom_scripts = enable_custom_scripts;
+    config.tool_groups = tool_groups.clone();
+    save_config(config)?;
+
+    install_unity_extension(app.clone(), channel.unity_project_path.clone())?;
+    set_unity_custom_scripts(channel.unity_project_path.clone(), enable_custom_scripts)?;
+
+    if configure_codex {
+        update_codex_mcp_config(
+            app.clone(),
+            channel.clone(),
+            mcp_server_path.clone(),
+            tool_groups.clone(),
+        )?;
+    }
+    if configure_claude {
+        update_claude_mcp_config(app, channel.clone(), mcp_server_path, tool_groups)?;
+    }
+
+    Ok(SetupResult {
+        channel,
+        bridge_installed: true,
+        codex_configured: configure_codex,
+        claude_configured: configure_claude,
+        runtime_command,
+    })
 }
 
 fn main() {
@@ -709,16 +1236,22 @@ fn main() {
             load_config,
             save_config,
             add_channel,
+            add_project,
             validate_unity_scene,
+            discover_unity_projects,
             get_claude_mcp_config,
             update_claude_mcp_config,
             remove_claude_mcp_config,
             update_codex_mcp_config,
             remove_codex_mcp_config,
             check_unity_extension,
+            get_unity_extension_status,
             install_unity_extension,
+            update_configured_unity_extensions,
             get_mcp_root,
             set_unity_custom_scripts,
+            get_onboarding_status,
+            one_click_setup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -783,6 +1316,18 @@ mod tests {
     }
 
     #[test]
+    fn removes_windows_verbatim_prefixes_from_client_paths() {
+        assert_eq!(
+            normalized_existing_path(PathBuf::from(r"\\?\C:\BANTWORKS\node.exe")),
+            PathBuf::from(r"C:\BANTWORKS\node.exe")
+        );
+        assert_eq!(
+            normalized_existing_path(PathBuf::from(r"\\?\UNC\server\share\node.exe")),
+            PathBuf::from(r"\\server\share\node.exe")
+        );
+    }
+
+    #[test]
     fn removes_only_the_target_codex_tables() {
         let input = "model = \"gpt\"\n\n[mcp_servers.banter]\ncommand = \"node\"\n\n[mcp_servers.banter.env]\nUNITY_PROJECT_PATH = \"X\"\n\n[other]\nkeep = true\n";
         let without_server = remove_toml_table_block(input, "mcp_servers.banter");
@@ -834,6 +1379,7 @@ mod tests {
         let claude = build_claude_mcp_config(
             serde_json::json!({ "keep": true, "mcpServers": { "other": {} } }),
             &channel,
+            "C:\\BANTWORKS\\runtime\\node.exe",
             "C:\\BANTWORKS\\banter-mcp.mjs",
             "banter,read",
         )
@@ -848,6 +1394,7 @@ mod tests {
         let codex = build_codex_mcp_config(
             "model = \"gpt\"\n\n[other]\nkeep = true\n",
             &channel,
+            "C:/BANTWORKS/runtime/node.exe",
             "C:/BANTWORKS/banter-mcp.mjs",
             "read,banter",
         )
@@ -856,9 +1403,85 @@ mod tests {
         assert!(codex.contains("[other]"));
         assert!(codex.contains("BANTWORKS_TOOL_GROUPS = \"read,banter\""));
         assert!(codex.contains("UNITY_SCENE_PATH = \"E:/unity/Project/Assets/Main.unity\""));
+        assert!(codex.contains("command = \"C:/BANTWORKS/runtime/node.exe\""));
 
-        assert!(
-            build_claude_mcp_config(serde_json::json!([]), &channel, "server.mjs", "all").is_err()
-        );
+        assert!(build_claude_mcp_config(
+            serde_json::json!([]),
+            &channel,
+            "node",
+            "server.mjs",
+            "all"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn project_folder_setup_does_not_require_a_scene_file() {
+        let root = temporary_root().join("First Project");
+        fs::create_dir_all(root.join("Assets")).unwrap();
+        fs::create_dir_all(root.join("ProjectSettings")).unwrap();
+
+        let channel = channel_for_project(&root).unwrap();
+        assert_eq!(channel.name, "First Project");
+        assert_eq!(channel.scene_path, None);
+        assert!(channel.enabled);
+
+        fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn extension_status_detects_stale_project_copies() {
+        let root = temporary_root();
+        let project = root.join("Project");
+        let source = root.join("BanterMCPBridge.cs");
+        let destination = unity_bridge_destination(&project);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::write(&source, "current bridge").unwrap();
+        fs::write(&destination, "old bridge").unwrap();
+
+        let stale = unity_extension_status(&source, &project);
+        assert!(stale.installed);
+        assert!(!stale.current);
+
+        fs::copy(&source, &destination).unwrap();
+        let current = unity_extension_status(&source, &project);
+        assert!(current.installed);
+        assert!(current.current);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unity_hub_discovery_filters_missing_projects() {
+        let root = temporary_root();
+        let valid = root.join("Valid");
+        let missing = root.join("Missing");
+        fs::create_dir_all(valid.join("Assets")).unwrap();
+        fs::create_dir_all(valid.join("ProjectSettings")).unwrap();
+        let hub_path = root.join("projects-v1.json");
+        let fixture = serde_json::json!({
+            "schema_version": "v1",
+            "data": {
+                valid.to_string_lossy().to_string(): {
+                    "title": "Valid Project",
+                    "path": valid,
+                    "version": "6000.3.10f1",
+                    "lastModified": 42
+                },
+                missing.to_string_lossy().to_string(): {
+                    "title": "Missing Project",
+                    "path": missing,
+                    "version": "6000.3.10f1"
+                }
+            }
+        });
+        fs::write(&hub_path, serde_json::to_string(&fixture).unwrap()).unwrap();
+
+        let projects = projects_from_unity_hub(&hub_path);
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "Valid Project");
+        assert_eq!(projects[0].unity_version.as_deref(), Some("6000.3.10f1"));
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

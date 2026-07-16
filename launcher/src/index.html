@@ -10,172 +10,162 @@
   <div class="app">
     <header class="header">
       <div class="logo">
-        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-          <rect width="32" height="32" rx="8" fill="#0f0f0f"/>
-          <rect x="2" y="2" width="28" height="28" rx="6" stroke="#00d4ff" stroke-width="2"/>
-          <path d="M8 12h16M8 16h12M8 20h14" stroke="#ff3b3b" stroke-width="2" stroke-linecap="round"/>
-        </svg>
+        <div class="logo-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
         <h1 class="brand-title"><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> <span class="brand-mcp">MCP</span></h1>
       </div>
-      <div class="status" id="status">
+      <div class="status" id="status" role="status">
         <span class="status-dot"></span>
-        <span class="status-text">Not Configured</span>
+        <span class="status-text">Checking setup</span>
       </div>
     </header>
 
     <main class="main">
-      <section class="section channels-section">
+      <section class="section setup-section">
         <div class="section-header">
-          <h2>Scene Channels</h2>
-          <button class="btn btn-primary" id="addChannelBtn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Add Scene
-          </button>
+          <div>
+            <p class="eyebrow">FIRST RUN</p>
+            <h2>Quick Setup</h2>
+          </div>
+          <span class="runtime-badge" id="runtimeBadge">Runtime</span>
         </div>
 
-        <div class="channels-list" id="channelsList">
+        <div class="setup-grid">
+          <div class="setup-form">
+            <div class="form-group">
+              <label for="projectPath">Unity Project</label>
+              <div class="input-with-button">
+                <input type="text" id="projectPath" class="input" placeholder="Select a Unity project folder">
+                <button class="btn btn-secondary" id="browseProjectBtn" type="button">Browse</button>
+              </div>
+              <select id="discoveredProjects" class="input select-input recent-projects">
+                <option value="">Recent Unity projects</option>
+              </select>
+            </div>
+
+            <fieldset class="client-picker">
+              <legend>Connect MCP Client</legend>
+              <label class="client-option" for="connectCodex">
+                <input type="checkbox" id="connectCodex">
+                <span class="client-copy">
+                  <strong>Codex</strong>
+                  <span id="codexDetection">Checking</span>
+                </span>
+                <span class="client-state" id="codexState">Not configured</span>
+              </label>
+              <label class="client-option" for="connectClaude">
+                <input type="checkbox" id="connectClaude">
+                <span class="client-copy">
+                  <strong>Claude Code</strong>
+                  <span id="claudeDetection">Checking</span>
+                </span>
+                <span class="client-state" id="claudeState">Not configured</span>
+              </label>
+            </fieldset>
+
+            <button class="btn btn-primary setup-button" id="setupBtn" type="button">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Set Up BANTWORKS MCP
+            </button>
+            <p class="setup-message" id="setupMessage" role="status"></p>
+          </div>
+
+          <div class="setup-checks" id="setupChecks">
+            <div class="check-row" data-check="runtime"><span class="check-icon"></span><span>Private runtime</span><strong>Checking</strong></div>
+            <div class="check-row" data-check="project"><span class="check-icon"></span><span>Unity project</span><strong>Not selected</strong></div>
+            <div class="check-row" data-check="bridge"><span class="check-icon"></span><span>Unity bridge</span><strong>Not installed</strong></div>
+            <div class="check-row" data-check="codex"><span class="check-icon"></span><span>Codex</span><strong>Not configured</strong></div>
+            <div class="check-row" data-check="claude"><span class="check-icon"></span><span>Claude Code</span><strong>Not configured</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section projects-section">
+        <div class="section-header">
+          <h2>Unity Projects</h2>
+          <div class="section-actions">
+            <button class="btn btn-secondary" id="updateBridgesBtn" type="button">Update Bridges</button>
+            <button class="btn btn-secondary" id="addProjectBtn" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Add Project
+            </button>
+          </div>
+        </div>
+        <div class="projects-list" id="projectsList">
           <div class="empty-state" id="emptyState">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-              <rect x="8" y="12" width="32" height="24" rx="4" stroke="#6366f1" stroke-width="2"/>
-              <path d="M16 20h16M16 26h12" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            <p>No scenes configured</p>
-            <p class="hint">Click "Add Scene" to get started</p>
+            <p>No Unity projects configured</p>
           </div>
         </div>
       </section>
 
-      <section class="section settings-section">
-        <h2>Settings</h2>
-
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>MCP Server Path</label>
-            <p class="hint">Path to the compiled MCP server</p>
+      <details class="section advanced-section">
+        <summary>Advanced</summary>
+        <div class="advanced-content">
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="mcpServerPath">MCP Server</label>
+              <p class="hint">Installed server bundle</p>
+            </div>
+            <input type="text" id="mcpServerPath" class="input">
           </div>
-          <input type="text" id="mcpServerPath" class="input" placeholder="Resolved from this installation" />
-        </div>
 
-        <div class="setting-row">
-          <div class="setting-info">
-            <label for="toolGroups">Exposed Capabilities</label>
-            <p class="hint">Limit the MCP tools visible to connected clients</p>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="toolGroups">Capabilities</label>
+              <p class="hint">Tools exposed to connected clients</p>
+            </div>
+            <select id="toolGroups" class="input select-input">
+              <option value="all">Full Unity + Banter</option>
+              <option value="read">Inspection</option>
+              <option value="read,author,banter">Banter workflow</option>
+              <option value="read,author">Unity authoring</option>
+              <option value="read,test">Testing</option>
+              <option value="none">Minimal routing</option>
+            </select>
           </div>
-          <select id="toolGroups" class="input select-input">
-            <option value="all">Full Unity + Banter</option>
-            <option value="read">Inspection</option>
-            <option value="read,author,banter">Banter workflow</option>
-            <option value="read,author">Unity authoring</option>
-            <option value="read,test">Testing</option>
-            <option value="none">Minimal routing</option>
-          </select>
-        </div>
 
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>Auto-configure Clients</label>
-            <p class="hint">Keep Claude Code and Codex synchronized with the selected Unity channel</p>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="autoConfig">Follow Active Project</label>
+              <p class="hint">Update configured clients when the active project changes</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="autoConfig" checked>
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="autoConfig" checked>
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
 
-        <div class="setting-row">
-          <div class="setting-info">
-            <label>Enable Custom Scripts</label>
-            <p class="hint">Allow MCP to add custom C# scripts (non-Banter projects)</p>
+          <div class="setting-row">
+            <div class="setting-info">
+              <label for="customScripts">Custom C# Scripts</label>
+              <p class="hint">Allow MCP-authored scripts outside Banter Visual Scripting</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="customScripts">
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="customScripts">
-            <span class="toggle-slider"></span>
-          </label>
+
+          <div class="action-buttons">
+            <button class="btn btn-secondary" id="applyCodexBtn" type="button">Apply to Codex</button>
+            <button class="btn btn-secondary" id="applyConfigBtn" type="button">Apply to Claude Code</button>
+            <button class="btn btn-secondary" id="installExtensionBtn" type="button">Update Unity Bridge</button>
+            <button class="btn btn-danger" id="disconnectCodexBtn" type="button">Disconnect Codex</button>
+            <button class="btn btn-danger" id="disconnectBtn" type="button">Disconnect Claude</button>
+            <button class="btn btn-secondary" id="openDocsBtn" type="button">Documentation</button>
+          </div>
         </div>
-      </section>
-
-      <section class="section actions-section">
-        <h2>Quick Actions</h2>
-
-        <div class="action-buttons">
-          <button class="btn btn-secondary" id="applyConfigBtn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M13 5L6 12L3 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Apply to Claude Code
-          </button>
-
-          <button class="btn btn-secondary" id="applyCodexBtn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M13 5L6 12L3 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Apply to Codex
-          </button>
-
-          <button class="btn btn-danger" id="disconnectBtn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Disconnect from Claude
-          </button>
-
-          <button class="btn btn-danger" id="disconnectCodexBtn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Disconnect from Codex
-          </button>
-
-          <button class="btn btn-secondary" id="installExtensionBtn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 3v7M5 7l3 3 3-3M3 12h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Install Unity Extension
-          </button>
-
-          <button class="btn btn-secondary" id="openDocsBtn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="2"/>
-              <path d="M5 6h6M5 9h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            View Documentation
-          </button>
-        </div>
-      </section>
+      </details>
     </main>
 
     <footer class="footer">
-      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v1.9.1</span> • <a href="#" id="githubLink">GitHub</a></p>
+      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v2.0.0</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
     </footer>
-  </div>
-
-  <!-- Add Channel Modal -->
-  <div class="modal" id="addChannelModal">
-    <div class="modal-backdrop" id="modalBackdrop"></div>
-    <div class="modal-content">
-      <h3>Add Scene Channel</h3>
-
-      <div class="form-group">
-        <label for="channelName">Channel Name</label>
-        <input type="text" id="channelName" class="input" placeholder="My Banter Scene">
-      </div>
-
-      <div class="form-group">
-        <label for="scenePath">Unity Scene File</label>
-        <div class="input-with-button">
-          <input type="text" id="scenePath" class="input" placeholder="E:/unity/MyProject/Assets/Scenes/Main.unity">
-          <button class="btn btn-icon" id="browseBtn">Browse</button>
-        </div>
-        <p class="validation-msg" id="pathValidation"></p>
-      </div>
-
-      <div class="modal-actions">
-        <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
-        <button class="btn btn-primary" id="confirmAddBtn" disabled>Add Scene</button>
-      </div>
-    </div>
   </div>
 
   <script src="app.js"></script>

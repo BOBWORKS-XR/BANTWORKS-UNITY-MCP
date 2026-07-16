@@ -1,442 +1,437 @@
-// State
 let config = {
   channels: [],
   active_channel_id: null,
   mcp_server_path: '',
   tool_groups: 'all',
-  auto_start: false,
+  auto_start: true,
   enable_custom_scripts: false
 };
 
-// DOM Elements (set after DOM loads)
-let statusEl, channelsList, emptyState, addChannelBtn, addChannelModal;
-let modalBackdrop, channelNameInput, scenePathInput, pathValidation;
-let browseBtn, cancelBtn, confirmAddBtn, mcpServerPathInput;
-let toolGroupsSelect, autoConfigCheckbox, customScriptsCheckbox, applyConfigBtn, applyCodexBtn;
-let disconnectBtn, disconnectCodexBtn, installExtensionBtn, openDocsBtn;
+let onboarding = null;
+let discoveredProjects = [];
+let selectedProjectPath = '';
+let clientSelectionInitialized = false;
+let projectStatusTimer = null;
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', async () => {
-  // Get DOM elements
-  statusEl = document.getElementById('status');
-  channelsList = document.getElementById('channelsList');
-  emptyState = document.getElementById('emptyState');
-  addChannelBtn = document.getElementById('addChannelBtn');
-  addChannelModal = document.getElementById('addChannelModal');
-  modalBackdrop = document.getElementById('modalBackdrop');
-  channelNameInput = document.getElementById('channelName');
-  scenePathInput = document.getElementById('scenePath');
-  pathValidation = document.getElementById('pathValidation');
-  browseBtn = document.getElementById('browseBtn');
-  cancelBtn = document.getElementById('cancelBtn');
-  confirmAddBtn = document.getElementById('confirmAddBtn');
-  mcpServerPathInput = document.getElementById('mcpServerPath');
-  toolGroupsSelect = document.getElementById('toolGroups');
-  autoConfigCheckbox = document.getElementById('autoConfig');
-  customScriptsCheckbox = document.getElementById('customScripts');
-  applyConfigBtn = document.getElementById('applyConfigBtn');
-  applyCodexBtn = document.getElementById('applyCodexBtn');
-  disconnectBtn = document.getElementById('disconnectBtn');
-  disconnectCodexBtn = document.getElementById('disconnectCodexBtn');
-  installExtensionBtn = document.getElementById('installExtensionBtn');
-  openDocsBtn = document.getElementById('openDocsBtn');
+const elements = {};
 
-  // Set up event listeners
+document.addEventListener('DOMContentLoaded', async function() {
+  for (const id of [
+    'status', 'runtimeBadge', 'projectPath', 'browseProjectBtn', 'discoveredProjects',
+    'connectCodex', 'connectClaude', 'codexDetection', 'claudeDetection', 'codexState',
+    'claudeState', 'setupBtn', 'setupMessage', 'projectsList', 'emptyState', 'addProjectBtn',
+    'updateBridgesBtn',
+    'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'applyConfigBtn',
+    'applyCodexBtn', 'disconnectBtn', 'disconnectCodexBtn', 'installExtensionBtn',
+    'openDocsBtn', 'githubLink'
+  ]) {
+    elements[id] = document.getElementById(id);
+  }
+
   setupEventListeners();
 
-  // Load config
   try {
-    config = await window.__TAURI__.core.invoke('load_config');
+    const results = await Promise.all([
+      window.__TAURI__.core.invoke('load_config'),
+      window.__TAURI__.core.invoke('discover_unity_projects')
+    ]);
+    config = results[0];
+    discoveredProjects = results[1];
+    const active = getActiveChannel();
+    selectedProjectPath = active ? active.unity_project_path : (discoveredProjects[0]?.path || '');
+    elements.projectPath.value = selectedProjectPath;
+    renderDiscoveredProjects();
+    await refreshOnboardingStatus();
     updateUI();
-  } catch (err) {
-    console.error('Failed to load config:', err);
-    showToast('Failed to load configuration: ' + err, 'error');
+  } catch (error) {
+    console.error('Launcher initialization failed:', error);
+    showToast('Failed to initialize launcher: ' + String(error), 'error');
   }
 });
 
 function setupEventListeners() {
-  // Add Scene button - opens modal
-  addChannelBtn.addEventListener('click', function() {
-    console.log('Add Scene clicked');
-    channelNameInput.value = '';
-    scenePathInput.value = '';
-    pathValidation.textContent = '';
-    pathValidation.className = 'validation-msg';
-    confirmAddBtn.disabled = true;
-    addChannelModal.classList.add('open');
-    channelNameInput.focus();
+  elements.browseProjectBtn.addEventListener('click', chooseProjectForSetup);
+  elements.addProjectBtn.addEventListener('click', addProjectFromPicker);
+  elements.updateBridgesBtn.addEventListener('click', updateConfiguredBridges);
+
+  elements.projectPath.addEventListener('input', function() {
+    selectedProjectPath = elements.projectPath.value.trim();
+    clearTimeout(projectStatusTimer);
+    projectStatusTimer = setTimeout(async function() {
+      await refreshOnboardingStatus();
+      updateSetupStatus();
+    }, 250);
   });
 
-  // Modal close
-  modalBackdrop.addEventListener('click', closeModal);
-  cancelBtn.addEventListener('click', closeModal);
+  elements.discoveredProjects.addEventListener('change', async function() {
+    if (!elements.discoveredProjects.value) return;
+    await selectSetupProject(elements.discoveredProjects.value);
+  });
 
-  // Browse button - opens file picker for .unity files
-  browseBtn.addEventListener('click', async function() {
-    try {
-      const selected = await window.__TAURI__.dialog.open({
-        directory: false,
-        multiple: false,
-        title: 'Select Unity Scene File',
-        filters: [{
-          name: 'Unity Scene',
-          extensions: ['unity']
-        }]
+  elements.connectCodex.addEventListener('change', updateSetupButton);
+  elements.connectClaude.addEventListener('change', updateSetupButton);
+  elements.setupBtn.addEventListener('click', runQuickSetup);
+
+  elements.mcpServerPath.addEventListener('change', async function() {
+    config.mcp_server_path = elements.mcpServerPath.value.trim();
+    await saveLauncherConfig('Failed to save MCP server path');
+  });
+
+  elements.toolGroups.addEventListener('change', async function() {
+    config.tool_groups = elements.toolGroups.value;
+    await saveLauncherConfig('Failed to save capabilities');
+    if (elements.autoConfig.checked && getActiveChannel()) {
+      await updateConfiguredClients(getActiveChannel());
+    }
+  });
+
+  elements.autoConfig.addEventListener('change', async function() {
+    config.auto_start = elements.autoConfig.checked;
+    await saveLauncherConfig('Failed to save active-project preference');
+  });
+
+  elements.customScripts.addEventListener('change', async function() {
+    config.enable_custom_scripts = elements.customScripts.checked;
+    await saveLauncherConfig('Failed to save script preference');
+    const channel = getActiveChannel();
+    if (channel) {
+      await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
+        unityProjectPath: channel.unity_project_path,
+        enabled: config.enable_custom_scripts
       });
-
-      if (selected) {
-        scenePathInput.value = selected;
-        validateScenePath(selected);
-      }
-    } catch (err) {
-      console.error('Failed to open dialog:', err);
-      showToast('Failed to open file dialog', 'error');
     }
   });
 
-  // Path input validation
-  scenePathInput.addEventListener('input', function() {
-    validateScenePath(scenePathInput.value);
-  });
+  elements.applyConfigBtn.addEventListener('click', applyToClaudeCode);
+  elements.applyCodexBtn.addEventListener('click', applyToCodex);
+  elements.disconnectBtn.addEventListener('click', disconnectFromClaude);
+  elements.disconnectCodexBtn.addEventListener('click', disconnectFromCodex);
+  elements.installExtensionBtn.addEventListener('click', installExtension);
 
-  // Channel name input
-  channelNameInput.addEventListener('input', function() {
-    var hasName = channelNameInput.value.trim().length > 0;
-    var pathValid = pathValidation.classList.contains('success');
-    confirmAddBtn.disabled = !hasName || !pathValid;
+  elements.openDocsBtn.addEventListener('click', openDocumentation);
+  elements.githubLink.addEventListener('click', function(event) {
+    event.preventDefault();
+    openDocumentation();
   });
+}
 
-  // Confirm add channel
-  confirmAddBtn.addEventListener('click', addChannel);
-
-  // Settings
-  mcpServerPathInput.addEventListener('change', async function() {
-    config.mcp_server_path = mcpServerPathInput.value;
-    try {
-      await window.__TAURI__.core.invoke('save_config', { config: config });
-    } catch (err) {
-      console.error('Failed to save config:', err);
-    }
+async function chooseProjectFolder() {
+  return await window.__TAURI__.dialog.open({
+    directory: true,
+    multiple: false,
+    title: 'Select Unity Project Folder'
   });
+}
 
-  toolGroupsSelect.addEventListener('change', async function() {
-    config.tool_groups = toolGroupsSelect.value;
-    try {
-      await window.__TAURI__.core.invoke('save_config', { config: config });
-      var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
-      if (autoConfigCheckbox.checked && channel) {
-        await updateConfiguredClients(channel);
-        showToast('Capability profile applied to Claude and Codex', 'success');
-      }
-    } catch (err) {
-      console.error('Failed to save capability profile:', err);
-      showToast('Failed to save capability profile', 'error');
-    }
-  });
+async function chooseProjectForSetup() {
+  try {
+    const selected = await chooseProjectFolder();
+    if (selected) await selectSetupProject(selected);
+  } catch (error) {
+    showToast('Could not open the project picker', 'error');
+  }
+}
 
-  autoConfigCheckbox.addEventListener('change', async function() {
-    config.auto_start = autoConfigCheckbox.checked;
-    try {
-      await window.__TAURI__.core.invoke('save_config', { config: config });
-    } catch (err) {
-      console.error('Failed to save config:', err);
-    }
-  });
+async function selectSetupProject(path) {
+  selectedProjectPath = String(path);
+  elements.projectPath.value = selectedProjectPath;
+  elements.discoveredProjects.value = discoveredProjects.some(function(project) {
+    return samePath(project.path, selectedProjectPath);
+  }) ? discoveredProjects.find(function(project) {
+    return samePath(project.path, selectedProjectPath);
+  }).path : '';
+  await refreshOnboardingStatus();
+  updateSetupStatus();
+}
 
-  customScriptsCheckbox.addEventListener('change', async function() {
-    config.enable_custom_scripts = customScriptsCheckbox.checked;
-    try {
-      await window.__TAURI__.core.invoke('save_config', { config: config });
-      // Also update Unity extension setting if active channel exists
-      var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
-      if (channel) {
-        await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
-          unityProjectPath: channel.unity_project_path,
-          enabled: customScriptsCheckbox.checked
-        });
-      }
-      showToast(customScriptsCheckbox.checked ? 'Custom scripts enabled' : 'Custom scripts disabled', 'success');
-    } catch (err) {
-      console.error('Failed to save config:', err);
-    }
-  });
+async function addProjectFromPicker() {
+  try {
+    const selected = await chooseProjectFolder();
+    if (!selected) return;
+    const channel = await window.__TAURI__.core.invoke('add_project', { projectPath: selected });
+    const existing = config.channels.find(function(item) {
+      return samePath(item.unity_project_path, channel.unity_project_path);
+    });
+    if (!existing) config.channels.push(channel);
+    config.active_channel_id = existing ? existing.id : channel.id;
+    await window.__TAURI__.core.invoke('save_config', { config: config });
+    selectedProjectPath = channel.unity_project_path;
+    elements.projectPath.value = selectedProjectPath;
+    await refreshAll();
+    showToast('Unity project added', 'success');
+  } catch (error) {
+    showToast(String(error), 'error');
+  }
+}
 
-  // Quick actions
-  applyConfigBtn.addEventListener('click', applyToClaudeCode);
-  applyCodexBtn.addEventListener('click', applyToCodex);
-  disconnectBtn.addEventListener('click', disconnectFromClaude);
-  disconnectCodexBtn.addEventListener('click', disconnectFromCodex);
-  installExtensionBtn.addEventListener('click', installExtension);
-  openDocsBtn.addEventListener('click', async function() {
-    try {
-      await window.__TAURI__.shell.open('https://github.com/BOBWORKS-XR/BANTWORKS-UNITY-MCP');
-    } catch (err) {
-      console.error('Failed to open docs:', err);
-    }
+function renderDiscoveredProjects() {
+  const currentValue = selectedProjectPath;
+  elements.discoveredProjects.innerHTML = '<option value="">Recent Unity projects</option>';
+  discoveredProjects.forEach(function(project) {
+    const option = document.createElement('option');
+    option.value = project.path;
+    option.textContent = project.name + (project.unityVersion ? ' · ' + project.unityVersion : '');
+    elements.discoveredProjects.appendChild(option);
   });
+  const match = discoveredProjects.find(function(project) {
+    return samePath(project.path, currentValue);
+  });
+  elements.discoveredProjects.value = match ? match.path : '';
+}
+
+async function refreshAll() {
+  config = await window.__TAURI__.core.invoke('load_config');
+  discoveredProjects = await window.__TAURI__.core.invoke('discover_unity_projects');
+  renderDiscoveredProjects();
+  await refreshOnboardingStatus();
+  updateUI();
+}
+
+async function refreshOnboardingStatus() {
+  onboarding = await window.__TAURI__.core.invoke('get_onboarding_status', {
+    unityProjectPath: selectedProjectPath || null
+  });
+  if (!clientSelectionInitialized) {
+    const codex = getClientStatus('codex');
+    const claude = getClientStatus('claude');
+    elements.connectCodex.checked = Boolean(codex && (codex.detected || codex.configured));
+    elements.connectClaude.checked = Boolean(claude && (claude.detected || claude.configured));
+    clientSelectionInitialized = true;
+  }
 }
 
 function updateUI() {
-  mcpServerPathInput.value = config.mcp_server_path;
-  var toolGroups = config.tool_groups || 'all';
-  Array.from(toolGroupsSelect.options).forEach(function(option) {
-    if (option.dataset.custom === 'true') option.remove();
+  elements.mcpServerPath.value = config.mcp_server_path || '';
+  const toolGroups = config.tool_groups || 'all';
+  let option = Array.from(elements.toolGroups.options).find(function(item) {
+    return item.value === toolGroups;
   });
-  var hasProfile = Array.from(toolGroupsSelect.options).some(function(option) {
-    return option.value === toolGroups;
-  });
-  if (!hasProfile) {
-    var customOption = document.createElement('option');
-    customOption.value = toolGroups;
-    customOption.textContent = 'Custom (' + toolGroups + ')';
-    customOption.dataset.custom = 'true';
-    toolGroupsSelect.appendChild(customOption);
+  if (!option) {
+    option = document.createElement('option');
+    option.value = toolGroups;
+    option.textContent = 'Custom (' + toolGroups + ')';
+    elements.toolGroups.appendChild(option);
   }
-  toolGroupsSelect.value = toolGroups;
-  autoConfigCheckbox.checked = config.auto_start !== false;
-  customScriptsCheckbox.checked = config.enable_custom_scripts === true;
-  renderChannels();
-  updateStatus();
+  elements.toolGroups.value = toolGroups;
+  elements.autoConfig.checked = config.auto_start !== false;
+  elements.customScripts.checked = config.enable_custom_scripts === true;
+  renderProjects();
+  updateSetupStatus();
 }
 
-function renderChannels() {
-  // Clear existing cards
-  var existingCards = channelsList.querySelectorAll('.channel-card');
-  existingCards.forEach(function(card) { card.remove(); });
+function updateSetupStatus() {
+  if (!onboarding) return;
+  const runtime = onboarding.runtime;
+  const project = onboarding.project;
+  const codex = getClientStatus('codex');
+  const claude = getClientStatus('claude');
 
-  if (config.channels.length === 0) {
-    emptyState.style.display = 'flex';
-    return;
+  elements.runtimeBadge.textContent = runtime.ready
+    ? (runtime.bundled ? 'Private Node 24 LTS' : 'System Node')
+    : 'Runtime unavailable';
+  elements.runtimeBadge.className = 'runtime-badge ' + (runtime.ready ? 'ready' : 'error');
+
+  setCheck('runtime', runtime.ready ? 'success' : 'error', runtime.ready ? 'Ready' : 'Missing');
+  setCheck('project', !selectedProjectPath ? 'pending' : (project?.valid ? 'success' : 'error'),
+    !selectedProjectPath ? 'Not selected' : (project?.valid ? 'Valid' : 'Invalid'));
+
+  let bridgeState = 'pending';
+  let bridgeText = 'Not installed';
+  if (project?.bridgeInstalled && !project.bridgeCurrent) {
+    bridgeState = 'warning';
+    bridgeText = 'Update available';
+  } else if (project?.bridgeInstalled) {
+    bridgeState = project.stateStatus === 'fresh' ? 'success' : 'warning';
+    bridgeText = project.stateStatus === 'fresh' ? 'Connected' : 'Installed';
   }
+  setCheck('bridge', bridgeState, bridgeText);
+  updateClientStatus('codex', codex, elements.codexDetection, elements.codexState);
+  updateClientStatus('claude', claude, elements.claudeDetection, elements.claudeState);
 
-  emptyState.style.display = 'none';
+  const connected = project?.bridgeCurrent && project.stateStatus === 'fresh';
+  const configured = project?.bridgeCurrent && (codex?.configured || claude?.configured);
+  if (connected) {
+    setHeaderStatus('active', 'Connected');
+  } else if (configured) {
+    setHeaderStatus('warning', 'Configured');
+  } else if (selectedProjectPath) {
+    setHeaderStatus('warning', 'Setup required');
+  } else {
+    setHeaderStatus('', 'Not configured');
+  }
+  updateSetupButton();
+}
+
+function updateClientStatus(id, status, detectionElement, stateElement) {
+  detectionElement.textContent = status?.detected ? 'Detected' : 'Not detected';
+  stateElement.textContent = status?.configured ? 'Configured' : 'Not configured';
+  stateElement.className = 'client-state ' + (status?.configured ? 'configured' : '');
+  setCheck(id, status?.configured ? 'success' : (status?.detected ? 'pending' : 'warning'),
+    status?.configured ? 'Configured' : (status?.detected ? 'Detected' : 'Not found'));
+}
+
+function setCheck(name, state, text) {
+  const row = document.querySelector('[data-check="' + name + '"]');
+  if (!row) return;
+  row.className = 'check-row ' + state;
+  row.querySelector('strong').textContent = text;
+}
+
+function setHeaderStatus(state, text) {
+  elements.status.className = 'status' + (state ? ' ' + state : '');
+  elements.status.querySelector('.status-text').textContent = text;
+}
+
+function updateSetupButton() {
+  const projectValid = Boolean(onboarding?.project?.valid);
+  const runtimeReady = Boolean(onboarding?.runtime?.ready);
+  const hasClient = elements.connectCodex.checked || elements.connectClaude.checked;
+  elements.setupBtn.disabled = !projectValid || !runtimeReady || !hasClient;
+}
+
+async function runQuickSetup() {
+  elements.setupBtn.disabled = true;
+  elements.setupBtn.classList.add('working');
+  elements.setupMessage.textContent = 'Installing bridge and configuring clients...';
+
+  try {
+    await window.__TAURI__.core.invoke('one_click_setup', {
+      unityProjectPath: selectedProjectPath,
+      configureCodex: elements.connectCodex.checked,
+      configureClaude: elements.connectClaude.checked,
+      toolGroups: config.tool_groups || 'all',
+      enableCustomScripts: config.enable_custom_scripts === true
+    });
+    await refreshAll();
+    elements.setupMessage.textContent = 'Setup saved. Waiting for Unity bridge...';
+    const connected = await waitForFreshBridge(30);
+    elements.setupMessage.textContent = connected
+      ? 'Setup complete. Restart the configured MCP client if it was already open.'
+      : 'Setup complete. Open or return to Unity to finish the bridge connection.';
+    showToast('BANTWORKS MCP setup completed', 'success');
+  } catch (error) {
+    elements.setupMessage.textContent = String(error);
+    showToast('Setup failed', 'error');
+  } finally {
+    elements.setupBtn.classList.remove('working');
+    updateSetupButton();
+  }
+}
+
+async function waitForFreshBridge(maxSeconds) {
+  for (let elapsed = 0; elapsed < maxSeconds; elapsed += 2) {
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    if (onboarding?.project?.stateStatus === 'fresh') return true;
+    await delay(2000);
+  }
+  return false;
+}
+
+function renderProjects() {
+  elements.projectsList.querySelectorAll('.project-card').forEach(function(card) { card.remove(); });
+  elements.emptyState.style.display = config.channels.length ? 'none' : 'flex';
 
   config.channels.forEach(function(channel) {
-    var card = createChannelCard(channel);
-    channelsList.appendChild(card);
+    const card = document.createElement('div');
+    const active = channel.id === config.active_channel_id;
+    card.className = 'project-card' + (active ? ' active' : '');
+    card.innerHTML =
+      '<span class="project-indicator"></span>' +
+      '<div class="project-info"><strong>' + escapeHtml(channel.name) + '</strong>' +
+      '<span>' + escapeHtml(channel.unity_project_path) + '</span></div>' +
+      '<div class="project-meta">' + (active ? '<span class="badge active-badge">Active</span>' : '') +
+      '<span class="badge bridge-badge">Checking bridge</span></div>' +
+      '<button class="icon-button remove-project" type="button" title="Remove project" aria-label="Remove project">' +
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
+
+    card.addEventListener('click', async function(event) {
+      if (!event.target.closest('.remove-project')) await selectChannel(channel.id);
+    });
+    card.querySelector('.remove-project').addEventListener('click', async function(event) {
+      event.stopPropagation();
+      await removeChannel(channel.id);
+    });
+    elements.projectsList.appendChild(card);
+    updateBridgeBadge(channel, card.querySelector('.bridge-badge'));
   });
 }
 
-function createChannelCard(channel) {
-  var isActive = channel.id === config.active_channel_id;
-  var displayPath = channel.scene_path || channel.unity_project_path;
-
-  var card = document.createElement('div');
-  card.className = 'channel-card' + (isActive ? ' active' : '');
-  card.dataset.channelId = channel.id;
-
-  card.innerHTML =
-    '<div class="channel-radio"></div>' +
-    '<div class="channel-info">' +
-      '<div class="channel-name">' + escapeHtml(channel.name) + '</div>' +
-      '<div class="channel-path">' + escapeHtml(displayPath) + '</div>' +
-    '</div>' +
-    '<div class="channel-badges">' +
-      '<span class="badge extension-badge" style="display: none;">Extension</span>' +
-    '</div>' +
-    '<div class="channel-actions">' +
-      '<button class="btn-icon-small delete" title="Remove channel">' +
-        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none">' +
-          '<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
-        '</svg>' +
-      '</button>' +
-    '</div>';
-
-  card.addEventListener('click', function(e) {
-    if (!e.target.closest('.btn-icon-small')) {
-      selectChannel(channel.id);
-    }
-  });
-
-  var deleteBtn = card.querySelector('.delete');
-  deleteBtn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    removeChannel(channel.id);
-  });
-
-  checkExtension(channel, card);
-  return card;
-}
-
-async function checkExtension(channel, card) {
+async function updateBridgeBadge(channel, badge) {
   try {
-    var hasExtension = await window.__TAURI__.core.invoke('check_unity_extension', {
+    const status = await window.__TAURI__.core.invoke('get_unity_extension_status', {
       unityProjectPath: channel.unity_project_path
     });
-
-    var badge = card.querySelector('.extension-badge');
-    if (hasExtension) {
-      badge.style.display = 'inline';
-      badge.className = 'badge success';
-      badge.textContent = 'Extension';
+    if (status.current) {
+      badge.textContent = 'Bridge current';
+      badge.className = 'badge bridge-badge success';
+    } else {
+      badge.textContent = status.installed ? 'Update available' : 'Bridge missing';
+      badge.className = 'badge bridge-badge warning';
     }
-  } catch (err) {
-    console.error('Failed to check extension:', err);
+  } catch (error) {
+    badge.textContent = 'Unavailable';
+    badge.className = 'badge bridge-badge warning';
+  }
+}
+
+async function updateConfiguredBridges() {
+  elements.updateBridgesBtn.disabled = true;
+  try {
+    const summary = await window.__TAURI__.core.invoke('update_configured_unity_extensions');
+    await refreshAll();
+    if (summary.failed.length) {
+      showToast('Updated ' + summary.updated + ' bridges; ' + summary.failed.length + ' failed', 'error');
+    } else if (summary.updated) {
+      showToast('Updated ' + summary.updated + ' Unity bridge' + (summary.updated === 1 ? '' : 's'), 'success');
+    } else {
+      showToast('All configured Unity bridges are current', 'success');
+    }
+  } catch (error) {
+    showToast('Bridge update failed: ' + String(error), 'error');
+  } finally {
+    elements.updateBridgesBtn.disabled = false;
   }
 }
 
 async function selectChannel(channelId) {
   config.active_channel_id = channelId;
-
-  try {
-    await window.__TAURI__.core.invoke('save_config', { config: config });
-
-    if (autoConfigCheckbox.checked) {
-      var channel = config.channels.find(function(c) { return c.id === channelId; });
-      if (channel) {
-        await updateConfiguredClients(channel);
-        showToast('Applied to Claude and Codex', 'success');
-      }
-    }
-
-    updateUI();
-  } catch (err) {
-    console.error('Failed to select channel:', err);
-    showToast('Failed to save configuration', 'error');
+  const channel = getActiveChannel();
+  if (channel) {
+    selectedProjectPath = channel.unity_project_path;
+    elements.projectPath.value = selectedProjectPath;
   }
+  await window.__TAURI__.core.invoke('save_config', { config: config });
+  if (elements.autoConfig.checked && channel) await updateConfiguredClients(channel);
+  await refreshAll();
 }
 
 async function removeChannel(channelId) {
-  config.channels = config.channels.filter(function(c) { return c.id !== channelId; });
-
+  config.channels = config.channels.filter(function(channel) { return channel.id !== channelId; });
   if (config.active_channel_id === channelId) {
-    config.active_channel_id = config.channels.length > 0 ? config.channels[0].id : null;
+    config.active_channel_id = config.channels[0]?.id || null;
   }
-
-  try {
-    await window.__TAURI__.core.invoke('save_config', { config: config });
-    updateUI();
-    showToast('Channel removed', 'success');
-  } catch (err) {
-    console.error('Failed to remove channel:', err);
-    showToast('Failed to save configuration', 'error');
-  }
-}
-
-function updateStatus() {
-  var activeChannel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
-
-  if (activeChannel) {
-    statusEl.className = 'status active';
-    statusEl.querySelector('.status-text').textContent = activeChannel.name;
-  } else if (config.channels.length > 0) {
-    statusEl.className = 'status warning';
-    statusEl.querySelector('.status-text').textContent = 'No channel selected';
-  } else {
-    statusEl.className = 'status';
-    statusEl.querySelector('.status-text').textContent = 'Not Configured';
-  }
-}
-
-function closeModal() {
-  addChannelModal.classList.remove('open');
-}
-
-async function validateScenePath(path) {
-  if (!path) {
-    pathValidation.textContent = '';
-    pathValidation.className = 'validation-msg';
-    confirmAddBtn.disabled = true;
-    return;
-  }
-
-  try {
-    var isValid = await window.__TAURI__.core.invoke('validate_unity_scene', { path: path });
-
-    if (isValid) {
-      pathValidation.textContent = 'Valid Unity scene file';
-      pathValidation.className = 'validation-msg success';
-      confirmAddBtn.disabled = !channelNameInput.value.trim();
-    } else {
-      pathValidation.textContent = 'Not a valid Unity scene (.unity file inside Assets folder)';
-      pathValidation.className = 'validation-msg error';
-      confirmAddBtn.disabled = true;
-    }
-  } catch (err) {
-    pathValidation.textContent = 'File does not exist';
-    pathValidation.className = 'validation-msg error';
-    confirmAddBtn.disabled = true;
-  }
-}
-
-async function addChannel() {
-  var name = channelNameInput.value.trim();
-  var path = scenePathInput.value.trim();
-
-  if (!name || !path) return;
-
-  try {
-    var channel = await window.__TAURI__.core.invoke('add_channel', {
-      name: name,
-      scenePath: path
-    });
-
-    config.channels.push(channel);
-
-    if (config.channels.length === 1) {
-      config.active_channel_id = channel.id;
-    }
-
-    await window.__TAURI__.core.invoke('save_config', { config: config });
-
-    closeModal();
-    updateUI();
-    showToast('Channel added', 'success');
-  } catch (err) {
-    console.error('Failed to add channel:', err);
-    pathValidation.textContent = String(err);
-    pathValidation.className = 'validation-msg error';
-  }
-}
-
-async function applyToClaudeCode() {
-  var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
-
-  if (!channel) {
-    showToast('No channel selected', 'error');
-    return;
-  }
-
-  try {
-    await window.__TAURI__.core.invoke('update_claude_mcp_config', {
-      channel: channel,
-      mcpServerPath: config.mcp_server_path,
-      toolGroups: config.tool_groups || 'all'
-    });
-    showToast('Applied to Claude Code (~/.claude.json)', 'success');
-  } catch (err) {
-    console.error('Failed to apply config:', err);
-    showToast('Failed to update Claude config', 'error');
-  }
-}
-
-async function applyToCodex() {
-  var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
-
-  if (!channel) {
-    showToast('No channel selected', 'error');
-    return;
-  }
-
-  try {
-    await window.__TAURI__.core.invoke('update_codex_mcp_config', {
-      channel: channel,
-      mcpServerPath: config.mcp_server_path,
-      toolGroups: config.tool_groups || 'all'
-    });
-    showToast('Applied to Codex (~/.codex/config.toml)', 'success');
-  } catch (err) {
-    console.error('Failed to apply Codex config:', err);
-    showToast('Failed to update Codex config', 'error');
-  }
+  await window.__TAURI__.core.invoke('save_config', { config: config });
+  const active = getActiveChannel();
+  selectedProjectPath = active?.unity_project_path || '';
+  elements.projectPath.value = selectedProjectPath;
+  await refreshAll();
+  showToast('Project removed from launcher', 'success');
 }
 
 async function updateConfiguredClients(channel) {
-  await window.__TAURI__.core.invoke('update_claude_mcp_config', {
-    channel: channel,
-    mcpServerPath: config.mcp_server_path,
-    toolGroups: config.tool_groups || 'all'
-  });
+  await refreshOnboardingStatus();
+  const codex = getClientStatus('codex');
+  const claude = getClientStatus('claude');
+  if (codex?.configured) {
+    await updateCodexConfig(channel);
+  }
+  if (claude?.configured) {
+    await updateClaudeConfig(channel);
+  }
+}
+
+async function updateCodexConfig(channel) {
   await window.__TAURI__.core.invoke('update_codex_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
@@ -444,73 +439,124 @@ async function updateConfiguredClients(channel) {
   });
 }
 
-async function disconnectFromClaude() {
+async function updateClaudeConfig(channel) {
+  await window.__TAURI__.core.invoke('update_claude_mcp_config', {
+    channel: channel,
+    mcpServerPath: config.mcp_server_path,
+    toolGroups: config.tool_groups || 'all'
+  });
+}
+
+async function applyToCodex() {
+  const channel = getActiveChannel();
+  if (!channel) return showToast('No Unity project selected', 'error');
   try {
-    await window.__TAURI__.core.invoke('remove_claude_mcp_config');
-    showToast('Disconnected Banter MCP from Claude Code', 'success');
-  } catch (err) {
-    console.error('Failed to disconnect:', err);
-    showToast('Failed to disconnect: ' + String(err), 'error');
+    await updateCodexConfig(channel);
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Applied to Codex', 'success');
+  } catch (error) {
+    showToast('Codex configuration failed: ' + String(error), 'error');
+  }
+}
+
+async function applyToClaudeCode() {
+  const channel = getActiveChannel();
+  if (!channel) return showToast('No Unity project selected', 'error');
+  try {
+    await updateClaudeConfig(channel);
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Applied to Claude Code', 'success');
+  } catch (error) {
+    showToast('Claude configuration failed: ' + String(error), 'error');
   }
 }
 
 async function disconnectFromCodex() {
   try {
     await window.__TAURI__.core.invoke('remove_codex_mcp_config');
-    showToast('Disconnected Banter MCP from Codex', 'success');
-  } catch (err) {
-    console.error('Failed to disconnect Codex:', err);
-    showToast('Failed to disconnect Codex: ' + String(err), 'error');
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Codex disconnected', 'success');
+  } catch (error) {
+    showToast('Could not disconnect Codex', 'error');
+  }
+}
+
+async function disconnectFromClaude() {
+  try {
+    await window.__TAURI__.core.invoke('remove_claude_mcp_config');
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Claude Code disconnected', 'success');
+  } catch (error) {
+    showToast('Could not disconnect Claude Code', 'error');
   }
 }
 
 async function installExtension() {
-  var channel = config.channels.find(function(c) { return c.id === config.active_channel_id; });
-
-  if (!channel) {
-    showToast('No channel selected', 'error');
-    return;
-  }
-
+  const channel = getActiveChannel();
+  if (!channel) return showToast('No Unity project selected', 'error');
   try {
     await window.__TAURI__.core.invoke('install_unity_extension', {
       unityProjectPath: channel.unity_project_path
     });
-    await window.__TAURI__.core.invoke('set_unity_custom_scripts', {
-      unityProjectPath: channel.unity_project_path,
-      enabled: customScriptsCheckbox.checked
-    });
-    showToast('Unity extension installed', 'success');
+    await refreshOnboardingStatus();
     updateUI();
-  } catch (err) {
-    console.error('Failed to install extension:', err);
-    showToast('Failed: ' + String(err), 'error');
+    showToast('Unity bridge updated', 'success');
+  } catch (error) {
+    showToast(String(error), 'error');
   }
+}
+
+async function saveLauncherConfig(errorMessage) {
+  try {
+    await window.__TAURI__.core.invoke('save_config', { config: config });
+  } catch (error) {
+    showToast(errorMessage + ': ' + String(error), 'error');
+  }
+}
+
+async function openDocumentation() {
+  try {
+    await window.__TAURI__.shell.open('https://github.com/BOBWORKS-XR/BANTWORKS-UNITY-MCP');
+  } catch (error) {
+    showToast('Could not open documentation', 'error');
+  }
+}
+
+function getActiveChannel() {
+  return config.channels.find(function(channel) {
+    return channel.id === config.active_channel_id;
+  });
+}
+
+function getClientStatus(id) {
+  return onboarding?.clients?.find(function(client) { return client.id === id; });
+}
+
+function samePath(left, right) {
+  return String(left || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase() ===
+    String(right || '').replace(/\\/g, '/').replace(/\/$/, '').toLowerCase();
+}
+
+function delay(milliseconds) {
+  return new Promise(function(resolve) { setTimeout(resolve, milliseconds); });
 }
 
 function showToast(message, type) {
-  type = type || 'info';
-  var existing = document.querySelector('.toast');
+  const existing = document.querySelector('.toast');
   if (existing) existing.remove();
-
-  var toast = document.createElement('div');
-  toast.className = 'toast ' + type;
-
-  var iconPath = '<circle cx="8" cy="8" r="6" stroke="#6366f1" stroke-width="2"/>';
-  if (type === 'success') {
-    iconPath = '<path d="M13 5L6 12L3 9" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
-  } else if (type === 'error') {
-    iconPath = '<path d="M4 4l8 8M12 4l-8 8" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>';
-  }
-
-  toast.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none">' + iconPath + '</svg> ' + escapeHtml(message);
-
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + (type || 'info');
+  toast.textContent = message;
   document.body.appendChild(toast);
-  setTimeout(function() { toast.remove(); }, 3000);
+  setTimeout(function() { toast.remove(); }, 4500);
 }
 
 function escapeHtml(text) {
-  var div = document.createElement('div');
+  const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
