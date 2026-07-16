@@ -73,6 +73,10 @@ Verify downloaded artifacts against the release's `SHA256SUMS.txt`. Builds that 
 
 Open **BANTWORKS MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up BANTWORKS MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports project, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
 
+![BANTWORKS MCP guided Windows launcher](docs/images/bantworks-mcp-guided-launcher.png)
+
+*The guided launcher manages the private runtime, MCP client configuration, Unity projects, and project-local bridge updates.*
+
 Bridge copies are project-local. The launcher compares every configured project against its bundled bridge, labels stale copies as **Update available**, and provides **Update Bridges** to back up and refresh all configured projects in one action.
 
 The MSI and standalone ZIP remain available for managed or manual deployments. Tagged releases include `SHA256SUMS.txt` for artifact verification. The standalone ZIP requires Node.js 18 or newer.
