@@ -37,6 +37,18 @@ BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not j
 
 This knowledge improves graph generation and review, but source-class coverage is not proof of runtime behavior. `validate_vs_graph_in_unity` provides an authoritative import and deserialization check in the selected Editor; generated graphs must still be exercised in the target Unity and Banter SDK version.
 
+## AI-Generated Scene Examples
+
+These Banter prototype screenshots show complete scene work generated through an AI client using BANTWORKS MCP, including hierarchy construction, configured Banter components, object references, and native Unity Visual Scripting graphs. They are real project examples rather than assets bundled with the MCP.
+
+![AI-generated Banter portal scene and Visual Scripting graph](docs/images/ai-generated-banter-portal-graph.png)
+
+*Generated portal scene, component setup, graph variables, and portal-state Visual Scripting logic.*
+
+![AI-generated Banter portal placement scene and Visual Scripting graph](docs/images/ai-generated-banter-portal-placement.png)
+
+*Generated portal-placement interaction with configured Banter held events, object references, and native Visual Scripting logic.*
+
 ## Cross-Version Obstacle Course
 
 `scripts/setup-unity-obstacle-course.ps1` creates or updates only a marked fixture project. It builds moving platforms, rotating hazards, deterministic pivot doors, paired rolling-ball ramps, world-space respawn with motion reset, and optional local asset dressing. When Banter is pinned, it also writes a separate integration scene with two synced balls.
