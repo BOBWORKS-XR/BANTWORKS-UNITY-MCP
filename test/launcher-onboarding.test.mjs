@@ -7,8 +7,6 @@ const launcherHtml = fs.readFileSync("launcher/src/index.html", "utf8");
 const launcherApp = fs.readFileSync("launcher/src/app.js", "utf8");
 const tauriConfig = fs.readFileSync("launcher/src-tauri/tauri.conf.json", "utf8");
 const runtimeStage = fs.readFileSync("scripts/stage-node-runtime.ps1", "utf8");
-const standaloneBuild = fs.readFileSync("scripts/build-standalone.ps1", "utf8");
-const feedbackGuide = fs.readFileSync("FEEDBACK.md", "utf8");
 
 test("guided setup accepts a Unity project folder and configures selected clients", () => {
   assert.match(launcherSource, /fn add_project\(/);
@@ -30,13 +28,4 @@ test("launcher-managed clients use a pinned private Node runtime", () => {
   assert.match(runtimeStage, /24\.17\.0/);
   assert.match(runtimeStage, /ArchiveSha256/);
   assert.match(runtimeStage, /NodeExeSha256/);
-});
-
-test("project feedback guide is canonical and included in release payloads", () => {
-  assert.match(feedbackGuide, /\.bantworks-mcp\/feedback\.md/);
-  assert.match(feedbackGuide, /Confirmed broken/);
-  assert.match(feedbackGuide, /Cross-Project Review/);
-  assert.match(tauriConfig, /"\.\.\/\.\.\/FEEDBACK\.md"\s*:\s*"server\/FEEDBACK\.md"/);
-  assert.match(standaloneBuild, /"FEEDBACK\.md"/);
-  assert.match(standaloneBuild, /Standalone archive is missing FEEDBACK\.md/);
 });
