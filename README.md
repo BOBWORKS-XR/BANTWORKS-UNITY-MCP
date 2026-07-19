@@ -337,6 +337,21 @@ Common fixes:
 - Generate real GUIDs, not patterns
 - Use `InvokeMember` for GetComponent, not a GetComponent node
 
+## Project Feedback
+
+Point every Unity project's AI client at [FEEDBACK.md](FEEDBACK.md). It defines
+one evidence-based format for MCP, bridge, installer, Visual Scripting, and
+Banter findings while keeping project-specific gameplay out of the MCP.
+
+Each project keeps its working report at
+`<UNITY_PROJECT_ROOT>/.bantworks-mcp/feedback.md`, outside Unity's `Assets`
+import pipeline. The guide includes a ready-to-use project instruction, required
+environment metadata, finding classifications, reproduction and validation
+fields, privacy rules, and a cross-project review process.
+
+Projects without a local source checkout can read the canonical raw guide at
+`https://raw.githubusercontent.com/BOBWORKS-XR/BANTWORKS-UNITY-MCP/master/FEEDBACK.md`.
+
 ## Development
 
 ```powershell

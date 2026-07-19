@@ -38,6 +38,7 @@ $rootFiles = @(
     "setup.ps1",
     "setup.bat",
     "README.md",
+    "FEEDBACK.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "SECURITY.md",
@@ -65,6 +66,9 @@ try {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $ExtractedRoot "docs\compatibility.md") -PathType Leaf)) {
         throw "Standalone archive is missing docs/compatibility.md"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $ExtractedRoot "FEEDBACK.md") -PathType Leaf)) {
+        throw "Standalone archive is missing FEEDBACK.md"
     }
 } finally {
     $resolvedTestRoot = [System.IO.Path]::GetFullPath($TestRoot)
