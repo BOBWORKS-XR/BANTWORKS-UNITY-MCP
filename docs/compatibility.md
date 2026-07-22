@@ -36,6 +36,7 @@ the default remains `all` for backward compatibility.
 | 6000.3.10f1 | 1.9.9 | None | Persistent obstacle fixture: generic course compiled; MCP-generated `Start` graph imported and persisted through the bridge; 4/4 Play Mode tests passed |
 | 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
 | 2022.3.39f1 | 1.9.4 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
+| 2022.3.39f1 authoring to 6000.3.2f1 Banter client | 1.9.4 asset bundle loaded by 1.9.9 client | Authoring SDK 3.1.2; client source reports 3.2.1 | Manual real-client negative: authoring SDK validation passed, but the client rejected `UnityEngine.Rigidbody.velocity` and disabled all four gun-recovery graphs. The two installed allowlists had drifted to `velocity` versus `linearVelocity`. |
 
 The observed Banter 3.2.2 package declares Unity 2022.3.39f1 metadata, but its
 source references Unity 6 `PhysicsMaterial` and `PhysicsMaterialCombine` types.
@@ -59,7 +60,11 @@ package version, and editor combination.
 `validate_vs_graph_in_unity` checks actual import/deserialization, and
 `validate_banter_visual_scripting` invokes the installed SDK's public allow-list
 validator. These checks should be run in the target project before treating a
-generated graph as ready.
+generated graph as ready. When an asset bundle is authored with an older Unity
+and SDK combination than the shipped Banter client, also compare the concrete
+member allowlists or load the bundle in the real client and inspect its AOT
+diagnostics. Passing the authoring SDK validator alone does not prove that the
+client still allows renamed Unity members such as `Rigidbody.velocity`.
 
 The repeatable obstacle fixture and its safety boundary are documented in
 [obstacle-course-compatibility.md](obstacle-course-compatibility.md).

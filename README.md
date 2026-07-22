@@ -16,11 +16,11 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 ## Features
 
 - **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
-- **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files using the bundled Unity Visual Scripting JSON manual and source-observed errata
+- **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files, including resolved unit definitions and required value-port integrity, using the bundled Unity Visual Scripting JSON manual and source-observed errata
 - **Banter Validation**: Invoke the selected SDK's own Visual Scripting allow-list validator and return bounded, structured diagnostics
 - **Evidence-Linked Banter Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
-- **Unity Integration**: Query project state, check import status, refresh assets
+- **Unity Integration**: Run bounded fresh state queries, persist compiler diagnostics, inspect filtered Console windows, refresh assets, and execute guarded project-defined Editor menu commands
 - **Closed-Loop Workflow**: Validate → Write → Import and deserialize in Unity → Test
 - **Capability Profiles**: Limit the exposed tool surface to inspection, authoring, testing, Banter workflows, or minimal project routing
 - **Cross-Version Unity Harness**: Provision a deterministic obstacle course that validates physics, serialized scenes, generated Visual Scripting graphs, bridge attachment, Play Mode tests, and optional Banter sync/allow-list behavior
@@ -33,7 +33,7 @@ BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not j
 - **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, compares its C# source classes with the embedded catalogues, and matches exact public release and Unity evidence when available. It does not generalize evidence across different source revisions or editor versions.
 - **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 is preceded by source-observed compatibility errata. Canonical output uses `graph.elements`; referenced nodes use string `$id` values; Visual Scripting 1.9.x may omit `$version` on connections.
 - **Generation, validation, and writing:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split layouts, checks node-reference integrity, and avoids rejecting valid unreferenced nodes. `write_vs_graph` validates again before writing, emits the ScriptGraphAsset class identifier and `NativeFormatImporter`, and preserves an existing asset GUID while migrating old MCP metadata.
-- **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph. `validate_banter_visual_scripting` then invokes the installed SDK's public `CheckVsNodes()` validator across graph assets, embedded prefab graphs, and the active scene, returning the SDK's exact allow-list diagnostics.
+- **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph, rejects failed unit definitions, and reports every resolved value input that lacks both a valid connection and a persisted default. `validate_banter_visual_scripting` then invokes the installed SDK's public `CheckVsNodes()` validator across graph assets, embedded prefab graphs, and the active scene, returning the SDK's exact allow-list diagnostics.
 
 This knowledge improves graph generation and review, but source-class coverage is not proof of runtime behavior. `validate_vs_graph_in_unity` provides an authoritative import and deserialization check in the selected Editor; generated graphs must still be exercised in the target Unity and Banter SDK version.
 
@@ -186,18 +186,19 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `unity://types` | Unity fundamentals (Vector3, Quaternion, etc.) |
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
+| `project://compilation-status` | Persistent Unity compiler result and diagnostics (requires extension) |
 
-### Tools (40 focused actions available to MCP clients)
+### Tools (42 focused actions available to MCP clients)
 
-All 40 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
+All 42 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
 
 | Category | Tools |
 |----------|-------|
 | Visual Scripting | `generate_vs_graph`, `validate_vs_graph`, `write_vs_graph`, `validate_vs_graph_in_unity`, `validate_banter_visual_scripting` |
 | Banter WebRoot | `write_webroot_js` |
 | Project routing | `list_unity_projects`, `select_unity_project` |
-| Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
-| Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot` |
+| Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `wait_for_unity_compile`, `get_console_logs`, `refresh_unity_assets` |
+| Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot`, `execute_editor_menu_item` |
 | Project and asset discovery | `get_unity_packages`, `get_banter_sdk_info`, `search_unity_assets` |
 | Unity tests | `discover_unity_tests`, `run_unity_tests`, `cancel_unity_test_run`, `get_unity_test_run` |
 | Scene lifecycle and builds | `get_unity_scenes`, `save_unity_scene`, `open_unity_scene`, `set_unity_build_scenes` |

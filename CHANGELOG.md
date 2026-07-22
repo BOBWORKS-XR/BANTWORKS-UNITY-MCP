@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.1.0 - 2026-07-22
+
+### Added
+
+- Added bounded, explicitly fresh hierarchy/component queries with exact/root/depth/component/field controls and snapshot age plus dirty-scene metadata.
+- Added `wait_for_unity_compile` and persistent `compilation-status.json` diagnostics from Unity's compilation pipeline.
+- Added guarded `execute_editor_menu_item` support for project-defined custom menu commands with dirty-scene, Play Mode, built-in-menu, compilation, and update preconditions.
+- Extended Unity Visual Scripting validation to fail on unresolved units and value inputs that have neither a valid connection nor a persisted default.
+- Added Console filters for time, message text, regular expressions, and stack source.
+
+### Fixed
+
+- `get_console_logs({"level":"error"})` now includes Unity `Error`, `Exception`, and `Assert` entries while preserving the original Unity level.
+- `check_import_status` no longer reports success over active, stale, or failed script compilation.
+- Exact hierarchy queries no longer expand every descendant whose path contains the selected root name.
+
+### Verified
+
+- The updated bridge compiled with zero errors in Unity 2022.3.39f1 and Unity 6000.3.2f1.
+- Strict Unity deserialization inspected 1,237 value inputs across 11 generated Banter kart graphs with zero missing elements or unbound inputs.
+- A live custom menu execution returned correlated timing, clean synchronous diagnostics, unchanged scene state, and a settled Editor result.
+
 ## 2.0.1 - 2026-07-17
 
 ### Fixed

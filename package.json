@@ -1,6 +1,6 @@
 {
   "name": "banter-mcp",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Codex, Claude Code, and MCP-compatible Unity integration for Banter SDK development",
   "type": "module",
   "main": "dist/index.js",

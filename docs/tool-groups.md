@@ -7,9 +7,9 @@ Accepted values are `all`, `none`, or a comma-separated combination of:
 
 | Group | Purpose |
 |-------|---------|
-| `read` | Project inspection, logs, package/asset discovery, screenshots, and validation. It exposes no authoring tools, but Unity validation can force import/refresh and related Editor side effects. |
-| `author` | Visual Scripting generation/writes, WebRoot writes, asset refresh, scene lifecycle, GameObject/component changes, and prefab placement/scanning. |
-| `test` | Test discovery/execution/cancellation/status, Play Mode control, logs, and screenshots. |
+| `read` | Project inspection, logs, compiler settling/diagnostics, package/asset discovery, screenshots, and validation. It exposes no authoring tools, but Unity validation can force import/refresh and related Editor side effects. |
+| `author` | Visual Scripting generation/writes, WebRoot writes, asset refresh, guarded custom Editor menu execution, scene lifecycle, GameObject/component changes, and prefab placement/scanning. |
+| `test` | Test discovery/execution/cancellation/status, compile settling, Play Mode control, logs, and screenshots. |
 | `banter` | Banter SDK provenance, Visual Scripting generation/validation/writes, SDK allow-list validation, and WebRoot authoring. |
 
 `list_unity_projects`, `select_unity_project`, and `get_bridge_status` remain

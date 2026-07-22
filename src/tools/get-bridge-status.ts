@@ -12,6 +12,7 @@ const STATE_FILES = [
   "project-instance.json",
   "console-log.json",
   "import-status.json",
+  "compilation-status.json",
   "prefab-catalog.json",
 ];
 

@@ -47,7 +47,7 @@ test("automatic full-state export is disabled throughout Play-mode transitions b
   }
 });
 
-test("Edit mode uses lightweight heartbeats and event-driven full exports", () => {
+test("Edit mode uses lightweight heartbeats without per-edit full exports", () => {
   const update = blockStartingAt("private static void OnEditorUpdate()");
   assert.match(update, /ProcessCommands\(\);/);
   assert.match(update, /ExportEditorState\(\);/);
@@ -64,13 +64,16 @@ test("Edit mode uses lightweight heartbeats and event-driven full exports", () =
   );
 
   for (const callback of [
-    "private static void OnHierarchyChanged",
     "private static void OnProjectChanged",
     "private static void OnUndoRedoPerformed",
-    "private static UndoPropertyModification[] OnPostprocessModifications",
   ]) {
     assert.match(blockStartingAt(callback), /ScheduleAutomaticStateExport\(\);/);
   }
+
+  assert.doesNotMatch(bridge, /EditorApplication\.hierarchyChanged\s*\+=/);
+  assert.doesNotMatch(bridge, /Undo\.postprocessModifications\s*\+=/);
+  assert.doesNotMatch(bridge, /private static void OnHierarchyChanged\s*\(/);
+  assert.doesNotMatch(bridge, /private static UndoPropertyModification\[\] OnPostprocessModifications\s*\(/);
 });
 
 test("Play mode keeps command polling and explicit full exports operational", () => {

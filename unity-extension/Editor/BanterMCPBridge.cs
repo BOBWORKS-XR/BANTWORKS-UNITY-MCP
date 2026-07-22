@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
+using UnityEditor.Compilation;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using Unity.Profiling;
@@ -38,6 +39,7 @@ namespace BantworksMCP
         private static readonly string TestRunResultsFolder = Path.Combine(StateFolder, "test-runs");
         private static readonly string TestDiscoveryResultsFolder = Path.Combine(StateFolder, "test-discovery");
         private static readonly string SceneResultsFolder = Path.Combine(StateFolder, "scene-results");
+        private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
 
         private static double lastCommandCheck = 0;
@@ -99,6 +101,9 @@ namespace BantworksMCP
         private static readonly List<ConsoleLogEntry> capturedLogs = new List<ConsoleLogEntry>();
         private static readonly int MaxLogEntries = 500;
         private static readonly object logLock = new object();
+        private static readonly List<CompilationMessageInfo> compilationMessages = new List<CompilationMessageInfo>();
+        private static long compilationStartedAt;
+        private static bool compilationMessagesTruncated;
 
         static BantworksMCPBridge()
         {
@@ -108,18 +113,23 @@ namespace BantworksMCP
 
             // Subscribe to editor events
             EditorApplication.update += OnEditorUpdate;
-            EditorApplication.hierarchyChanged += OnHierarchyChanged;
             EditorApplication.projectChanged += OnProjectChanged;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
             Selection.selectionChanged += OnSelectionChanged;
             Undo.undoRedoPerformed += OnUndoRedoPerformed;
-            Undo.postprocessModifications += OnPostprocessModifications;
             EditorSceneManager.sceneOpened += OnSceneOpened;
             EditorSceneManager.sceneSaved += OnSceneSaved;
+
+            // Do not export the complete hierarchy for ordinary transform/property edits.
+            // Large scenes are refreshed explicitly by query_project_state; serializing them
+            // from editor modification callbacks blocks Unity's main thread while authoring.
 
             // Subscribe to asset import events
             AssetDatabase.importPackageCompleted += OnImportCompleted;
             AssetDatabase.importPackageFailed += OnImportFailed;
+            CompilationPipeline.compilationStarted += OnCompilationStarted;
+            CompilationPipeline.assemblyCompilationFinished += OnAssemblyCompilationFinished;
+            CompilationPipeline.compilationFinished += OnCompilationFinished;
 
             // Subscribe to console log events
             Application.logMessageReceived += OnLogMessageReceived;
@@ -168,6 +178,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(TestDiscoveryResultsFolder);
             if (!Directory.Exists(SceneResultsFolder))
                 Directory.CreateDirectory(SceneResultsFolder);
+            if (!Directory.Exists(EditorMenuResultsFolder))
+                Directory.CreateDirectory(EditorMenuResultsFolder);
 
             string ignorePath = Path.Combine(MCPFolder, ".gitignore");
             if (!File.Exists(ignorePath))
@@ -294,11 +306,6 @@ namespace BantworksMCP
             }
         }
 
-        private static void OnHierarchyChanged()
-        {
-            ScheduleAutomaticStateExport();
-        }
-
         private static void OnProjectChanged()
         {
             ScheduleAutomaticStateExport();
@@ -312,12 +319,6 @@ namespace BantworksMCP
         private static void OnUndoRedoPerformed()
         {
             ScheduleAutomaticStateExport();
-        }
-
-        private static UndoPropertyModification[] OnPostprocessModifications(UndoPropertyModification[] modifications)
-        {
-            ScheduleAutomaticStateExport();
-            return modifications;
         }
 
         private static void OnSceneOpened(UnityEngine.SceneManagement.Scene scene, OpenSceneMode mode)
@@ -338,6 +339,55 @@ namespace BantworksMCP
         private static void OnImportFailed(string packageName, string errorMessage)
         {
             ExportImportStatus(false, errorMessage);
+        }
+
+        private static void OnCompilationStarted(object context)
+        {
+            compilationMessages.Clear();
+            compilationMessagesTruncated = false;
+            compilationStartedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            ExportCompilationStatus(false);
+            ExportEditorState();
+        }
+
+        private static void OnAssemblyCompilationFinished(string assemblyPath, CompilerMessage[] messages)
+        {
+            if (messages == null)
+                return;
+
+            foreach (CompilerMessage message in messages)
+            {
+                if (compilationMessages.Count >= 500)
+                {
+                    compilationMessagesTruncated = true;
+                    if (message.type != CompilerMessageType.Error)
+                        continue;
+
+                    int warningIndex = compilationMessages.FindLastIndex(
+                        existing => string.Equals(existing.type, CompilerMessageType.Warning.ToString(), StringComparison.Ordinal));
+                    if (warningIndex < 0)
+                        continue;
+                    compilationMessages.RemoveAt(warningIndex);
+                }
+
+                compilationMessages.Add(new CompilationMessageInfo
+                {
+                    assemblyPath = assemblyPath,
+                    type = message.type.ToString(),
+                    message = message.message,
+                    file = message.file,
+                    line = message.line,
+                    column = message.column
+                });
+            }
+
+            ExportCompilationStatus(false);
+        }
+
+        private static void OnCompilationFinished(object context)
+        {
+            ExportCompilationStatus(true);
+            ExportEditorState();
         }
 
         private static void OnLogMessageReceived(string condition, string stackTrace, LogType type)
@@ -385,7 +435,7 @@ namespace BantworksMCP
         {
             bool enabled = !BackgroundStateExportInPlayMode;
             BackgroundStateExportInPlayMode = enabled;
-            Menu.SetChecked(BackgroundStateExportMenuItem, enabled);
+            UnityEditor.Menu.SetChecked(BackgroundStateExportMenuItem, enabled);
             if (EditorApplication.isPlayingOrWillChangePlaymode)
             {
                 if (enabled)
@@ -406,7 +456,7 @@ namespace BantworksMCP
         [MenuItem(BackgroundStateExportMenuItem, true)]
         private static bool ValidateBackgroundStateExportInPlayMode()
         {
-            Menu.SetChecked(BackgroundStateExportMenuItem, BackgroundStateExportInPlayMode);
+            UnityEditor.Menu.SetChecked(BackgroundStateExportMenuItem, BackgroundStateExportInPlayMode);
             return true;
         }
 
@@ -550,6 +600,11 @@ namespace BantworksMCP
                     var setBuildScenesCmd = JsonUtility.FromJson<SetBuildScenesCommand>(json);
                     SetUnityBuildScenes(setBuildScenesCmd);
                     return "Updated Unity build scenes";
+
+                case "execute_editor_menu_item":
+                    var executeMenuCmd = JsonUtility.FromJson<ExecuteEditorMenuItemCommand>(json);
+                    ExecuteEditorMenuItem(executeMenuCmd);
+                    return $"Executed Unity Editor menu item: {executeMenuCmd.menuPath}";
 
                 case "create_gameobject":
                     var createCmd = JsonUtility.FromJson<CreateGameObjectCommand>(json);
@@ -939,7 +994,9 @@ namespace BantworksMCP
                 assetPath = cmd.assetPath,
                 timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 elementTypes = new List<string>(),
-                warnings = new List<string>()
+                warnings = new List<string>(),
+                allowUnboundValueInputs = cmd.allowUnboundValueInputs,
+                unboundValueInputs = new List<VSValueInputDiagnostic>()
             };
 
             try
@@ -1011,6 +1068,8 @@ namespace BantworksMCP
                     else
                         result.nodeCount++;
 
+                    InspectValueInputs(element, result);
+
                     if (typeName.IndexOf("Missing", StringComparison.OrdinalIgnoreCase) >= 0 ||
                         typeName.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
@@ -1022,9 +1081,28 @@ namespace BantworksMCP
                 if (result.missingElementCount > 0)
                     result.warnings.Add($"Unity exposed {result.missingElementCount} missing or unknown graph elements");
 
-                result.success = result.missingElementCount == 0;
+                if (result.unboundValueInputCount > 0)
+                {
+                    result.warnings.Add(
+                        $"Unity exposed {result.unboundValueInputCount} value inputs with no valid connection or persisted default. " +
+                        "These inputs can throw MissingValuePortInputException when evaluated.");
+                }
+
+                result.success = result.missingElementCount == 0 &&
+                    result.failedUnitDefinitionCount == 0 &&
+                    result.valuePortInspectionErrorCount == 0 &&
+                    (cmd.allowUnboundValueInputs || result.unboundValueInputCount == 0);
                 if (!result.success)
-                    result.error = "The graph imported, but one or more elements could not be resolved";
+                {
+                    if (result.missingElementCount > 0)
+                        result.error = "The graph imported, but one or more elements could not be resolved";
+                    else if (result.failedUnitDefinitionCount > 0)
+                        result.error = "The graph imported, but one or more units failed to define their ports";
+                    else if (result.valuePortInspectionErrorCount > 0)
+                        result.error = "The graph imported, but required value-port inspection did not complete";
+                    else
+                        result.error = "The graph imported, but one or more value inputs have no valid connection or persisted default";
+                }
             }
             catch (Exception exception)
             {
@@ -1038,6 +1116,218 @@ namespace BantworksMCP
                 Path.Combine(VisualScriptingValidationResultsFolder, cmd.id + ".json"),
                 JsonUtility.ToJson(result, true));
             DeleteOldFiles(VisualScriptingValidationResultsFolder, "*.json", 50);
+        }
+
+        private static void InspectValueInputs(object element, VSGraphAssetValidationResult result)
+        {
+            if (element == null)
+                return;
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            Type unitType = element.GetType();
+            System.Reflection.PropertyInfo valueInputsProperty = unitType.GetProperty("valueInputs", flags);
+            if (valueInputsProperty == null)
+                return;
+
+            result.valuePortInspectionAvailable = true;
+
+            try
+            {
+                MethodInfo ensureDefined = unitType.GetMethod(
+                    "EnsureDefined",
+                    flags,
+                    null,
+                    Type.EmptyTypes,
+                    null);
+                ensureDefined?.Invoke(element, null);
+
+                if (ReadBooleanProperty(element, unitType, "failedToDefine", flags))
+                {
+                    result.failedUnitDefinitionCount++;
+                    object definitionException = ReadProperty(element, unitType, "definitionException", flags);
+                    result.warnings.Add(
+                        $"Unit {unitType.FullName} ({ReadProperty(element, unitType, "guid", flags)}) failed to define: " +
+                        (definitionException is Exception exception ? exception.Message : "unknown definition error"));
+                    return;
+                }
+
+                var valueInputs = valueInputsProperty.GetValue(element) as System.Collections.IEnumerable;
+                if (valueInputs == null)
+                    return;
+
+                foreach (object input in valueInputs)
+                {
+                    if (input == null)
+                        continue;
+
+                    result.valueInputCount++;
+                    Type inputRuntimeType = input.GetType();
+                    bool hasValidConnection = ReadBooleanProperty(input, inputRuntimeType, "hasValidConnection", flags);
+                    bool hasDefaultValue = ReadBooleanProperty(input, inputRuntimeType, "hasDefaultValue", flags);
+                    if (hasValidConnection || hasDefaultValue)
+                        continue;
+
+                    result.unboundValueInputCount++;
+                    if (result.unboundValueInputs.Count >= 200)
+                    {
+                        result.unboundValueInputsTruncated = true;
+                        continue;
+                    }
+
+                    object expectedType = ReadProperty(input, inputRuntimeType, "type", flags);
+                    result.unboundValueInputs.Add(new VSValueInputDiagnostic
+                    {
+                        unitType = unitType.FullName ?? unitType.Name,
+                        unitGuid = Convert.ToString(ReadProperty(element, unitType, "guid", flags), CultureInfo.InvariantCulture),
+                        portKey = Convert.ToString(ReadProperty(input, inputRuntimeType, "key", flags), CultureInfo.InvariantCulture),
+                        expectedType = expectedType is Type type ? type.FullName : Convert.ToString(expectedType, CultureInfo.InvariantCulture),
+                        hasValidConnection = false,
+                        hasDefaultValue = false
+                    });
+                }
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception is TargetInvocationException && exception.InnerException != null
+                    ? exception.InnerException
+                    : exception;
+                result.valuePortInspectionErrorCount++;
+                result.warnings.Add($"Could not inspect value inputs on {unitType.FullName}: {actual.Message}");
+            }
+        }
+
+        private static void ExecuteEditorMenuItem(ExecuteEditorMenuItemCommand cmd)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Editor menu execution requires a safe correlation ID");
+
+            long startedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var result = new EditorMenuExecutionResult
+            {
+                commandId = cmd.id,
+                menuPath = cmd.menuPath,
+                startedAt = startedAt,
+                before = CaptureEditorOperationState(),
+                diagnostics = new List<ConsoleLogEntry>()
+            };
+            Application.LogCallback diagnosticCapture = null;
+
+            try
+            {
+                string menuPath = NormalizeCustomEditorMenuPath(cmd.menuPath);
+                result.menuPath = menuPath;
+
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                    throw new InvalidOperationException("Unity is compiling or updating assets. Wait for the Editor to settle before executing a menu item.");
+                if (EditorApplication.isPlayingOrWillChangePlaymode && !cmd.allowInPlayMode)
+                    throw new InvalidOperationException("Unity is in or entering Play Mode. Set allowInPlayMode only when this menu command is designed for Play Mode.");
+
+                var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                if (activeScene.IsValid() && activeScene.isDirty && !cmd.allowDirtyScene)
+                    throw new InvalidOperationException("The active scene has unsaved changes. Save it first or explicitly set allowDirtyScene.");
+
+                diagnosticCapture = (condition, stackTrace, logType) =>
+                {
+                    if (logType != LogType.Error && logType != LogType.Exception && logType != LogType.Assert)
+                        return;
+                    if (result.diagnostics.Count >= 100)
+                    {
+                        result.diagnosticsTruncated = true;
+                        return;
+                    }
+
+                    result.diagnostics.Add(new ConsoleLogEntry
+                    {
+                        level = logType.ToString(),
+                        message = condition,
+                        stackTrace = stackTrace,
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                    });
+                };
+                Application.logMessageReceived += diagnosticCapture;
+
+                result.executionReturnedTrue = EditorApplication.ExecuteMenuItem(menuPath);
+                if (!result.executionReturnedTrue)
+                    throw new InvalidOperationException($"No enabled Unity Editor menu item was found at '{menuPath}'.");
+                if (result.diagnostics.Count > 0)
+                    throw new InvalidOperationException($"The menu item logged {result.diagnostics.Count} synchronous Unity errors.");
+
+                result.success = true;
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception is TargetInvocationException && exception.InnerException != null
+                    ? exception.InnerException
+                    : exception;
+                result.success = false;
+                result.error = actual.Message;
+            }
+            finally
+            {
+                if (diagnosticCapture != null)
+                    Application.logMessageReceived -= diagnosticCapture;
+
+                result.after = CaptureEditorOperationState();
+                result.finishedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                result.durationMs = Math.Max(0, result.finishedAt - result.startedAt);
+                WriteAtomicText(
+                    Path.Combine(EditorMenuResultsFolder, cmd.id + ".json"),
+                    JsonUtility.ToJson(result, true));
+                DeleteOldFiles(EditorMenuResultsFolder, "*.json", 50);
+            }
+        }
+
+        private static string NormalizeCustomEditorMenuPath(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                throw new InvalidOperationException("menuPath is required");
+
+            string normalized = value.Trim().Replace('\\', '/');
+            if (normalized.Length > 512 || normalized.StartsWith("/", StringComparison.Ordinal) ||
+                normalized.EndsWith("/", StringComparison.Ordinal) || normalized.Contains("//") ||
+                normalized.Any(character => char.IsControl(character)))
+            {
+                throw new InvalidOperationException("menuPath is malformed");
+            }
+
+            string root = normalized.Split('/')[0];
+            string[] blockedBuiltInRoots =
+            {
+                "File", "Edit", "Assets", "GameObject", "Component", "Window", "Help", "CONTEXT"
+            };
+            if (blockedBuiltInRoots.Any(candidate => string.Equals(candidate, root, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException(
+                    $"Built-in Unity menu root '{root}' is blocked. This command only executes project-defined custom menu items.");
+            }
+
+            return normalized;
+        }
+
+        private static EditorOperationState CaptureEditorOperationState()
+        {
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            return new EditorOperationState
+            {
+                isPlaying = EditorApplication.isPlaying,
+                isPlayingOrWillChangePlaymode = EditorApplication.isPlayingOrWillChangePlaymode,
+                isCompiling = EditorApplication.isCompiling,
+                isUpdating = EditorApplication.isUpdating,
+                activeScenePath = activeScene.IsValid() ? activeScene.path : null,
+                activeSceneDirty = activeScene.IsValid() && activeScene.isDirty,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+        }
+
+        private static object ReadProperty(object target, Type targetType, string propertyName, BindingFlags flags)
+        {
+            return targetType.GetProperty(propertyName, flags)?.GetValue(target);
+        }
+
+        private static bool ReadBooleanProperty(object target, Type targetType, string propertyName, BindingFlags flags)
+        {
+            object value = ReadProperty(target, targetType, propertyName, flags);
+            return value is bool boolean && boolean;
         }
 
         private static string NormalizeVisualScriptingAssetPath(string value)
@@ -3710,6 +4000,7 @@ namespace BantworksMCP
                     isPlayingOrWillChangePlaymode = EditorApplication.isPlayingOrWillChangePlaymode,
                     isUpdating = EditorApplication.isUpdating,
                     activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name,
+                    activeSceneDirty = UnityEngine.SceneManagement.SceneManager.GetActiveScene().isDirty,
                     selectedObjects = Selection.gameObjects?.Select(o => o.name).ToArray() ?? new string[0],
                     timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 };
@@ -4203,6 +4494,38 @@ namespace BantworksMCP
             public string valueJson;
         }
 
+        private static void ExportCompilationStatus(bool completed)
+        {
+            try
+            {
+                long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var errors = compilationMessages
+                    .Where(message => string.Equals(message.type, CompilerMessageType.Error.ToString(), StringComparison.Ordinal))
+                    .ToList();
+                var warnings = compilationMessages
+                    .Where(message => string.Equals(message.type, CompilerMessageType.Warning.ToString(), StringComparison.Ordinal))
+                    .ToList();
+                var status = new CompilationStatus
+                {
+                    completed = completed,
+                    hasErrors = errors.Count > 0,
+                    startedAt = compilationStartedAt == 0 ? now : compilationStartedAt,
+                    timestamp = now,
+                    errorCount = errors.Count,
+                    warningCount = warnings.Count,
+                    messagesTruncated = compilationMessagesTruncated,
+                    errors = errors,
+                    warnings = warnings
+                };
+
+                WriteAtomicText(Path.Combine(StateFolder, "compilation-status.json"), JsonUtility.ToJson(status, true));
+            }
+            catch (Exception e)
+            {
+                System.Console.WriteLine($"[BANTWORKS MCP] Error exporting compilation status: {e.Message}");
+            }
+        }
+
         [Serializable]
         private class PlayModeCommand
         {
@@ -4261,6 +4584,7 @@ namespace BantworksMCP
             public string id;
             public string type;
             public string assetPath;
+            public bool allowUnboundValueInputs;
         }
 
         [Serializable]
@@ -4279,10 +4603,29 @@ namespace BantworksMCP
             public int valueConnectionCount;
             public int groupCount;
             public int missingElementCount;
+            public int failedUnitDefinitionCount;
+            public bool valuePortInspectionAvailable;
+            public int valueInputCount;
+            public int unboundValueInputCount;
+            public bool unboundValueInputsTruncated;
+            public int valuePortInspectionErrorCount;
+            public bool allowUnboundValueInputs;
             public string error;
             public long timestamp;
             public List<string> elementTypes;
             public List<string> warnings;
+            public List<VSValueInputDiagnostic> unboundValueInputs;
+        }
+
+        [Serializable]
+        private class VSValueInputDiagnostic
+        {
+            public string unitType;
+            public string unitGuid;
+            public string portKey;
+            public string expectedType;
+            public bool hasValidConnection;
+            public bool hasDefaultValue;
         }
 
         [Serializable]
@@ -4344,6 +4687,45 @@ namespace BantworksMCP
             public string id;
             public string type;
             public BuildSceneInput[] scenes;
+        }
+
+        [Serializable]
+        private class ExecuteEditorMenuItemCommand
+        {
+            public string id;
+            public string type;
+            public string menuPath;
+            public bool allowInPlayMode;
+            public bool allowDirtyScene;
+        }
+
+        [Serializable]
+        private class EditorMenuExecutionResult
+        {
+            public string commandId;
+            public bool success;
+            public string menuPath;
+            public bool executionReturnedTrue;
+            public string error;
+            public long startedAt;
+            public long finishedAt;
+            public long durationMs;
+            public EditorOperationState before;
+            public EditorOperationState after;
+            public bool diagnosticsTruncated;
+            public List<ConsoleLogEntry> diagnostics;
+        }
+
+        [Serializable]
+        private class EditorOperationState
+        {
+            public bool isPlaying;
+            public bool isPlayingOrWillChangePlaymode;
+            public bool isCompiling;
+            public bool isUpdating;
+            public string activeScenePath;
+            public bool activeSceneDirty;
+            public long timestamp;
         }
 
         [Serializable]
@@ -4680,6 +5062,7 @@ namespace BantworksMCP
             public bool isPlayingOrWillChangePlaymode;
             public bool isUpdating;
             public string activeScene;
+            public bool activeSceneDirty;
             public string[] selectedObjects;
             public long timestamp;
         }
@@ -4707,6 +5090,31 @@ namespace BantworksMCP
             public bool hasErrors;
             public string errorMessage;
             public long timestamp;
+        }
+
+        [Serializable]
+        private class CompilationStatus
+        {
+            public bool completed;
+            public bool hasErrors;
+            public long startedAt;
+            public long timestamp;
+            public int errorCount;
+            public int warningCount;
+            public bool messagesTruncated;
+            public List<CompilationMessageInfo> errors;
+            public List<CompilationMessageInfo> warnings;
+        }
+
+        [Serializable]
+        private class CompilationMessageInfo
+        {
+            public string assemblyPath;
+            public string type;
+            public string message;
+            public string file;
+            public int line;
+            public int column;
         }
 
         [Serializable]

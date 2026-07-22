@@ -15,6 +15,16 @@ export interface ImportStatusResult {
   warnings?: string[];
   assetPath?: string;
   message?: string;
+  isCompiling?: boolean;
+  isUpdating?: boolean;
+  editorStateTimestamp?: number;
+  editorStateAgeMs?: number;
+  compilationCompleted?: boolean;
+  compilationHasErrors?: boolean;
+  compilationTimestamp?: number;
+  compilerErrors?: BridgeCompilerMessage[];
+  compilerWarnings?: BridgeCompilerMessage[];
+  stale?: boolean;
 }
 
 interface BridgeAssetStatus {
@@ -32,6 +42,49 @@ interface BridgeImportStatus {
   warnings?: string[];
   timestamp?: number;
   assets?: BridgeAssetStatus[];
+}
+
+interface BridgeEditorState {
+  isCompiling?: boolean;
+  isUpdating?: boolean;
+  timestamp?: number;
+}
+
+export interface BridgeCompilerMessage {
+  assemblyPath?: string;
+  type?: string;
+  message?: string;
+  file?: string;
+  line?: number;
+  column?: number;
+}
+
+interface BridgeCompilationStatus {
+  completed?: boolean;
+  hasErrors?: boolean;
+  startedAt?: number;
+  timestamp?: number;
+  errorCount?: number;
+  warningCount?: number;
+  messagesTruncated?: boolean;
+  errors?: BridgeCompilerMessage[];
+  warnings?: BridgeCompilerMessage[];
+}
+
+export interface UnityCompileStatusResult {
+  success: boolean;
+  settled: boolean;
+  isCompiling?: boolean;
+  isUpdating?: boolean;
+  editorStateTimestamp?: number;
+  editorStateAgeMs?: number;
+  compilationCompleted?: boolean;
+  compilationHasErrors?: boolean;
+  compilationTimestamp?: number;
+  compilerErrors?: BridgeCompilerMessage[];
+  compilerWarnings?: BridgeCompilerMessage[];
+  stale?: boolean;
+  message: string;
 }
 
 /**
@@ -85,11 +138,42 @@ export async function checkImportStatus(
       const startTime = Date.now();
 
       while (Date.now() - startTime < timeoutMs) {
+        const editorState = readOptionalJson<BridgeEditorState>(
+          path.join(config.mcpStatePath, "editor-state.json")
+        );
+        const compilationStatus = readOptionalJson<BridgeCompilationStatus>(
+          path.join(config.mcpStatePath, "compilation-status.json")
+        );
+        const editorStateAgeMs = editorState?.timestamp === undefined
+          ? undefined
+          : Math.max(0, Date.now() - editorState.timestamp);
+
+        if (editorStateAgeMs === undefined || editorStateAgeMs > 5000) {
+          return {
+            success: false,
+            imported: false,
+            assetPath,
+            editorStateTimestamp: editorState?.timestamp,
+            editorStateAgeMs,
+            stale: true,
+            message: "Unity editor state is stale; import and compilation status cannot be verified.",
+          };
+        }
+
+        if (editorState?.isCompiling || editorState?.isUpdating || compilationStatus?.completed === false) {
+          await sleep(250);
+          continue;
+        }
+
         if (fs.existsSync(statusPath)) {
           const status = readStatus(statusPath);
 
           if (isStatusCurrentForAsset(status, fullAssetPath)) {
-            return createResult(status, assetPath, fullAssetPath);
+            return attachEditorAndCompilationStatus(
+              createResult(status, assetPath, fullAssetPath),
+              editorState,
+              compilationStatus
+            );
           }
         }
 
@@ -102,6 +186,7 @@ export async function checkImportStatus(
         imported: false,
         message: `Timeout waiting for import status (${timeoutMs}ms)`,
         assetPath,
+        ...readCurrentEditorAndCompilationState(config),
       };
     } else {
       // Just read current status
@@ -113,7 +198,31 @@ export async function checkImportStatus(
         };
       }
 
-      return createResult(readStatus(statusPath), assetPath, fullAssetPath);
+      const current = readCurrentEditorAndCompilationState(config);
+      if (current.stale) {
+        return {
+          success: false,
+          imported: false,
+          assetPath,
+          message: "Unity editor state is stale; import and compilation status cannot be verified.",
+          ...current,
+        };
+      }
+      if (current.isCompiling || current.isUpdating || current.compilationCompleted === false) {
+        return {
+          success: false,
+          imported: false,
+          assetPath,
+          message: "Unity is still compiling or importing assets.",
+          ...current,
+        };
+      }
+
+      return attachEditorAndCompilationStatus(
+        createResult(readStatus(statusPath), assetPath, fullAssetPath),
+        readOptionalJson<BridgeEditorState>(path.join(config.mcpStatePath, "editor-state.json")),
+        readOptionalJson<BridgeCompilationStatus>(path.join(config.mcpStatePath, "compilation-status.json"))
+      );
     }
   } catch (error) {
     return {
@@ -122,6 +231,139 @@ export async function checkImportStatus(
       errors: [error instanceof Error ? error.message : "Unknown error"],
       message: "Error checking import status",
     };
+  }
+}
+
+export async function waitForUnityCompile(
+  timeoutMs: number = 30000,
+  config: BanterMCPConfig
+): Promise<UnityCompileStatusResult> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) {
+    return {
+      success: false,
+      settled: false,
+      message: "timeoutMs must be between 1000 and 120000.",
+    };
+  }
+
+  const startedAt = Date.now();
+  let settledSince: number | undefined;
+  while (Date.now() - startedAt < timeoutMs) {
+    const current = readCurrentEditorAndCompilationState(config);
+    if (current.stale) {
+      return {
+        success: false,
+        settled: false,
+        ...current,
+        message: "Unity editor state is stale; compilation status cannot be verified.",
+      };
+    }
+
+    if (!current.isCompiling && !current.isUpdating && current.compilationCompleted !== false) {
+      settledSince ??= Date.now();
+      if (Date.now() - settledSince < 500) {
+        await sleep(100);
+        continue;
+      }
+
+      const hasErrors = current.compilationHasErrors === true;
+      return {
+        success: !hasErrors,
+        settled: true,
+        ...current,
+        message: hasErrors
+          ? `Unity compilation settled with ${current.compilerErrors?.length ?? 0} reported errors.`
+          : "Unity compilation and asset updates are settled.",
+      };
+    }
+
+    settledSince = undefined;
+
+    await sleep(250);
+  }
+
+  return {
+    success: false,
+    settled: false,
+    ...readCurrentEditorAndCompilationState(config),
+    message: `Timeout waiting for Unity compilation and asset updates (${timeoutMs}ms).`,
+  };
+}
+
+function readCurrentEditorAndCompilationState(config: BanterMCPConfig): Omit<UnityCompileStatusResult, "success" | "settled" | "message"> {
+  const editorState = readOptionalJson<BridgeEditorState>(
+    path.join(config.mcpStatePath, "editor-state.json")
+  );
+  const compilationStatus = readOptionalJson<BridgeCompilationStatus>(
+    path.join(config.mcpStatePath, "compilation-status.json")
+  );
+  const editorStateAgeMs = editorState?.timestamp === undefined
+    ? undefined
+    : Math.max(0, Date.now() - editorState.timestamp);
+
+  return {
+    isCompiling: editorState?.isCompiling,
+    isUpdating: editorState?.isUpdating,
+    editorStateTimestamp: editorState?.timestamp,
+    editorStateAgeMs,
+    compilationCompleted: compilationStatus?.completed,
+    compilationHasErrors: compilationStatus?.hasErrors,
+    compilationTimestamp: compilationStatus?.timestamp,
+    compilerErrors: compilationStatus?.errors || [],
+    compilerWarnings: compilationStatus?.warnings || [],
+    stale: editorStateAgeMs === undefined || editorStateAgeMs > 5000,
+  };
+}
+
+function attachEditorAndCompilationStatus(
+  result: ImportStatusResult,
+  editorState: BridgeEditorState | undefined,
+  compilationStatus: BridgeCompilationStatus | undefined
+): ImportStatusResult {
+  const editorStateAgeMs = editorState?.timestamp === undefined
+    ? undefined
+    : Math.max(0, Date.now() - editorState.timestamp);
+  const compilerErrors = compilationStatus?.errors || [];
+  const compilerWarnings = compilationStatus?.warnings || [];
+  const compilationHasErrors = compilationStatus?.hasErrors === true || compilerErrors.length > 0;
+  const stale = editorStateAgeMs === undefined || editorStateAgeMs > 5000;
+
+  return {
+    ...result,
+    success: result.success && !compilationHasErrors && !stale,
+    errors: compilationHasErrors
+      ? [...(result.errors || []), ...compilerErrors.map(formatCompilerMessage)]
+      : result.errors,
+    message: stale
+      ? "Unity editor state is stale; import and compilation status cannot be verified."
+      : compilationHasErrors
+      ? `Unity asset import completed, but script compilation has ${compilerErrors.length} errors.`
+      : result.message,
+    isCompiling: editorState?.isCompiling,
+    isUpdating: editorState?.isUpdating,
+    editorStateTimestamp: editorState?.timestamp,
+    editorStateAgeMs,
+    compilationCompleted: compilationStatus?.completed,
+    compilationHasErrors,
+    compilationTimestamp: compilationStatus?.timestamp,
+    compilerErrors,
+    compilerWarnings,
+    stale,
+  };
+}
+
+function formatCompilerMessage(message: BridgeCompilerMessage): string {
+  const location = message.file
+    ? `${message.file}${message.line ? `:${message.line}${message.column ? `:${message.column}` : ""}` : ""}`
+    : message.assemblyPath || "Unity compiler";
+  return `${location}: ${message.message || "Unknown compiler error"}`;
+}
+
+function readOptionalJson<T>(filePath: string): T | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  } catch {
+    return undefined;
   }
 }
 

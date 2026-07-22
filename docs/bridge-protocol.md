@@ -9,7 +9,7 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | Location | Direction | Purpose |
 |----------|-----------|---------|
 | `.bantworks-mcp/commands/*.json` | MCP to Unity | Scene, prefab, refresh, and state-export requests |
-| `.bantworks-mcp/state/*.json` | Unity to MCP | Hierarchy, editor state, console, import status, and prefab catalogue |
+| `.bantworks-mcp/state/*.json` | Unity to MCP | Hierarchy, editor state, console, import status, compilation status, and prefab catalogue |
 | `.bantworks-mcp/state/project-instance.json` | Unity to MCP | Live editor process identity and heartbeat |
 | `.bantworks-mcp/state/command-results/*.json` | Unity to MCP | Per-command acknowledgement or failure |
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
@@ -20,6 +20,7 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | `.bantworks-mcp/state/test-discovery/*.json` | Unity to MCP | Correlated, bounded Test Runner discovery results |
 | `.bantworks-mcp/state/test-runs/*.json` | Unity to MCP | Persisted Test Runner state and bounded case results |
 | `.bantworks-mcp/state/scene-results/*.json` | Unity to MCP | Correlated open-scene and build-settings results |
+| `.bantworks-mcp/state/editor-menu-results/*.json` | Unity to MCP | Correlated custom Editor menu execution, timing, state, and synchronous diagnostics |
 
 The bridge directory is project-local and ignored by Git through its own `.gitignore` file.
 
@@ -30,6 +31,17 @@ The MCP server and Unity bridge publish JSON by writing a temporary file in the 
 Each mutating command receives a UUID. Unity writes an acknowledgement under that UUID, and bounds queries use the same UUID for their result file. This prevents one request from consuming a concurrent request's result.
 
 State-export requests also receive unique filenames, so simultaneous `query_project_state` calls do not overwrite each other before Unity reads them.
+
+Hierarchy and component queries request a fresh full snapshot when the selected
+Editor heartbeat is live. The response reports whether that refresh completed,
+snapshot/editor ages, dirty-scene state, and bounded query metadata. Exact root,
+descendant, depth, component, field, and result-limit controls keep a narrow
+inspection from returning an entire large subtree. `refresh: false` explicitly
+accepts the latest saved snapshot.
+
+`compilation-status.json` is independent of asset import status. The bridge
+records compilation start/completion plus bounded compiler errors and warnings,
+and preserves late errors even when the warning limit is reached.
 
 ## Project Routing
 
@@ -152,7 +164,11 @@ bridge forces a synchronous AssetDatabase import, loads the main asset, verifies
 that it is a `Unity.VisualScripting.ScriptGraphAsset`, and reflects its graph
 elements without introducing a compile-time Visual Scripting dependency. The
 correlated result includes the Unity asset GUID, concrete asset and graph types,
-dependency hash, element counts and types, and missing-element diagnostics.
+  dependency hash, element counts and types, missing-element diagnostics,
+  failed unit definitions, and every value input that has neither a valid
+  connection nor a persisted default. Unbound inputs fail by default because
+  Unity Visual Scripting throws `MissingValuePortInputException` if they are
+  evaluated; `allowUnboundValueInputs` is an explicit report-only override.
 Projects without Visual Scripting return an explicit validation failure while
 the bridge itself continues to compile.
 
@@ -166,6 +182,17 @@ returned with bounded stack traces; `diagnosticCount` and
 `diagnosticsTruncated` preserve the total and truncation state. Projects without
 a compatible Banter validator fail explicitly without breaking the generic
 Unity bridge.
+
+## Editor Commands
+
+`execute_editor_menu_item` invokes an exact project-defined Unity `MenuItem`
+path and returns correlated before/after Editor state, duration, the Boolean
+result from `EditorApplication.ExecuteMenuItem`, and bounded synchronous Error,
+Exception, and Assert diagnostics. It blocks Unity's built-in File, Edit,
+Assets, GameObject, Component, Window, Help, and CONTEXT roots. Compilation,
+asset updates, Play Mode, and dirty scenes fail closed unless the applicable
+explicit override is supplied. By default the server also waits for a stable
+post-command compile/import state.
 
 ## Unity Test Runner
 

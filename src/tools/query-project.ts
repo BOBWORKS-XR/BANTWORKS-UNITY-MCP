@@ -6,23 +6,79 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { randomUUID } from "crypto";
 import type { BanterMCPConfig } from "../lib/config.js";
 import { atomicWriteFileSync } from "../lib/files.js";
+
+export type ProjectStateMatchMode = "contains" | "exact";
+
+export interface ProjectStateQueryOptions {
+  match?: ProjectStateMatchMode;
+  rootPath?: string;
+  includeDescendants?: boolean;
+  maxDepth?: number;
+  maxResults?: number;
+  fields?: string[];
+  componentType?: string;
+  refresh?: boolean;
+  timeoutMs?: number;
+}
+
+interface QuerySummary {
+  totalMatches: number;
+  returned: number;
+  truncated: boolean;
+  match: ProjectStateMatchMode;
+  rootPath?: string;
+  includeDescendants: boolean;
+  maxDepth?: number;
+  maxResults: number;
+  fields?: string[];
+  componentType?: string;
+}
+
+interface SnapshotInfo {
+  timestamp?: number;
+  ageMs?: number;
+  refreshed: boolean;
+  refreshRequested: boolean;
+  refreshError?: string;
+  editorStateTimestamp?: number;
+  editorStateAgeMs?: number;
+  sceneDirty?: boolean;
+  isPlaying?: boolean;
+  isCompiling?: boolean;
+  isUpdating?: boolean;
+}
+
+interface RefreshResult {
+  requested: boolean;
+  refreshed: boolean;
+  error?: string;
+}
 
 export interface ProjectStateResult {
   success: boolean;
   data?: unknown;
   error?: string;
+  warning?: string;
   source?: string;
+  query?: QuerySummary;
+  snapshot?: SnapshotInfo;
 }
 
+const DEFAULT_MAX_RESULTS = 200;
+const MAX_RESULTS_LIMIT = 5000;
+const DEFAULT_REFRESH_TIMEOUT_MS = 30000;
+
 /**
- * Query the Unity project state
+ * Query the Unity project state.
  */
 export async function queryProjectState(
   query: string,
   filter: string | undefined,
-  config: BanterMCPConfig
+  config: BanterMCPConfig,
+  options: ProjectStateQueryOptions = {}
 ): Promise<ProjectStateResult> {
   if (!config.unityProjectPath || !fs.existsSync(config.assetsPath)) {
     return {
@@ -31,22 +87,32 @@ export async function queryProjectState(
     };
   }
 
+  const validationError = validateQueryOptions(options);
+  if (validationError) {
+    return { success: false, error: validationError };
+  }
+
   try {
+    const stateBackedQuery = query === "hierarchy" || query === "components" || query === "all";
+    const refresh = stateBackedQuery
+      ? await refreshHierarchyIfRequested(config, options)
+      : { requested: false, refreshed: false };
+
     switch (query) {
       case "hierarchy":
-        return await readStateFile(config, "scene-hierarchy.json", filter);
+        return readHierarchy(config, filter, options, refresh);
 
       case "components":
-        return await readComponentsFromHierarchy(config, filter);
+        return readComponentsFromHierarchy(config, filter, options, refresh);
 
       case "prefabs":
-        return await readPrefabCatalog(config, filter);
+        return readPrefabCatalog(config, filter);
 
       case "assets":
-        return await readAssets(config, filter);
+        return readAssets(config, filter);
 
       case "all":
-        return await readAllState(config);
+        return readAllState(config, refresh);
 
       default:
         return {
@@ -62,121 +128,372 @@ export async function queryProjectState(
   }
 }
 
-async function readStateFile(
+function validateQueryOptions(options: ProjectStateQueryOptions): string | undefined {
+  if (options.match !== undefined && options.match !== "contains" && options.match !== "exact") {
+    return "match must be either contains or exact.";
+  }
+  if (options.maxResults !== undefined &&
+      (!Number.isInteger(options.maxResults) || options.maxResults < 1 || options.maxResults > MAX_RESULTS_LIMIT)) {
+    return `maxResults must be a whole number between 1 and ${MAX_RESULTS_LIMIT}.`;
+  }
+  if (options.maxDepth !== undefined &&
+      (!Number.isInteger(options.maxDepth) || options.maxDepth < 0 || options.maxDepth > 100)) {
+    return "maxDepth must be a whole number between 0 and 100.";
+  }
+  if (options.timeoutMs !== undefined &&
+      (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 120000)) {
+    return "timeoutMs must be between 1000 and 120000.";
+  }
+  if (options.fields !== undefined &&
+      (!Array.isArray(options.fields) || options.fields.length > 50 || options.fields.some((field) => typeof field !== "string" || !field))) {
+    return "fields must contain at most 50 non-empty field names.";
+  }
+  return undefined;
+}
+
+async function refreshHierarchyIfRequested(
+  config: BanterMCPConfig,
+  options: ProjectStateQueryOptions
+): Promise<RefreshResult> {
+  if (options.refresh === false) {
+    return { requested: false, refreshed: false };
+  }
+
+  if (!isBridgeLive(config)) {
+    return {
+      requested: true,
+      refreshed: false,
+      error: "Unity bridge heartbeat is stale or unavailable; returning the latest saved snapshot.",
+    };
+  }
+
+  return requestStateExport(
+    config,
+    "scene-hierarchy",
+    options.timeoutMs ?? DEFAULT_REFRESH_TIMEOUT_MS
+  );
+}
+
+function isBridgeLive(config: BanterMCPConfig): boolean {
+  const editorState = readJsonFile(path.join(config.mcpStatePath, "editor-state.json"));
+  const timestamp = numberValue(editorState?.timestamp);
+  return timestamp !== undefined && Date.now() - timestamp <= 5000;
+}
+
+function readHierarchy(
+  config: BanterMCPConfig,
+  filter: string | undefined,
+  options: ProjectStateQueryOptions,
+  refresh: RefreshResult
+): ProjectStateResult {
+  const state = readStateFile(config, "scene-hierarchy.json", refresh);
+  if (!state.success) {
+    return state;
+  }
+
+  const hierarchy = state.data as Record<string, unknown>;
+  const objects = Array.isArray(hierarchy.objects)
+    ? hierarchy.objects.filter(isRecord)
+    : [];
+  const selected = selectHierarchyObjects(objects, filter, options);
+
+  return {
+    ...state,
+    data: {
+      ...hierarchy,
+      objects: selected.items,
+    },
+    query: selected.summary,
+  };
+}
+
+function readStateFile(
   config: BanterMCPConfig,
   filename: string,
-  filter?: string
-): Promise<ProjectStateResult> {
+  refresh: RefreshResult = { requested: false, refreshed: false }
+): ProjectStateResult {
   const filePath = path.join(config.mcpStatePath, filename);
 
   if (!fs.existsSync(filePath)) {
-    // Try to trigger Unity to export state
-    await requestStateExport(config, filename);
-
-    // Wait briefly and retry
-    await sleep(500);
-
-    if (!fs.existsSync(filePath)) {
-      return {
-        success: false,
-        error: `State file not found: ${filename}. Unity may need to export project state.`,
-        source: filePath,
-      };
-    }
+    return {
+      success: false,
+      error: `State file not found: ${filename}. Unity may need to export project state.`,
+      source: filePath,
+      snapshot: buildSnapshotInfo(config, undefined, refresh),
+    };
   }
 
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    let data = JSON.parse(content);
-
-    // Apply filter if provided
-    if (filter) {
-      data = applyFilter(data, filter);
-    }
-
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     return {
       success: true,
       data,
+      warning: refresh.error,
       source: filePath,
+      snapshot: buildSnapshotInfo(config, data, refresh),
     };
   } catch (error) {
     return {
       success: false,
       error: `Error reading ${filename}: ${error instanceof Error ? error.message : "Unknown error"}`,
       source: filePath,
+      snapshot: buildSnapshotInfo(config, undefined, refresh),
     };
   }
 }
 
-async function readAllState(config: BanterMCPConfig): Promise<ProjectStateResult> {
+function buildSnapshotInfo(
+  config: BanterMCPConfig,
+  data: unknown,
+  refresh: RefreshResult
+): SnapshotInfo {
+  const state = isRecord(data) ? data : undefined;
+  const editorState = readJsonFile(path.join(config.mcpStatePath, "editor-state.json"));
+  const timestamp = numberValue(state?.timestamp);
+  const editorStateTimestamp = numberValue(editorState?.timestamp);
+
+  return {
+    timestamp,
+    ageMs: timestamp === undefined ? undefined : Math.max(0, Date.now() - timestamp),
+    refreshed: refresh.refreshed,
+    refreshRequested: refresh.requested,
+    refreshError: refresh.error,
+    editorStateTimestamp,
+    editorStateAgeMs: editorStateTimestamp === undefined
+      ? undefined
+      : Math.max(0, Date.now() - editorStateTimestamp),
+    sceneDirty: booleanValue(editorState?.activeSceneDirty),
+    isPlaying: booleanValue(editorState?.isPlaying),
+    isCompiling: booleanValue(editorState?.isCompiling),
+    isUpdating: booleanValue(editorState?.isUpdating),
+  };
+}
+
+function selectHierarchyObjects(
+  objects: Array<Record<string, unknown>>,
+  filter: string | undefined,
+  options: ProjectStateQueryOptions
+): { items: Array<Record<string, unknown>>; summary: QuerySummary } {
+  const match = options.match ?? "contains";
+  const rootPath = normalizeObjectPath(options.rootPath);
+  const includeDescendants = options.includeDescendants === true;
+  const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
+  const root = rootPath
+    ? objects.find((object) => stringValue(object.path)?.toLowerCase() === rootPath.toLowerCase())
+    : undefined;
+  const rootDepth = numberValue(root?.depth);
+
+  let matches = objects.filter((object) => {
+    const objectPath = stringValue(object.path) ?? "";
+    const objectDepth = numberValue(object.depth) ?? 0;
+
+    if (rootPath) {
+      const exactRoot = objectPath.toLowerCase() === rootPath.toLowerCase();
+      const descendant = objectPath.toLowerCase().startsWith(`${rootPath.toLowerCase()}/`);
+      if (!exactRoot && !(includeDescendants && descendant)) {
+        return false;
+      }
+      if (options.maxDepth !== undefined && rootDepth !== undefined && objectDepth - rootDepth > options.maxDepth) {
+        return false;
+      }
+    } else if (options.maxDepth !== undefined && objectDepth > options.maxDepth) {
+      return false;
+    }
+
+    if (options.componentType && !objectHasComponent(object, options.componentType)) {
+      return false;
+    }
+    return !filter || matchesFilter(object, filter, match);
+  });
+
+  if (options.componentType) {
+    matches = matches.map((object) => projectMatchingComponents(object, options.componentType as string));
+  }
+
+  const totalMatches = matches.length;
+  const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
+  const items = matches
+    .slice(0, maxResults)
+    .map((object) => fields ? pickFields(object, fields) : object);
+
+  return {
+    items,
+    summary: {
+      totalMatches,
+      returned: items.length,
+      truncated: totalMatches > items.length,
+      match,
+      rootPath,
+      includeDescendants,
+      maxDepth: options.maxDepth,
+      maxResults,
+      fields,
+      componentType: options.componentType,
+    },
+  };
+}
+
+function projectMatchingComponents(
+  object: Record<string, unknown>,
+  componentType: string
+): Record<string, unknown> {
+  const components = Array.isArray(object.components)
+    ? object.components.filter(isRecord).filter((component) => componentMatchesType(component, componentType))
+    : [];
+  return { ...object, components };
+}
+
+function objectHasComponent(object: Record<string, unknown>, componentType: string): boolean {
+  return Array.isArray(object.components) &&
+    object.components.filter(isRecord).some((component) => componentMatchesType(component, componentType));
+}
+
+function componentMatchesType(component: Record<string, unknown>, componentType: string): boolean {
+  const requested = componentType.toLowerCase();
+  return stringValue(component.type)?.toLowerCase() === requested ||
+    stringValue(component.fullType)?.toLowerCase() === requested;
+}
+
+function matchesFilter(
+  item: Record<string, unknown>,
+  filter: string,
+  match: ProjectStateMatchMode
+): boolean {
+  const filterLower = filter.toLowerCase();
+  if (match === "contains") {
+    return JSON.stringify(item).toLowerCase().includes(filterLower);
+  }
+
+  const candidates = [item.name, item.path, item.type, item.fullType, item.objectName, item.objectPath]
+    .filter((value): value is string => typeof value === "string");
+  if (candidates.some((value) => value.toLowerCase() === filterLower)) {
+    return true;
+  }
+
+  return Array.isArray(item.components) && item.components.filter(isRecord).some((component) =>
+    stringValue(component.type)?.toLowerCase() === filterLower ||
+    stringValue(component.fullType)?.toLowerCase() === filterLower
+  );
+}
+
+function pickFields(item: Record<string, unknown>, fields: string[]): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(item, field)) {
+      result[field] = item[field];
+    }
+  }
+  return result;
+}
+
+function normalizeObjectPath(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+function readAllState(config: BanterMCPConfig, refresh: RefreshResult): ProjectStateResult {
   const files = [
     "scene-hierarchy.json",
     "editor-state.json",
     "console-log.json",
     "import-status.json",
+    "compilation-status.json",
     "prefab-catalog.json",
   ];
   const result: Record<string, unknown> = {};
 
   for (const file of files) {
-    const fileResult = await readStateFile(config, file);
+    const fileResult = readStateFile(
+      config,
+      file,
+      file === "scene-hierarchy.json" ? refresh : { requested: false, refreshed: false }
+    );
     const key = file.replace(".json", "").replace(/-/g, "_");
-
-    if (fileResult.success) {
-      result[key] = fileResult.data;
-    } else {
-      result[key] = { error: fileResult.error };
-    }
+    result[key] = fileResult.success ? fileResult.data : { error: fileResult.error };
   }
 
+  const hierarchy = readJsonFile(path.join(config.mcpStatePath, "scene-hierarchy.json"));
   return {
     success: true,
     data: result,
+    warning: refresh.error,
+    snapshot: buildSnapshotInfo(config, hierarchy, refresh),
   };
 }
 
-async function readComponentsFromHierarchy(
+function readComponentsFromHierarchy(
   config: BanterMCPConfig,
-  filter?: string
-): Promise<ProjectStateResult> {
-  const hierarchyResult = await readStateFile(config, "scene-hierarchy.json");
+  filter: string | undefined,
+  options: ProjectStateQueryOptions,
+  refresh: RefreshResult
+): ProjectStateResult {
+  const hierarchyResult = readStateFile(config, "scene-hierarchy.json", refresh);
   if (!hierarchyResult.success) {
     return hierarchyResult;
   }
 
   const hierarchy = hierarchyResult.data as { objects?: Array<Record<string, unknown>> };
-  const components: Array<Record<string, unknown>> = [];
+  const selectedObjects = selectHierarchyObjects(hierarchy.objects || [], undefined, {
+    ...options,
+    fields: undefined,
+    componentType: undefined,
+    maxResults: Math.max(1, hierarchy.objects?.length || 0),
+  });
+  let components: Array<Record<string, unknown>> = [];
 
-  for (const obj of hierarchy.objects || []) {
-    const objectComponents = Array.isArray(obj.components) ? obj.components : [];
-    for (const component of objectComponents as Array<Record<string, unknown>>) {
+  for (const object of selectedObjects.items) {
+    const objectComponents = Array.isArray(object.components) ? object.components : [];
+    for (const component of objectComponents.filter(isRecord)) {
       components.push({
-        objectName: obj.name,
-        objectPath: obj.path,
-        depth: obj.depth,
+        objectName: object.name,
+        objectPath: object.path,
+        depth: object.depth,
         ...component,
       });
     }
   }
 
+  if (options.componentType) {
+    components = components.filter((component) => componentMatchesType(component, options.componentType as string));
+  }
+  if (filter) {
+    components = components.filter((component) => matchesFilter(component, filter, options.match ?? "contains"));
+  }
+
+  const totalMatches = components.length;
+  const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
+  const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
+  const items = components
+    .slice(0, maxResults)
+    .map((component) => fields ? pickFields(component, fields) : component);
+
   return {
-    success: true,
-    data: filter ? applyFilter(components, filter) : components,
-    source: path.join(config.mcpStatePath, "scene-hierarchy.json"),
+    ...hierarchyResult,
+    data: items,
+    query: {
+      ...selectedObjects.summary,
+      totalMatches,
+      returned: items.length,
+      truncated: totalMatches > items.length,
+      fields,
+      componentType: options.componentType,
+    },
   };
 }
 
-async function readPrefabCatalog(
+function readPrefabCatalog(
   config: BanterMCPConfig,
   filter?: string
-): Promise<ProjectStateResult> {
+): ProjectStateResult {
   const catalogPath = path.join(config.mcpStatePath, "prefab-catalog.json");
 
   if (fs.existsSync(catalogPath)) {
     const data = JSON.parse(fs.readFileSync(catalogPath, "utf-8"));
     return {
       success: true,
-      data: filter ? applyFilter(flattenPrefabCatalog(data), filter) : data,
+      data: filter ? applySimpleFilter(flattenPrefabCatalog(data), filter) : data,
       source: catalogPath,
     };
   }
@@ -193,10 +510,10 @@ async function readPrefabCatalog(
   };
 }
 
-async function readAssets(
+function readAssets(
   config: BanterMCPConfig,
   filter?: string
-): Promise<ProjectStateResult> {
+): ProjectStateResult {
   const assets = scanAssets(config.assetsPath, undefined, filter);
   return {
     success: true,
@@ -274,50 +591,99 @@ function scanAssets(
   return results;
 }
 
-function applyFilter(data: unknown, filter: string): unknown {
+function applySimpleFilter(data: unknown, filter: string): unknown {
   const filterLower = filter.toLowerCase();
-
-  if (Array.isArray(data)) {
-    return data.filter((item) => objectContains(item, filterLower));
-  }
-
-  if (typeof data === "object" && data !== null) {
-    const obj = data as Record<string, unknown>;
-    if (Array.isArray(obj.objects)) {
-      return {
-        ...obj,
-        objects: obj.objects.filter((item) => objectContains(item, filterLower)),
-      };
-    }
-  }
-
-  return data;
+  return Array.isArray(data)
+    ? data.filter((item) => JSON.stringify(item).toLowerCase().includes(filterLower))
+    : data;
 }
 
-function objectContains(item: unknown, filterLower: string): boolean {
-  if (typeof item !== "object" || item === null) {
-    return String(item).toLowerCase().includes(filterLower);
-  }
+async function requestStateExport(
+  config: BanterMCPConfig,
+  stateType: string,
+  timeoutMs: number
+): Promise<RefreshResult> {
+  const commandId = randomUUID();
+  const statePath = path.join(config.mcpStatePath, `${stateType}.json`);
+  const resultPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
+  const beforeModifiedAt = fs.existsSync(statePath) ? fs.statSync(statePath).mtimeMs : 0;
 
-  return JSON.stringify(item).toLowerCase().includes(filterLower);
-}
-
-async function requestStateExport(config: BanterMCPConfig, stateType: string): Promise<void> {
   try {
-    const { randomUUID } = await import("crypto");
-    const commandPath = path.join(config.mcpCommandsPath, `export-state-${randomUUID()}.json`);
-    const command = {
+    fs.mkdirSync(config.mcpCommandsPath, { recursive: true });
+    const commandPath = path.join(config.mcpCommandsPath, `${commandId}.json`);
+    atomicWriteFileSync(commandPath, JSON.stringify({
+      id: commandId,
       type: "export-state",
-      stateType: stateType.replace(".json", ""),
+      stateType,
       timestamp: Date.now(),
-    };
+    }, null, 2));
 
-    // Publish a uniquely named, complete command so concurrent state queries
-    // cannot overwrite one another or expose partial JSON to Unity.
-    atomicWriteFileSync(commandPath, JSON.stringify(command, null, 2));
-  } catch {
-    // Non-critical
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const stateChanged = fs.existsSync(statePath) && fs.statSync(statePath).mtimeMs > beforeModifiedAt;
+      if (fs.existsSync(resultPath)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
+          if (result.commandId === commandId) {
+            fs.unlinkSync(resultPath);
+            if (result.success === false) {
+              return {
+                requested: true,
+                refreshed: false,
+                error: stringValue(result.error) || "Unity rejected the state export command.",
+              };
+            }
+            return stateChanged || fs.existsSync(statePath)
+              ? { requested: true, refreshed: true }
+              : { requested: true, refreshed: false, error: "Unity acknowledged the export but no snapshot was written." };
+          }
+        } catch {
+          // Unity may still be atomically replacing the result file.
+        }
+      }
+      if (stateChanged) {
+        return { requested: true, refreshed: true };
+      }
+      await sleep(100);
+    }
+
+    return {
+      requested: true,
+      refreshed: false,
+      error: `Timed out after ${timeoutMs}ms waiting for Unity to export project state; returning the latest snapshot.`,
+    };
+  } catch (error) {
+    return {
+      requested: true,
+      refreshed: false,
+      error: error instanceof Error ? error.message : "Could not request a Unity state export.",
+    };
   }
+}
+
+function readJsonFile(filePath: string): Record<string, unknown> | undefined {
+  try {
+    const value = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    return isRecord(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function sleep(ms: number): Promise<void> {

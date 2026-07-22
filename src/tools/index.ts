@@ -9,7 +9,7 @@ import { validateVSGraph, VSValidationResult } from "./validate-vs-graph.js";
 import { writeVSGraph, WriteVSGraphResult } from "./write-vs-graph.js";
 import { generateVSGraph, GenerateVSGraphResult } from "./generate-vs-graph.js";
 import { queryProjectState, ProjectStateResult } from "./query-project.js";
-import { checkImportStatus, ImportStatusResult } from "./check-import-status.js";
+import { checkImportStatus, ImportStatusResult, waitForUnityCompile } from "./check-import-status.js";
 import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
 import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
@@ -225,7 +225,8 @@ Returns stable path-derived project IDs, bridge installation, live/stale Editor 
 
     {
       name: "validate_vs_graph_in_unity",
-      description: `Force Unity to import and deserialize a Visual Scripting Script Graph asset, then return its resolved graph type, element counts, element types, GUID, and dependency hash.
+      description: `Force Unity to import and deserialize a Visual Scripting Script Graph asset, then return its resolved graph type, element counts, element types, GUID, dependency hash, and required value-port integrity.
+By default validation fails when a ValueInput has neither a valid connection nor a persisted default because Unity Visual Scripting will throw MissingValuePortInputException if that input is evaluated.
 This is the authoritative import check after write_vs_graph. It uses reflection so the bridge still compiles in projects without Visual Scripting, where the tool returns a clear validation failure.`,
       inputSchema: {
         type: "object",
@@ -236,6 +237,11 @@ This is the authoritative import check after write_vs_graph. It uses reflection 
             maxLength: 1024,
             pattern: "^Assets/.+\\.asset$",
             description: "Project-relative Script Graph path under Assets (for example, Assets/Graphs/Respawn.asset)",
+          },
+          allowUnboundValueInputs: {
+            type: "boolean",
+            default: false,
+            description: "Report but do not fail validation for unbound value inputs (default: false)",
           },
         },
         required: ["assetPath"],
@@ -565,9 +571,50 @@ Every path is preflighted as an existing Assets/.../*.unity asset and duplicate 
     },
 
     {
+      name: "execute_editor_menu_item",
+      description: `Execute a project-defined custom Unity Editor MenuItem by exact path and return correlated before/after state, duration, and synchronous Unity errors.
+Built-in Unity roots such as File, Edit, Assets, GameObject, Component, Window, and Help are blocked. Compilation/update activity, dirty scenes, and Play Mode fail closed unless the relevant explicit override is supplied.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          menuPath: {
+            type: "string",
+            minLength: 3,
+            maxLength: 512,
+            description: "Exact project-defined MenuItem path",
+          },
+          allowInPlayMode: {
+            type: "boolean",
+            default: false,
+            description: "Allow execution while Unity is in or entering Play Mode",
+          },
+          allowDirtyScene: {
+            type: "boolean",
+            default: false,
+            description: "Allow execution while the active scene has unsaved changes",
+          },
+          waitForSettled: {
+            type: "boolean",
+            default: true,
+            description: "Wait for compilation and asset updates started by the menu item",
+          },
+          timeoutMs: {
+            type: "number",
+            minimum: 1000,
+            maximum: 120000,
+            default: 30000,
+            description: "Maximum time for execution result and Editor settling",
+          },
+        },
+        required: ["menuPath"],
+      },
+    },
+
+    {
       name: "query_project_state",
       description: `Query the current Unity project state.
-Returns scene hierarchy, components, and other project information.
+Hierarchy/component reads explicitly refresh a live Unity bridge, report snapshot freshness, and return bounded results.
+Use rootPath, exact matching, depth, component, and field projections for targeted inspection instead of requesting a whole large scene.
 
 Requires the BanterMCPBridge Unity extension to be installed and Unity Editor running.`,
       inputSchema: {
@@ -580,7 +627,57 @@ Requires the BanterMCPBridge Unity extension to be installed and Unity Editor ru
           },
           filter: {
             type: "string",
-            description: "Optional filter (e.g., object name, component type)",
+            description: "Optional filter (e.g., object name, path, or component type)",
+          },
+          match: {
+            type: "string",
+            enum: ["contains", "exact"],
+            default: "contains",
+            description: "How filter is matched against hierarchy/component identity fields",
+          },
+          rootPath: {
+            type: "string",
+            description: "Exact hierarchy path to use as the query root",
+          },
+          includeDescendants: {
+            type: "boolean",
+            default: false,
+            description: "Include descendants of rootPath (default: false)",
+          },
+          maxDepth: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+            description: "Maximum hierarchy depth; relative to rootPath when supplied",
+          },
+          maxResults: {
+            type: "integer",
+            minimum: 1,
+            maximum: 5000,
+            default: 200,
+            description: "Maximum hierarchy objects or components returned",
+          },
+          fields: {
+            type: "array",
+            maxItems: 50,
+            items: { type: "string" },
+            description: "Optional returned fields, such as name, path, active, depth, or components",
+          },
+          componentType: {
+            type: "string",
+            description: "Exact short or full component type; hierarchy results retain only matching components",
+          },
+          refresh: {
+            type: "boolean",
+            default: true,
+            description: "Request a fresh hierarchy snapshot from a live bridge (default: true)",
+          },
+          timeoutMs: {
+            type: "number",
+            minimum: 1000,
+            maximum: 120000,
+            default: 30000,
+            description: "Maximum wait for an explicit Unity hierarchy export",
           },
         },
         required: ["query"],
@@ -627,8 +724,31 @@ Useful for debugging after importing assets or running graphs.`,
             description: "Filter by log level (default: all)",
           },
           limit: {
-            type: "number",
+            type: "integer",
+            minimum: 1,
+            maximum: 1000,
+            default: 50,
             description: "Maximum number of entries to return (default: 50)",
+          },
+          sinceTimestamp: {
+            type: "number",
+            minimum: 0,
+            description: "Only return entries at or after this Unix timestamp in milliseconds",
+          },
+          contains: {
+            type: "string",
+            maxLength: 2048,
+            description: "Case-insensitive message substring filter",
+          },
+          regex: {
+            type: "string",
+            maxLength: 2048,
+            description: "Case-insensitive regular expression applied to message and stack trace",
+          },
+          stackContains: {
+            type: "string",
+            maxLength: 2048,
+            description: "Case-insensitive stack-trace substring filter",
           },
         },
       },
@@ -644,6 +764,24 @@ Use after writing multiple files to force Unity to import them.`,
           path: {
             type: "string",
             description: "Optional: specific path to refresh",
+          },
+        },
+      },
+    },
+
+    {
+      name: "wait_for_unity_compile",
+      description: `Wait until Unity is no longer compiling or updating assets.
+Returns persistent compiler diagnostics from the bridge and fails when the current assembly compilation has errors. Use after C# writes, refreshes, or domain reloads before Play Mode and build operations.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          timeoutMs: {
+            type: "number",
+            minimum: 1000,
+            maximum: 120000,
+            default: 30000,
+            description: "Maximum time to wait for Unity to settle",
           },
         },
       },
@@ -1299,12 +1437,27 @@ export async function handleToolCall(
       result = await queryProjectState(
         args.query as string,
         args.filter as string | undefined,
-        config
+        config,
+        {
+          match: args.match as "contains" | "exact" | undefined,
+          rootPath: args.rootPath as string | undefined,
+          includeDescendants: args.includeDescendants as boolean | undefined,
+          maxDepth: args.maxDepth as number | undefined,
+          maxResults: args.maxResults as number | undefined,
+          fields: args.fields as string[] | undefined,
+          componentType: args.componentType as string | undefined,
+          refresh: args.refresh as boolean | undefined,
+          timeoutMs: args.timeoutMs as number | undefined,
+        }
       );
       break;
 
     case "validate_vs_graph_in_unity":
-      result = await validateVSGraphInUnity(args.assetPath as string, config);
+      result = await validateVSGraphInUnity(
+        args.assetPath as string,
+        args.allowUnboundValueInputs as boolean | undefined,
+        config
+      );
       break;
 
     case "validate_banter_visual_scripting":
@@ -1410,6 +1563,17 @@ export async function handleToolCall(
       );
       break;
 
+    case "execute_editor_menu_item":
+      result = await executeEditorMenuItem(
+        args.menuPath as string,
+        args.allowInPlayMode as boolean | undefined,
+        args.allowDirtyScene as boolean | undefined,
+        args.waitForSettled as boolean | undefined,
+        args.timeoutMs as number | undefined,
+        config
+      );
+      break;
+
     case "check_import_status":
       result = await checkImportStatus(
         args.assetPath as string | undefined,
@@ -1423,6 +1587,10 @@ export async function handleToolCall(
       result = await getConsoleLogs(
         args.level as string | undefined,
         args.limit as number | undefined,
+        args.sinceTimestamp as number | undefined,
+        args.contains as string | undefined,
+        args.regex as string | undefined,
+        args.stackContains as string | undefined,
         config
       );
       break;
@@ -1434,6 +1602,13 @@ export async function handleToolCall(
     case "control_play_mode":
       result = await controlPlayMode(
         args.action as PlayModeAction,
+        args.timeoutMs as number | undefined,
+        config
+      );
+      break;
+
+    case "wait_for_unity_compile":
+      result = await waitForUnityCompile(
         args.timeoutMs as number | undefined,
         config
       );
@@ -1637,6 +1812,10 @@ export async function handleToolCall(
 async function getConsoleLogs(
   level: string | undefined,
   limit: number | undefined,
+  sinceTimestamp: number | undefined,
+  contains: string | undefined,
+  regexPattern: string | undefined,
+  stackContains: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const fs = await import("fs");
@@ -1656,19 +1835,94 @@ async function getConsoleLogs(
     const data = JSON.parse(fs.readFileSync(logPath, "utf-8"));
     let logs = data.logs || [];
 
-    // Filter by level if specified
+    // Unity writes LogType names with title casing. Treat Exception and Assert
+    // as errors while preserving the original level in the returned entry.
     if (level && level !== "all") {
-      logs = logs.filter((log: { level: string }) => log.level === level);
+      const requestedLevel = level.toLowerCase();
+      logs = logs.filter((log: { level?: string }) => {
+        const unityLevel = String(log.level || "").toLowerCase();
+        return requestedLevel === "error"
+          ? unityLevel === "error" || unityLevel === "exception" || unityLevel === "assert"
+          : unityLevel === requestedLevel;
+      });
     }
 
-    // Limit results
-    const maxLimit = limit || 50;
+    if (sinceTimestamp !== undefined) {
+      if (!Number.isFinite(sinceTimestamp) || sinceTimestamp < 0) {
+        return { success: false, error: "sinceTimestamp must be a non-negative number.", logs: [] };
+      }
+      logs = logs.filter((log: { timestamp?: number }) =>
+        typeof log.timestamp === "number" && log.timestamp >= sinceTimestamp
+      );
+    }
+
+    if (contains) {
+      const needle = contains.toLowerCase();
+      logs = logs.filter((log: { message?: string }) =>
+        String(log.message || "").toLowerCase().includes(needle)
+      );
+    }
+
+    if (stackContains) {
+      const needle = stackContains.toLowerCase();
+      logs = logs.filter((log: { stackTrace?: string }) =>
+        String(log.stackTrace || "").toLowerCase().includes(needle)
+      );
+    }
+
+    if (regexPattern) {
+      let matcher: RegExp;
+      try {
+        matcher = new RegExp(regexPattern, "i");
+      } catch (error) {
+        return {
+          success: false,
+          error: `Invalid console regex: ${error instanceof Error ? error.message : "unknown error"}`,
+          logs: [],
+        };
+      }
+      logs = logs.filter((log: { message?: string; stackTrace?: string }) =>
+        matcher.test(`${String(log.message || "")}\n${String(log.stackTrace || "")}`)
+      );
+    }
+
+    const maxLimit = limit ?? 50;
+    if (!Number.isInteger(maxLimit) || maxLimit < 1 || maxLimit > 1000) {
+      return { success: false, error: "limit must be a whole number between 1 and 1000.", logs: [] };
+    }
     logs = logs.slice(-maxLimit);
+
+    const snapshotTimestamp = typeof data.timestamp === "number" ? data.timestamp : undefined;
+    const snapshotAgeMs = snapshotTimestamp === undefined
+      ? undefined
+      : Math.max(0, Date.now() - snapshotTimestamp);
+    const editorStatePath = path.join(config.mcpStatePath, "editor-state.json");
+    let editorStateTimestamp: number | undefined;
+    try {
+      const editorState = JSON.parse(fs.readFileSync(editorStatePath, "utf-8"));
+      editorStateTimestamp = typeof editorState.timestamp === "number" ? editorState.timestamp : undefined;
+    } catch {
+      // Freshness remains unknown when the editor heartbeat cannot be read.
+    }
+    const editorStateAgeMs = editorStateTimestamp === undefined
+      ? undefined
+      : Math.max(0, Date.now() - editorStateTimestamp);
+    const stale = editorStateAgeMs !== undefined && editorStateAgeMs <= 5000 &&
+      (snapshotAgeMs === undefined || snapshotAgeMs > 5000);
 
     return {
       success: true,
       count: logs.length,
       logs,
+      source: logPath,
+      snapshotTimestamp,
+      snapshotAgeMs,
+      editorStateTimestamp,
+      editorStateAgeMs,
+      stale,
+      warning: stale
+        ? "Unity is responsive, but the console snapshot is stale. Recent compiler or runtime errors may be missing."
+        : undefined,
     };
   } catch (error) {
     return {
@@ -1948,6 +2202,7 @@ async function searchUnityAssets(
 
 async function validateVSGraphInUnity(
   assetPath: string,
+  allowUnboundValueInputs: boolean | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const normalizedPath = normalizeUnityVisualScriptingAssetPath(assetPath);
@@ -1958,6 +2213,7 @@ async function validateVSGraphInUnity(
   const result = await sendUnityCommand({
     type: "validate_vs_graph_asset",
     assetPath: normalizedPath,
+    allowUnboundValueInputs: allowUnboundValueInputs === true,
   }, config);
   if (!result.success || !result.commandId) {
     return result;
@@ -2473,6 +2729,111 @@ async function executeUnitySceneCommand(
     status: "result_timeout",
     error: "Unity acknowledged the scene command but its correlated scene result was not available.",
   };
+}
+
+async function executeEditorMenuItem(
+  menuPath: string,
+  allowInPlayMode: boolean | undefined,
+  allowDirtyScene: boolean | undefined,
+  waitForSettled: boolean | undefined,
+  requestedTimeoutMs: number | undefined,
+  config: BanterMCPConfig
+): Promise<unknown> {
+  const normalizedMenuPath = normalizeCustomEditorMenuPath(menuPath);
+  if (!normalizedMenuPath) {
+    return {
+      success: false,
+      error: "menuPath must be a project-defined custom menu path; built-in Unity menu roots are blocked.",
+    };
+  }
+
+  const timeoutMs = requestedTimeoutMs ?? 30000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) {
+    return { success: false, error: "timeoutMs must be between 1000 and 120000." };
+  }
+
+  const startedAt = Date.now();
+  const command = await sendUnityCommand({
+    type: "execute_editor_menu_item",
+    menuPath: normalizedMenuPath,
+    allowInPlayMode: allowInPlayMode === true,
+    allowDirtyScene: allowDirtyScene === true,
+  }, config);
+  if (!command.success || !command.commandId) {
+    return command;
+  }
+
+  const resultPath = path.join(
+    config.mcpStatePath,
+    "editor-menu-results",
+    `${command.commandId}.json`
+  );
+  while (Date.now() - startedAt < timeoutMs) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const menuResult = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
+        if (menuResult.commandId === command.commandId) {
+          fs.unlinkSync(resultPath);
+          if (menuResult.success !== true || waitForSettled === false) {
+            return menuResult;
+          }
+
+          // Give delayCall-based menu code a brief chance to start its import or compilation.
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          const remaining = timeoutMs - (Date.now() - startedAt);
+          if (remaining < 1000) {
+            return {
+              ...menuResult,
+              success: false,
+              settled: false,
+              settleError: "The menu item executed, but no time remained to verify Unity settled.",
+            };
+          }
+
+          const compileStatus = await waitForUnityCompile(remaining, config);
+          return {
+            ...menuResult,
+            success: menuResult.success === true && compileStatus.success,
+            settled: compileStatus.settled,
+            settleStatus: compileStatus,
+          };
+        }
+      } catch {
+        // Unity may still be atomically replacing the correlated result.
+      }
+    }
+
+    if (!command.completed) {
+      const bridgeFailure = consumeLateBridgeAcknowledgement(command.commandId, config);
+      if (bridgeFailure) {
+        return bridgeFailure;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return {
+    success: false,
+    commandId: command.commandId,
+    status: "result_timeout",
+    error: `Timed out after ${timeoutMs}ms waiting for the Unity Editor menu result.`,
+  };
+}
+
+export function normalizeCustomEditorMenuPath(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim().replace(/\\/g, "/");
+  if (normalized.length < 3 || normalized.length > 512 || normalized.startsWith("/") ||
+      normalized.endsWith("/") || normalized.includes("//") || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    return undefined;
+  }
+
+  const blockedRoots = new Set(["file", "edit", "assets", "gameobject", "component", "window", "help", "context"]);
+  const root = normalized.split("/", 1)[0].toLowerCase();
+  return blockedRoots.has(root) ? undefined : normalized;
 }
 
 interface UnityCommandResult {
