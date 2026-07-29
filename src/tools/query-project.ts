@@ -6,9 +6,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { randomUUID } from "crypto";
 import type { BanterMCPConfig } from "../lib/config.js";
-import { atomicWriteFileSync } from "../lib/files.js";
+import { dispatchUnityBridgeCommand } from "../lib/unity-bridge-transport.js";
 
 export type ProjectStateMatchMode = "contains" | "exact";
 
@@ -603,20 +602,27 @@ async function requestStateExport(
   stateType: string,
   timeoutMs: number
 ): Promise<RefreshResult> {
-  const commandId = randomUUID();
   const statePath = path.join(config.mcpStatePath, `${stateType}.json`);
-  const resultPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
   const beforeModifiedAt = fs.existsSync(statePath) ? fs.statSync(statePath).mtimeMs : 0;
 
   try {
-    fs.mkdirSync(config.mcpCommandsPath, { recursive: true });
-    const commandPath = path.join(config.mcpCommandsPath, `${commandId}.json`);
-    atomicWriteFileSync(commandPath, JSON.stringify({
-      id: commandId,
+    const dispatch = await dispatchUnityBridgeCommand({
       type: "export-state",
       stateType,
-      timestamp: Date.now(),
-    }, null, 2));
+    }, config, Math.min(timeoutMs, 3000));
+    const resultPath = path.join(
+      config.mcpStatePath,
+      "command-results",
+      `${dispatch.commandId}.json`
+    );
+
+    if (dispatch.acknowledgement?.success === false) {
+      return {
+        requested: true,
+        refreshed: false,
+        error: dispatch.acknowledgement.error || "Unity rejected the state export command.",
+      };
+    }
 
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
@@ -624,7 +630,7 @@ async function requestStateExport(
       if (fs.existsSync(resultPath)) {
         try {
           const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as Record<string, unknown>;
-          if (result.commandId === commandId) {
+          if (result.commandId === dispatch.commandId) {
             fs.unlinkSync(resultPath);
             if (result.success === false) {
               return {
@@ -642,6 +648,9 @@ async function requestStateExport(
         }
       }
       if (stateChanged) {
+        return { requested: true, refreshed: true };
+      }
+      if (dispatch.acknowledgement?.success === true && fs.existsSync(statePath)) {
         return { requested: true, refreshed: true };
       }
       await sleep(100);

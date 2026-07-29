@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "BANTWORKS MCP",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "identifier": "com.bobworks.bantworksmcp",
   "build": {
     "beforeDevCommand": "",

@@ -21,6 +21,7 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 - **Evidence-Linked Banter Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
 - **Unity Integration**: Run bounded fresh state queries, persist compiler diagnostics, inspect filtered Console windows, refresh assets, and execute guarded project-defined Editor menu commands
+- **Low-Latency Local Bridge**: Prefer versioned project-local named-pipe commands on Windows, with Unity work queued to the main thread and automatic atomic-file compatibility fallback
 - **Closed-Loop Workflow**: Validate → Write → Import and deserialize in Unity → Test
 - **Capability Profiles**: Limit the exposed tool surface to inspection, authoring, testing, Banter workflows, or minimal project routing
 - **Cross-Version Unity Harness**: Provision a deterministic obstacle course that validates physics, serialized scenes, generated Visual Scripting graphs, bridge attachment, Play Mode tests, and optional Banter sync/allow-list behavior
@@ -58,7 +59,7 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 ## Requirements
 
 - Windows 10 or 11 for the guided launcher. The installer includes a private Node.js 24 LTS runtime.
-- Node.js 18 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
+- Node.js 20 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
 - Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
@@ -79,7 +80,7 @@ Open **BANTWORKS MCP**, choose a Unity project folder, select the detected MCP c
 
 Bridge copies are project-local. The launcher compares every configured project against its bundled bridge, labels stale copies as **Update available**, and provides **Update Bridges** to back up and refresh all configured projects in one action.
 
-The MSI and standalone ZIP remain available for managed or manual deployments. Tagged releases include `SHA256SUMS.txt` for artifact verification. The standalone ZIP requires Node.js 18 or newer.
+The MSI and standalone ZIP remain available for managed or manual deployments. Tagged releases include `SHA256SUMS.txt` for artifact verification. The standalone ZIP requires Node.js 20 or newer.
 
 From an extracted standalone ZIP, validate the included server with:
 
@@ -157,7 +158,9 @@ The guided setup installs the bridge automatically. For a manual install, use th
   → YourProject/Assets/Editor/BanterMCPBridge.cs
 ```
 
-Unity will compile it automatically and start exporting project state to `YourProject/.bantworks-mcp/state`.
+Unity will compile it automatically, advertise its protocol and capabilities in `YourProject/.bantworks-mcp/state/project-instance.json`, and start exporting project state.
+
+On Windows, current server and bridge versions prefer a project-local named pipe for small command and acknowledgement messages. Unity API calls are still executed only from `EditorApplication.update` on Unity's main thread. Large state snapshots and correlated artifacts remain atomic project-local files. Legacy bridges, unsupported platforms, stale endpoints, and connection failures automatically use the existing file command channel.
 
 In Edit mode, the bridge keeps a lightweight editor-status heartbeat and debounces full-state exports after actual hierarchy, project, property, undo, scene-open, and scene-save changes. It does not repeatedly traverse an unchanged scene. Automatic full-state export is disabled during Play mode by default to avoid main-thread hierarchy and `SerializedObject` traversal hitches. Command polling and explicit exports remain active during Play mode. Use **BANTWORKS MCP > Refresh State** or the `export-state` bridge command for an on-demand snapshot, or opt in to periodic Play-mode snapshots with the checkable **BANTWORKS MCP > Background State Export In Play Mode** menu item. The opt-in is persisted in Unity `EditorPrefs`.
 

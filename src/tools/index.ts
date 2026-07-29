@@ -15,7 +15,10 @@ import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
 import { getUnityPackages } from "./get-unity-packages.js";
 import { getBanterSDKInfo } from "./get-banter-sdk-info.js";
-import { atomicWriteFileSync } from "../lib/files.js";
+import {
+  dispatchUnityBridgeCommand,
+  type BridgeCommandResult,
+} from "../lib/unity-bridge-transport.js";
 import type { UnityProjectRouter } from "../lib/project-router.js";
 import {
   describeToolGroupSelection,
@@ -1937,32 +1940,16 @@ async function refreshUnityAssets(
   assetPath: string | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
-  const fs = await import("fs");
-  const path = await import("path");
+  const result = await sendUnityCommand({
+    type: "refresh",
+    path: assetPath || null,
+  }, config);
+  if (!result.success) return result;
 
-  // Write a refresh command for Unity to pick up
-  try {
-    const command = {
-      type: "refresh",
-      path: assetPath || null,
-      timestamp: Date.now(),
-    };
-
-    const crypto = await import("crypto");
-    const commandPath = path.join(config.mcpCommandsPath, `refresh-${crypto.randomUUID()}.json`);
-    atomicWriteFileSync(commandPath, JSON.stringify(command, null, 2));
-
-    return {
-      success: true,
-      message: "Refresh command sent to Unity",
-      path: assetPath || "all assets",
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    };
-  }
+  return {
+    ...commandResponse(result, "Unity asset refresh requested."),
+    path: assetPath || "all assets",
+  };
 }
 
 export type PlayModeAction = "play" | "pause" | "resume" | "stop";
@@ -2845,52 +2832,30 @@ interface UnityCommandResult {
   error?: string;
 }
 
-interface BridgeCommandResult {
-  commandId?: string;
-  success?: boolean;
-  message?: string;
-  error?: string;
-  timestamp?: number;
-}
-
 async function sendUnityCommand(
   command: Record<string, unknown>,
   config: BanterMCPConfig
 ): Promise<UnityCommandResult> {
-  const fs = await import("fs");
-  const path = await import("path");
-  const crypto = await import("crypto");
-
   try {
-    // Generate unique command ID
-    const commandId = crypto.randomUUID();
-    const commandFile = path.join(config.mcpCommandsPath, `${commandId}.json`);
-
-    // Unity only sees the final file name after the command JSON is complete.
-    atomicWriteFileSync(commandFile, JSON.stringify({
-      ...command,
-      id: commandId,
-      timestamp: Date.now(),
-    }, null, 2));
-
-    const result = await waitForUnityCommandResult(commandId, config, 3000);
-    if (!result) {
+    const dispatch = await dispatchUnityBridgeCommand(command, config, 3000);
+    if (!dispatch.acknowledgement) {
       return {
         success: true,
-        commandId,
+        commandId: dispatch.commandId,
         completed: false,
         status: "queued",
-        message: "Command queued. Unity did not acknowledge it within 3 seconds.",
+        message: dispatch.fallbackReason ||
+          `Command queued over ${dispatch.transport}. Unity did not acknowledge it within 3 seconds.`,
       };
     }
 
     return {
-      success: result.success === true,
-      commandId,
+      success: dispatch.acknowledgement.success === true,
+      commandId: dispatch.commandId,
       completed: true,
       status: "completed",
-      message: result.message,
-      error: result.error,
+      message: dispatch.acknowledgement.message,
+      error: dispatch.acknowledgement.error,
     };
   } catch (error) {
     return {
@@ -2898,35 +2863,6 @@ async function sendUnityCommand(
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }
-}
-
-async function waitForUnityCommandResult(
-  commandId: string,
-  config: BanterMCPConfig,
-  timeoutMs: number
-): Promise<BridgeCommandResult | undefined> {
-  const fs = await import("fs");
-  const path = await import("path");
-  const resultPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    if (fs.existsSync(resultPath)) {
-      try {
-        const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as BridgeCommandResult;
-        if (result.commandId === commandId) {
-          fs.unlinkSync(resultPath);
-          return result;
-        }
-      } catch {
-        // The bridge may be replacing the file. Retry on the next poll.
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  return undefined;
 }
 
 function commandResponse(result: UnityCommandResult, completedMessage: string): Record<string, unknown> {

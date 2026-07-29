@@ -1,9 +1,13 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Pipes;
 using System.Linq;
 using System.Reflection;
+using System.Text;
+using System.Threading;
 using UnityEditor;
 using UnityEditor.Compilation;
 using UnityEditor.SceneManagement;
@@ -41,6 +45,18 @@ namespace BantworksMCP
         private static readonly string SceneResultsFolder = Path.Combine(StateFolder, "scene-results");
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
+        private const string BridgeVersion = "2.2.0";
+        private const int BridgeProtocolVersion = 1;
+        private const int MinimumBridgeProtocolVersion = 1;
+        private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
+        private static readonly string PipeName = BuildPipeName();
+        private static readonly ConcurrentQueue<PendingPipeCommand> PendingPipeCommands =
+            new ConcurrentQueue<PendingPipeCommand>();
+        private static readonly object PipeServerLock = new object();
+        private static Thread pipeServerThread;
+        private static NamedPipeServerStream activePipeServer;
+        private static volatile bool pipeServerShutdownRequested;
+        private static volatile bool pipeServerAvailable;
 
         private static double lastCommandCheck = 0;
         private static double lastLightweightStateExport = 0;
@@ -119,6 +135,7 @@ namespace BantworksMCP
         {
             // Initialize folders
             EnsureDirectories();
+            StartPipeServer();
             LoadLauncherSettingsIfChanged();
 
             // Subscribe to editor events
@@ -129,6 +146,8 @@ namespace BantworksMCP
             Undo.undoRedoPerformed += OnUndoRedoPerformed;
             EditorSceneManager.sceneOpened += OnSceneOpened;
             EditorSceneManager.sceneSaved += OnSceneSaved;
+            AssemblyReloadEvents.beforeAssemblyReload += ShutdownPipeServer;
+            EditorApplication.quitting += ShutdownPipeServer;
 
             // Do not export the complete hierarchy for ordinary transform/property edits.
             // Large scenes are refreshed explicitly by query_project_state; serializing them
@@ -199,6 +218,9 @@ namespace BantworksMCP
         private static void OnEditorUpdate()
         {
             double time = EditorApplication.timeSinceStartup;
+
+            // Pipe threads only receive bytes. Unity API work is always drained here.
+            ProcessPendingPipeCommands();
 
             // Check for commands periodically
             if (time - lastCommandCheck > CommandCheckInterval)
@@ -530,6 +552,241 @@ namespace BantworksMCP
 
         #region Command Processing
 
+        private static string BuildPipeName()
+        {
+            using (var process = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                return "bantworks-unity-" + process.Id + "-" +
+                    process.StartTime.ToUniversalTime().Ticks.ToString("x16", CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static void StartPipeServer()
+        {
+            if (Application.platform != RuntimePlatform.WindowsEditor)
+                return;
+
+            pipeServerShutdownRequested = false;
+            pipeServerThread = new Thread(PipeServerLoop)
+            {
+                IsBackground = true,
+                Name = "BANTWORKS MCP Named Pipe"
+            };
+            pipeServerThread.Start();
+        }
+
+        private static void ShutdownPipeServer()
+        {
+            pipeServerShutdownRequested = true;
+            pipeServerAvailable = false;
+
+            NamedPipeServerStream serverToDispose;
+            lock (PipeServerLock)
+            {
+                serverToDispose = activePipeServer;
+                activePipeServer = null;
+            }
+
+            if (serverToDispose != null)
+            {
+                try
+                {
+                    if (!serverToDispose.IsConnected)
+                    {
+                        using (var wakeClient = new NamedPipeClientStream(
+                            ".",
+                            PipeName,
+                            PipeDirection.Out,
+                            PipeOptions.None))
+                        {
+                            wakeClient.Connect(250);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    serverToDispose.Dispose();
+                }
+                catch
+                {
+                }
+            }
+
+            PendingPipeCommand pending;
+            while (PendingPipeCommands.TryDequeue(out pending))
+            {
+                pending.responseJson = JsonUtility.ToJson(CreateCommandResult(
+                    pending.commandId,
+                    false,
+                    null,
+                    "Unity is reloading or shutting down."));
+                pending.completed.Set();
+            }
+
+            if (pipeServerThread != null && pipeServerThread.IsAlive)
+                pipeServerThread.Join(2000);
+            pipeServerThread = null;
+        }
+
+        private static void PipeServerLoop()
+        {
+            while (!pipeServerShutdownRequested)
+            {
+                NamedPipeServerStream server = null;
+                try
+                {
+                    server = new NamedPipeServerStream(
+                        PipeName,
+                        PipeDirection.InOut,
+                        4,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.None);
+
+                    lock (PipeServerLock)
+                    {
+                        activePipeServer = server;
+                    }
+                    pipeServerAvailable = true;
+                    server.WaitForConnection();
+                    if (pipeServerShutdownRequested)
+                        break;
+
+                    string requestJson;
+                    using (var reader = new StreamReader(
+                        server,
+                        new UTF8Encoding(false),
+                        false,
+                        4096,
+                        true))
+                    {
+                        requestJson = ReadBoundedPipeLine(reader);
+                    }
+
+                    string commandId = ExtractCommandId(requestJson);
+                    var pending = new PendingPipeCommand
+                    {
+                        commandId = commandId,
+                        requestJson = requestJson,
+                        completed = new ManualResetEventSlim(false)
+                    };
+                    PendingPipeCommands.Enqueue(pending);
+
+                    if (!pending.completed.Wait(TimeSpan.FromMinutes(2)))
+                    {
+                        pending.timedOut = true;
+                        pending.responseJson = BuildPipeErrorJson(
+                            commandId,
+                            "Unity did not process the command before the bridge timeout.");
+                    }
+
+                    using (var writer = new StreamWriter(
+                        server,
+                        new UTF8Encoding(false),
+                        4096,
+                        true))
+                    {
+                        writer.WriteLine(pending.responseJson);
+                        writer.Flush();
+                    }
+                    if (!pending.timedOut)
+                        pending.completed.Dispose();
+                }
+                catch (ObjectDisposedException)
+                {
+                    if (!pipeServerShutdownRequested)
+                        System.Console.WriteLine("[BANTWORKS MCP] Named pipe was disposed unexpectedly.");
+                }
+                catch (PlatformNotSupportedException e)
+                {
+                    System.Console.WriteLine("[BANTWORKS MCP] Named pipe transport is unavailable: " + e.Message);
+                    pipeServerShutdownRequested = true;
+                }
+                catch (Exception e)
+                {
+                    if (!pipeServerShutdownRequested)
+                        System.Console.WriteLine("[BANTWORKS MCP] Named pipe error: " + e.Message);
+                }
+                finally
+                {
+                    pipeServerAvailable = false;
+                    lock (PipeServerLock)
+                    {
+                        if (ReferenceEquals(activePipeServer, server))
+                            activePipeServer = null;
+                    }
+                    if (server != null)
+                        server.Dispose();
+                }
+            }
+        }
+
+        private static string ReadBoundedPipeLine(StreamReader reader)
+        {
+            var builder = new StringBuilder();
+            while (true)
+            {
+                int value = reader.Read();
+                if (value < 0 || value == '\n')
+                    break;
+                if (value == '\r')
+                    continue;
+                if (builder.Length >= MaximumPipeCommandCharacters)
+                    throw new InvalidDataException("Named-pipe command exceeds the 4 MiB character limit.");
+                builder.Append((char)value);
+            }
+
+            if (builder.Length == 0)
+                throw new InvalidDataException("Named-pipe command was empty.");
+            return builder.ToString();
+        }
+
+        private static string ExtractCommandId(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+                return null;
+
+            const string marker = "\"id\"";
+            int markerIndex = json.IndexOf(marker, StringComparison.Ordinal);
+            if (markerIndex < 0)
+                return null;
+            int colonIndex = json.IndexOf(':', markerIndex + marker.Length);
+            int openingQuote = colonIndex >= 0 ? json.IndexOf('"', colonIndex + 1) : -1;
+            int closingQuote = openingQuote >= 0 ? json.IndexOf('"', openingQuote + 1) : -1;
+            if (openingQuote < 0 || closingQuote <= openingQuote + 1)
+                return null;
+
+            string value = json.Substring(openingQuote + 1, closingQuote - openingQuote - 1);
+            if (value.Length > 128 || value.Any(c => !char.IsLetterOrDigit(c) && c != '-'))
+                return null;
+            return value;
+        }
+
+        private static string BuildPipeErrorJson(string commandId, string error)
+        {
+            string id = string.IsNullOrEmpty(commandId) ? "" : commandId;
+            string escapedError = (error ?? "Unknown bridge error")
+                .Replace("\\", "\\\\")
+                .Replace("\"", "\\\"");
+            return "{\"commandId\":\"" + id + "\",\"success\":false,\"error\":\"" +
+                escapedError + "\",\"timestamp\":" +
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) + "}";
+        }
+
+        private static void ProcessPendingPipeCommands()
+        {
+            PendingPipeCommand pending;
+            while (PendingPipeCommands.TryDequeue(out pending))
+            {
+                CommandResult result = ExecuteCommandJson(pending.requestJson);
+                pending.responseJson = JsonUtility.ToJson(result);
+                pending.completed.Set();
+            }
+        }
+
         private static void ProcessCommands()
         {
             if (!Directory.Exists(CommandsFolder))
@@ -544,13 +801,12 @@ namespace BantworksMCP
                 {
                     string json = File.ReadAllText(file);
                     command = JsonUtility.FromJson<MCPCommand>(json);
-                    string message = ProcessCommandJson(json, command);
-                    WriteCommandResult(command?.id, true, message, null);
-                    CommandsProcessed++;
-                    LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Command processed";
-
-                    // Delete processed command
-                    File.Delete(file);
+                    CommandResult result = ExecuteCommandJson(json, command);
+                    WriteCommandResult(result);
+                    if (result.success)
+                        File.Delete(file);
+                    else
+                        ArchiveFailedCommand(file);
                 }
                 catch (Exception e)
                 {
@@ -561,10 +817,32 @@ namespace BantworksMCP
             }
         }
 
+        private static CommandResult ExecuteCommandJson(string json, MCPCommand command = null)
+        {
+            try
+            {
+                if (command == null)
+                    command = JsonUtility.FromJson<MCPCommand>(json);
+                string message = ProcessCommandJson(json, command);
+                CommandsProcessed++;
+                LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Command processed";
+                return CreateCommandResult(command != null ? command.id : null, true, message, null);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[BANTWORKS MCP] Command failed: " + e.Message);
+                return CreateCommandResult(command != null ? command.id : ExtractCommandId(json), false, null, e.Message);
+            }
+        }
+
         private static string ProcessCommandJson(string json, MCPCommand baseCommand)
         {
             if (baseCommand == null || string.IsNullOrWhiteSpace(baseCommand.type))
                 throw new InvalidOperationException("Command is missing a type");
+            if (baseCommand.protocolVersion != 0 && baseCommand.protocolVersion != BridgeProtocolVersion)
+                throw new InvalidOperationException(
+                    "Unsupported bridge protocol version " + baseCommand.protocolVersion +
+                    "; expected " + BridgeProtocolVersion + ".");
 
             switch (baseCommand.type)
             {
@@ -727,21 +1005,31 @@ namespace BantworksMCP
 
         private static void WriteCommandResult(string commandId, bool success, string message, string error)
         {
-            if (string.IsNullOrWhiteSpace(commandId))
+            WriteCommandResult(CreateCommandResult(commandId, success, message, error));
+        }
+
+        private static CommandResult CreateCommandResult(string commandId, bool success, string message, string error)
+        {
+            return new CommandResult
+            {
+                commandId = commandId,
+                success = success,
+                message = message,
+                error = error,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+        }
+
+        private static void WriteCommandResult(CommandResult result)
+        {
+            if (result == null || string.IsNullOrWhiteSpace(result.commandId))
                 return;
 
             try
             {
-                var result = new CommandResult
-                {
-                    commandId = commandId,
-                    success = success,
-                    message = message,
-                    error = error,
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                };
-
-                WriteAtomicText(Path.Combine(CommandResultsFolder, $"{commandId}.json"), JsonUtility.ToJson(result, true));
+                WriteAtomicText(
+                    Path.Combine(CommandResultsFolder, $"{result.commandId}.json"),
+                    JsonUtility.ToJson(result, true));
             }
             catch (Exception e)
             {
@@ -4059,6 +4347,12 @@ namespace BantworksMCP
                 var instance = new ProjectInstanceState
                 {
                     editorInstanceId = process.Id + "-" + processStart.Ticks.ToString("x16", CultureInfo.InvariantCulture),
+                    bridgeVersion = BridgeVersion,
+                    protocolVersion = BridgeProtocolVersion,
+                    minimumProtocolVersion = MinimumBridgeProtocolVersion,
+                    capabilities = CurrentBridgeCapabilities(),
+                    preferredTransport = pipeServerAvailable ? "named_pipe" : "file",
+                    pipeName = pipeServerAvailable ? PipeName : null,
                     projectPath = ProjectRoot,
                     projectName = Path.GetFileName(ProjectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
                     unityVersion = Application.unityVersion,
@@ -4068,6 +4362,22 @@ namespace BantworksMCP
                 };
                 WriteAtomicText(Path.Combine(StateFolder, "project-instance.json"), JsonUtility.ToJson(instance, true));
             }
+        }
+
+        private static string[] CurrentBridgeCapabilities()
+        {
+            var capabilities = new List<string>
+            {
+                "file_commands",
+                "correlated_command_results",
+                "manual_full_state_export",
+                "main_thread_unity_api",
+                "unity_test_runner",
+                "banter_visual_scripting"
+            };
+            if (pipeServerAvailable)
+                capabilities.Insert(0, "named_pipe_commands");
+            return capabilities.ToArray();
         }
 
         private static void ExportConsoleLogs()
@@ -4463,6 +4773,7 @@ namespace BantworksMCP
             public string type;
             public string path;
             public string stateType;
+            public int protocolVersion;
             public long timestamp;
         }
 
@@ -5157,6 +5468,12 @@ namespace BantworksMCP
         private class ProjectInstanceState
         {
             public string editorInstanceId;
+            public string bridgeVersion;
+            public int protocolVersion;
+            public int minimumProtocolVersion;
+            public string[] capabilities;
+            public string preferredTransport;
+            public string pipeName;
             public string projectPath;
             public string projectName;
             public string unityVersion;
@@ -5173,6 +5490,15 @@ namespace BantworksMCP
             public string message;
             public string error;
             public long timestamp;
+        }
+
+        private class PendingPipeCommand
+        {
+            public string commandId;
+            public string requestJson;
+            public string responseJson;
+            public ManualResetEventSlim completed;
+            public bool timedOut;
         }
 
         [Serializable]

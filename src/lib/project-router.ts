@@ -20,6 +20,12 @@ interface LauncherConfigFile {
 
 interface ProjectInstanceState {
   editorInstanceId?: string;
+  bridgeVersion?: string;
+  protocolVersion?: number;
+  minimumProtocolVersion?: number;
+  capabilities?: string[];
+  preferredTransport?: string;
+  pipeName?: string;
   projectPath?: string;
   projectName?: string;
   unityVersion?: string;

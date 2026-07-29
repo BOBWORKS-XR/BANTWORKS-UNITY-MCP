@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.2.0 - 2026-07-29
+
+### Added
+
+- Added a versioned bridge handshake with bridge release, protocol range, Editor process identity, preferred transport, and advertised capabilities.
+- Added a project-local Windows named-pipe command and acknowledgement channel. Pipe threads handle bytes only; every Unity API operation remains queued to `EditorApplication.update` on Unity's main thread.
+- Added automatic atomic-file fallback for legacy, stale, unavailable, non-Windows, or protocol-incompatible bridges.
+- Extended `get_bridge_status` and project routing with protocol and transport diagnostics.
+
+### Safety
+
+- Commands are bounded to 4 MiB and acknowledgements to 64 KiB.
+- A command that may have reached Unity is never resent through the file fallback, preventing duplicate scene mutations after an acknowledgement timeout.
+- Editor reload and shutdown explicitly wake and dispose the pipe listener before joining its worker.
+- Full hierarchy snapshots and large correlated outputs remain project-local files rather than being pushed through the command pipe.
+
+### Verified
+
+- 82 Node tests pass, including real Windows named-pipe round trips, legacy fallback, main-thread source guards, and duplicate-command prevention.
+- Unity 2022.3.39f1 and Unity 6000.3.10f1 compiled the bridge in disposable projects, advertised protocol 1, executed correlated `get_scenes` commands over named pipes, and exited cleanly through a second pipe command.
+
 ## 2.1.0 - 2026-07-22
 
 ### Added

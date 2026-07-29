@@ -1,6 +1,16 @@
 # Unity Bridge Protocol
 
-BANTWORKS MCP uses a local, project-scoped file bridge. It does not open an HTTP or WebSocket listener.
+BANTWORKS MCP uses a local, project-scoped hybrid bridge. On Windows, protocol-compatible versions prefer a named pipe for small commands and acknowledgements. Atomic project-local files remain the compatibility fallback and the transport for state snapshots and larger correlated results. The bridge does not open a TCP, HTTP, or WebSocket listener.
+
+## Handshake and Transport
+
+`state/project-instance.json` is the live bridge handshake. It contains the bridge release, protocol range, Editor process identity, heartbeat, capabilities, preferred transport, and current pipe name. Protocol 1 clients accept only a fresh descriptor that explicitly advertises `named_pipe_commands` and a validated project-local pipe name.
+
+The pipe reader runs outside Unity's main thread but only receives bounded UTF-8 JSON and queues it. `EditorApplication.update` drains that queue before checking compatibility command files. Scene traversal, `AssetDatabase`, serialization, test execution, and every other Unity API call therefore remain on the main thread.
+
+If a pipe endpoint is absent, stale, incompatible, unsupported, or cannot be connected before sending, the server atomically publishes the same command under `commands/`. Once a command may have reached the pipe, it is not submitted again through files; this prevents duplicate mutations when an acknowledgement is lost.
+
+Pipe command payloads are limited to 4 MiB and acknowledgements to 64 KiB. Large hierarchy snapshots, screenshots, test runs, asset searches, and other correlated artifacts continue to use bounded project-local files.
 
 ## Locations
 
@@ -10,7 +20,7 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 |----------|-----------|---------|
 | `.bantworks-mcp/commands/*.json` | MCP to Unity | Scene, prefab, refresh, and state-export requests |
 | `.bantworks-mcp/state/*.json` | Unity to MCP | Hierarchy, editor state, console, import status, compilation status, and prefab catalogue |
-| `.bantworks-mcp/state/project-instance.json` | Unity to MCP | Live editor process identity and heartbeat |
+| `.bantworks-mcp/state/project-instance.json` | Unity to MCP | Live editor identity, heartbeat, protocol, capabilities, and preferred endpoint |
 | `.bantworks-mcp/state/command-results/*.json` | Unity to MCP | Per-command acknowledgement or failure |
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
