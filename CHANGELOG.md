@@ -15,6 +15,7 @@
 - `get_console_logs({"level":"error"})` now includes Unity `Error`, `Exception`, and `Assert` entries while preserving the original Unity level.
 - `check_import_status` no longer reports success over active, stale, or failed script compilation.
 - Exact hierarchy queries no longer expand every descendant whose path contains the selected root name.
+- Background full-state export is now disabled by default in Edit mode as well as Play mode. A persistent `BANTWORKS MCP/Background State Export In Edit Mode` menu toggle allows explicit opt-in without affecting command polling or manual refreshes.
 - Pinned patched `@hono/node-server` and `fast-uri` transitive dependencies after the release audit exposed upstream advisories. Source and standalone installs now require Node 20 or newer; the Windows launcher continues to ship its private Node 24 runtime.
 
 ### Verified

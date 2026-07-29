@@ -59,6 +59,8 @@ namespace BantworksMCP
         private static readonly double LauncherSettingsCheckInterval = 1.0; // seconds
         private const string BackgroundStateExportMenuItem = "BANTWORKS MCP/Background State Export In Play Mode";
         private const string BackgroundStateExportKey = "BantworksMCP_BackgroundStateExportInPlayMode";
+        private const string BackgroundEditModeStateExportMenuItem = "BANTWORKS MCP/Background State Export In Edit Mode";
+        private const string BackgroundEditModeStateExportKey = "BantworksMCP_BackgroundStateExportInEditMode";
         private static readonly ProfilerMarker AutomaticStateExportProfilerMarker =
             new ProfilerMarker("BANTWORKS MCP.AutomaticStateExport");
         private static readonly ProfilerMarker FullStateExportProfilerMarker =
@@ -94,8 +96,16 @@ namespace BantworksMCP
             set => EditorPrefs.SetBool(BackgroundStateExportKey, value);
         }
 
+        private static bool BackgroundStateExportInEditMode
+        {
+            get => EditorPrefs.GetBool(BackgroundEditModeStateExportKey, false);
+            set => EditorPrefs.SetBool(BackgroundEditModeStateExportKey, value);
+        }
+
         private static bool AutomaticStateExportAllowed =>
-            !EditorApplication.isPlayingOrWillChangePlaymode || BackgroundStateExportInPlayMode;
+            EditorApplication.isPlayingOrWillChangePlaymode
+                ? BackgroundStateExportInPlayMode
+                : BackgroundStateExportInEditMode;
 
         // Console log capture
         private static readonly List<ConsoleLogEntry> capturedLogs = new List<ConsoleLogEntry>();
@@ -134,7 +144,7 @@ namespace BantworksMCP
             // Subscribe to console log events
             Application.logMessageReceived += OnLogMessageReceived;
 
-            // Defer the initial full export until Unity has settled after the domain reload.
+            // Background full exports are opt-in. Explicit MCP/manual refreshes still work.
             ScheduleAutomaticStateExport();
 
             // Scan prefabs on startup (delayed to not block editor)
@@ -457,6 +467,32 @@ namespace BantworksMCP
         private static bool ValidateBackgroundStateExportInPlayMode()
         {
             UnityEditor.Menu.SetChecked(BackgroundStateExportMenuItem, BackgroundStateExportInPlayMode);
+            return true;
+        }
+
+        [MenuItem(BackgroundEditModeStateExportMenuItem)]
+        private static void ToggleBackgroundStateExportInEditMode()
+        {
+            bool enabled = !BackgroundStateExportInEditMode;
+            BackgroundStateExportInEditMode = enabled;
+            UnityEditor.Menu.SetChecked(BackgroundEditModeStateExportMenuItem, enabled);
+            if (!EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                if (enabled)
+                    ScheduleAutomaticStateExport(0);
+                else
+                    automaticStateExportPending = false;
+            }
+
+            LastActivity = DateTime.Now.ToString("HH:mm:ss") +
+                (enabled ? " - Edit-mode background export enabled" : " - Edit-mode background export disabled");
+            Debug.Log($"[BANTWORKS MCP] Edit-mode background state export {(enabled ? "enabled" : "disabled")}");
+        }
+
+        [MenuItem(BackgroundEditModeStateExportMenuItem, true)]
+        private static bool ValidateBackgroundStateExportInEditMode()
+        {
+            UnityEditor.Menu.SetChecked(BackgroundEditModeStateExportMenuItem, BackgroundStateExportInEditMode);
             return true;
         }
 
