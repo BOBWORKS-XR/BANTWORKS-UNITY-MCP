@@ -44,8 +44,9 @@ namespace BantworksMCP
         private static readonly string TestDiscoveryResultsFolder = Path.Combine(StateFolder, "test-discovery");
         private static readonly string SceneResultsFolder = Path.Combine(StateFolder, "scene-results");
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
+        private static readonly string HierarchyQueryResultsFolder = Path.Combine(StateFolder, "hierarchy-query-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
-        private const string BridgeVersion = "2.2.0";
+        private const string BridgeVersion = "2.3.0";
         private const int BridgeProtocolVersion = 1;
         private const int MinimumBridgeProtocolVersion = 1;
         private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
@@ -209,6 +210,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(SceneResultsFolder);
             if (!Directory.Exists(EditorMenuResultsFolder))
                 Directory.CreateDirectory(EditorMenuResultsFolder);
+            if (!Directory.Exists(HierarchyQueryResultsFolder))
+                Directory.CreateDirectory(HierarchyQueryResultsFolder);
 
             string ignorePath = Path.Combine(MCPFolder, ".gitignore");
             if (!File.Exists(ignorePath))
@@ -854,6 +857,11 @@ namespace BantworksMCP
                 case "export-state":
                     ExportProjectState();
                     return "Project state exported";
+
+                case "query_hierarchy":
+                    var hierarchyQueryCmd = JsonUtility.FromJson<HierarchyQueryCommand>(json);
+                    QueryHierarchy(hierarchyQueryCmd);
+                    return "Queried live Unity hierarchy";
 
                 case "control_play_mode":
                     var playModeCmd = JsonUtility.FromJson<PlayModeCommand>(json);
@@ -1520,6 +1528,241 @@ namespace BantworksMCP
             }
         }
 
+        private static void QueryHierarchy(HierarchyQueryCommand cmd)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Hierarchy query requires a safe correlation ID");
+
+            var result = new HierarchyQueryResult
+            {
+                commandId = cmd.id,
+                queryKind = cmd.queryKind,
+                objects = new List<GameObjectInfo>(),
+                components = new List<ComponentQueryInfo>(),
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+
+            try
+            {
+                if (cmd.queryKind != "hierarchy" && cmd.queryKind != "components")
+                    throw new InvalidOperationException("queryKind must be hierarchy or components");
+                if (cmd.match != "contains" && cmd.match != "exact")
+                    throw new InvalidOperationException("match must be contains or exact");
+                if (cmd.maxDepth < -1 || cmd.maxDepth > 100)
+                    throw new InvalidOperationException("maxDepth must be -1 or a whole number between 0 and 100");
+                if (cmd.maxResults < 1 || cmd.maxResults > 5000)
+                    throw new InvalidOperationException("maxResults must be between 1 and 5000");
+                if (string.IsNullOrWhiteSpace(cmd.rootPath) &&
+                    string.IsNullOrWhiteSpace(cmd.componentType) &&
+                    !(cmd.match == "exact" && !string.IsNullOrWhiteSpace(cmd.filter)))
+                {
+                    throw new InvalidOperationException("Live hierarchy queries require rootPath or an exact filter/component type");
+                }
+
+                var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                if (!activeScene.IsValid() || !activeScene.isLoaded)
+                    throw new InvalidOperationException("The active Unity scene is not loaded");
+
+                result.sceneName = activeScene.name;
+                result.scenePath = activeScene.path;
+                var candidates = new List<HierarchyQueryCandidate>();
+                if (!string.IsNullOrWhiteSpace(cmd.rootPath))
+                {
+                    GameObject root = FindGameObjectByPath(cmd.rootPath);
+                    AddHierarchyQueryCandidate(
+                        root,
+                        candidates,
+                        GetHierarchyDepth(root),
+                        0,
+                        cmd.includeDescendants,
+                        cmd.maxDepth);
+                }
+                else
+                {
+                    foreach (GameObject root in activeScene.GetRootGameObjects())
+                        AddHierarchyQueryCandidate(root, candidates, 0, 0, true, cmd.maxDepth);
+                }
+
+                foreach (HierarchyQueryCandidate candidate in candidates)
+                {
+                    bool containsFilter = !string.IsNullOrWhiteSpace(cmd.filter) && cmd.match == "contains";
+                    bool needsComponentIdentities = cmd.queryKind == "components" ||
+                        !string.IsNullOrWhiteSpace(cmd.componentType) ||
+                        (!string.IsNullOrWhiteSpace(cmd.filter) && cmd.match == "exact");
+                    Component[] allComponents = needsComponentIdentities
+                        ? candidate.gameObject.GetComponents<Component>().Where(component => component != null).ToArray()
+                        : null;
+                    Component[] matchingComponents = string.IsNullOrWhiteSpace(cmd.componentType)
+                        ? allComponents
+                        : allComponents.Where(component =>
+                            string.Equals(component.GetType().Name, cmd.componentType, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(component.GetType().FullName, cmd.componentType, StringComparison.OrdinalIgnoreCase))
+                            .ToArray();
+                    if (!string.IsNullOrWhiteSpace(cmd.componentType) && matchingComponents.Length == 0)
+                        continue;
+
+                    if (cmd.queryKind == "hierarchy")
+                    {
+                        if (!containsFilter &&
+                            !MatchesHierarchyIdentityFilter(candidate.gameObject, allComponents, cmd.filter))
+                            continue;
+
+                        GameObjectInfo info = null;
+                        if (containsFilter || result.objects.Count < cmd.maxResults)
+                        {
+                            info = CreateGameObjectInfo(
+                                candidate.gameObject,
+                                candidate.depth,
+                                string.IsNullOrWhiteSpace(cmd.componentType) ? null : matchingComponents);
+                        }
+                        if (containsFilter && !MatchesHierarchyQueryFilter(info, cmd.filter))
+                            continue;
+
+                        result.totalMatches++;
+                        if (info != null && result.objects.Count < cmd.maxResults)
+                            result.objects.Add(info);
+                        continue;
+                    }
+
+                    Component[] components = string.IsNullOrWhiteSpace(cmd.componentType)
+                        ? allComponents
+                        : matchingComponents;
+                    foreach (Component component in components)
+                    {
+                        if (!containsFilter &&
+                            !MatchesComponentIdentityFilter(candidate.gameObject, component, cmd.filter))
+                            continue;
+
+                        result.totalMatches++;
+                        if (!containsFilter && result.components.Count >= cmd.maxResults)
+                            continue;
+
+                        var info = new ComponentQueryInfo
+                        {
+                            objectName = candidate.gameObject.name,
+                            objectPath = GetGameObjectPath(candidate.gameObject),
+                            depth = candidate.depth,
+                            type = component.GetType().Name,
+                            fullType = component.GetType().FullName,
+                            globalObjectId = GetStableObjectId(component),
+                            properties = SerializeComponent(component).properties
+                        };
+                        if (containsFilter && !MatchesComponentQueryFilter(info, cmd.filter))
+                        {
+                            result.totalMatches--;
+                            continue;
+                        }
+
+                        if (result.components.Count < cmd.maxResults)
+                            result.components.Add(info);
+                    }
+                }
+
+                result.returned = cmd.queryKind == "hierarchy" ? result.objects.Count : result.components.Count;
+                result.truncated = result.totalMatches > result.returned;
+                result.timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                result.success = true;
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception is TargetInvocationException && exception.InnerException != null
+                    ? exception.InnerException
+                    : exception;
+                result.success = false;
+                result.error = actual.Message;
+                result.timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            }
+            finally
+            {
+                WriteAtomicText(
+                    Path.Combine(HierarchyQueryResultsFolder, cmd.id + ".json"),
+                    JsonUtility.ToJson(result, true));
+                DeleteOldFiles(HierarchyQueryResultsFolder, "*.json", 50);
+            }
+        }
+
+        private static void AddHierarchyQueryCandidate(
+            GameObject gameObject,
+            List<HierarchyQueryCandidate> candidates,
+            int absoluteDepth,
+            int relativeDepth,
+            bool includeDescendants,
+            int maxDepth)
+        {
+            if (maxDepth >= 0 && relativeDepth > maxDepth)
+                return;
+
+            candidates.Add(new HierarchyQueryCandidate
+            {
+                gameObject = gameObject,
+                depth = absoluteDepth
+            });
+            if (!includeDescendants)
+                return;
+
+            foreach (Transform child in gameObject.transform)
+            {
+                AddHierarchyQueryCandidate(
+                    child.gameObject,
+                    candidates,
+                    absoluteDepth + 1,
+                    relativeDepth + 1,
+                    true,
+                    maxDepth);
+            }
+        }
+
+        private static int GetHierarchyDepth(GameObject gameObject)
+        {
+            int depth = 0;
+            Transform parent = gameObject.transform.parent;
+            while (parent != null)
+            {
+                depth++;
+                parent = parent.parent;
+            }
+            return depth;
+        }
+
+        private static bool MatchesHierarchyIdentityFilter(
+            GameObject gameObject,
+            Component[] components,
+            string filter)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+                return true;
+
+            return string.Equals(gameObject.name, filter, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(GetGameObjectPath(gameObject), filter, StringComparison.OrdinalIgnoreCase) ||
+                (components != null && components.Any(component =>
+                    string.Equals(component.GetType().Name, filter, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(component.GetType().FullName, filter, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private static bool MatchesComponentIdentityFilter(
+            GameObject gameObject,
+            Component component,
+            string filter)
+        {
+            if (string.IsNullOrWhiteSpace(filter))
+                return true;
+
+            return string.Equals(gameObject.name, filter, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(GetGameObjectPath(gameObject), filter, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(component.GetType().Name, filter, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(component.GetType().FullName, filter, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool MatchesHierarchyQueryFilter(GameObjectInfo info, string filter)
+        {
+            return JsonUtility.ToJson(info).IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool MatchesComponentQueryFilter(ComponentQueryInfo info, string filter)
+        {
+            return JsonUtility.ToJson(info).IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         private static void ExecuteEditorMenuItem(ExecuteEditorMenuItemCommand cmd)
         {
             if (cmd == null || !IsSafeCorrelationId(cmd.id))
@@ -1576,6 +1819,7 @@ namespace BantworksMCP
                 if (result.diagnostics.Count > 0)
                     throw new InvalidOperationException($"The menu item logged {result.diagnostics.Count} synchronous Unity errors.");
 
+                result.executionSucceeded = true;
                 result.success = true;
             }
             catch (Exception exception)
@@ -4167,6 +4411,20 @@ namespace BantworksMCP
 
         private static void AddObjectToHierarchy(GameObject obj, List<GameObjectInfo> list, int depth)
         {
+            list.Add(CreateGameObjectInfo(obj, depth));
+
+            // Recurse into children (limit depth to prevent huge exports)
+            if (depth < 10)
+            {
+                foreach (Transform child in obj.transform)
+                {
+                    AddObjectToHierarchy(child.gameObject, list, depth + 1);
+                }
+            }
+        }
+
+        private static GameObjectInfo CreateGameObjectInfo(GameObject obj, int depth, Component[] includedComponents = null)
+        {
             var info = new GameObjectInfo
             {
                 name = obj.name,
@@ -4192,11 +4450,26 @@ namespace BantworksMCP
                     obj.transform.localScale.y,
                     obj.transform.localScale.z
                 },
+                localPosition = new float[] {
+                    obj.transform.localPosition.x,
+                    obj.transform.localPosition.y,
+                    obj.transform.localPosition.z
+                },
+                localRotation = new float[] {
+                    obj.transform.localEulerAngles.x,
+                    obj.transform.localEulerAngles.y,
+                    obj.transform.localEulerAngles.z
+                },
+                localScale = new float[] {
+                    obj.transform.localScale.x,
+                    obj.transform.localScale.y,
+                    obj.transform.localScale.z
+                },
                 components = new List<ComponentInfo>()
             };
 
             // Serialize all components with their properties
-            var components = obj.GetComponents<Component>();
+            var components = includedComponents ?? obj.GetComponents<Component>();
             foreach (var comp in components)
             {
                 if (comp != null)
@@ -4204,17 +4477,7 @@ namespace BantworksMCP
                     info.components.Add(SerializeComponent(comp));
                 }
             }
-
-            list.Add(info);
-
-            // Recurse into children (limit depth to prevent huge exports)
-            if (depth < 10)
-            {
-                foreach (Transform child in obj.transform)
-                {
-                    AddObjectToHierarchy(child.gameObject, list, depth + 1);
-                }
-            }
+            return info;
         }
 
         private static ComponentInfo SerializeComponent(Component comp)
@@ -4371,6 +4634,7 @@ namespace BantworksMCP
                 "file_commands",
                 "correlated_command_results",
                 "manual_full_state_export",
+                "targeted_hierarchy_queries",
                 "main_thread_unity_api",
                 "unity_test_runner",
                 "banter_visual_scripting"
@@ -5047,12 +5311,63 @@ namespace BantworksMCP
         }
 
         [Serializable]
+        private class HierarchyQueryCommand
+        {
+            public string id;
+            public string type;
+            public string queryKind;
+            public string filter;
+            public string match;
+            public string rootPath;
+            public bool includeDescendants;
+            public int maxDepth;
+            public int maxResults;
+            public string componentType;
+        }
+
+        [Serializable]
+        private class HierarchyQueryResult
+        {
+            public string commandId;
+            public bool success;
+            public string queryKind;
+            public string sceneName;
+            public string scenePath;
+            public List<GameObjectInfo> objects;
+            public List<ComponentQueryInfo> components;
+            public int totalMatches;
+            public int returned;
+            public bool truncated;
+            public string error;
+            public long timestamp;
+        }
+
+        private class HierarchyQueryCandidate
+        {
+            public GameObject gameObject;
+            public int depth;
+        }
+
+        [Serializable]
+        private class ComponentQueryInfo
+        {
+            public string objectName;
+            public string objectPath;
+            public int depth;
+            public string type;
+            public string fullType;
+            public string globalObjectId;
+            public List<PropertyInfo> properties;
+        }
+
+        [Serializable]
         private class EditorMenuExecutionResult
         {
             public string commandId;
             public bool success;
             public string menuPath;
             public bool executionReturnedTrue;
+            public bool executionSucceeded;
             public string error;
             public long startedAt;
             public long finishedAt;
@@ -5380,6 +5695,9 @@ namespace BantworksMCP
             public float[] position;
             public float[] rotation;
             public float[] scale;
+            public float[] localPosition;
+            public float[] localRotation;
+            public float[] localScale;
             public List<ComponentInfo> components;
         }
 

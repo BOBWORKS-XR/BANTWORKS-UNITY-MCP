@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.3.0 - 2026-08-04
+
+### Added
+
+- Added correlated live hierarchy and component queries for `rootPath`, `componentType`, and exact-filter reads. These commands traverse only the requested subtree or scan lightweight identities before serializing matches, and do not rewrite `scene-hierarchy.json`.
+- Added explicit hierarchy `localPosition`, `localRotation`, and `localScale` projections. Unsupported requested fields now fail with the complete supported-field list instead of being silently omitted.
+- Added `executionSucceeded`, `settled`, and `settleVerified` result states for custom Editor menu commands.
+
+### Fixed
+
+- Long synchronous Editor menu commands no longer become failed commands solely because their work temporarily blocked the Editor heartbeat. The settle check waits for heartbeat recovery, preserves proven execution success when settling cannot be verified, and still fails on verified compilation errors.
+- Fresh targeted queries fail explicitly on stale bridge state or timeout instead of substituting an old full-scene snapshot that can produce a false zero-match result.
+- Updated the `fast-uri`, `hono`, and `ip-address` transitive dependency overrides to patched releases after the release audit exposed new upstream advisories.
+
+### Verified
+
+- 89 Node tests pass, including correlated targeted-query, full-snapshot non-rewrite, local-transform projection, heartbeat-recovery, and menu-result regression coverage.
+- The bridge compiled with zero errors in disposable Unity 2022.3.39f1 and Unity 6000.3.10f1 projects.
+- A live Unity 2022.3.39f1 command smoke returned a requested root and child with local transforms while leaving `scene-hierarchy.json` unchanged.
+
 ## 2.2.0 - 2026-07-29
 
 ### Added

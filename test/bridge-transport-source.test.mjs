@@ -11,7 +11,7 @@ const source = fs.readFileSync(
 );
 
 test("Unity bridge advertises a versioned hybrid command protocol", () => {
-  assert.match(source, /BridgeVersion = "2\.2\.0"/);
+  assert.match(source, /BridgeVersion = "2\.3\.0"/);
   assert.match(source, /BridgeProtocolVersion = 1/);
   assert.match(source, /"named_pipe_commands"/);
   assert.match(source, /"file_commands"/);

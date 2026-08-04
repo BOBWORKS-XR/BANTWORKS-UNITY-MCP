@@ -27,4 +27,12 @@ test("Editor menu commands return correlated execution evidence", () => {
   assert.match(bridge, /result\.durationMs = Math\.Max/);
   assert.match(bridge, /LogType\.Exception/);
   assert.match(bridge, /LogType\.Assert/);
+  assert.match(bridge, /result\.executionSucceeded = true/);
+});
+
+test("targeted hierarchy queries are correlated and avoid full-state export", () => {
+  assert.match(bridge, /case "query_hierarchy"/);
+  assert.match(bridge, /Path\.Combine\(HierarchyQueryResultsFolder, cmd\.id \+ "\.json"\)/);
+  assert.match(bridge, /CreateGameObjectInfo/);
+  assert.doesNotMatch(bridge, /case "query_hierarchy":[\s\S]{0,300}ExportProjectState/);
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  combineEditorMenuSettleResult,
   isValidUnityTestRunId,
   normalizeUnityAssetGuid,
   normalizeUnityAssetReferencePath,
@@ -228,4 +229,24 @@ test("Editor menu execution is custom-only and fail-closed by default", () => {
   assert.equal(normalizeCustomEditorMenuPath("File/Exit"), undefined);
   assert.equal(normalizeCustomEditorMenuPath("Assets/Delete"), undefined);
   assert.equal(normalizeCustomEditorMenuPath("Window/Layouts/Delete All"), undefined);
+});
+
+test("Editor menu execution remains successful when settling is unverified", () => {
+  const stale = combineEditorMenuSettleResult(
+    { success: true, executionReturnedTrue: true },
+    { success: false, settled: false, stale: true, message: "Unity editor state is stale." }
+  );
+  const compileFailure = combineEditorMenuSettleResult(
+    { success: true, executionReturnedTrue: true },
+    { success: false, settled: true, stale: false, compilationHasErrors: true, message: "Compilation failed." }
+  );
+
+  assert.equal(stale.success, true);
+  assert.equal(stale.executionSucceeded, true);
+  assert.equal(stale.settleVerified, false);
+  assert.match(stale.warning ?? "", /not verified/);
+  assert.equal(compileFailure.success, false);
+  assert.equal(compileFailure.executionSucceeded, true);
+  assert.equal(compileFailure.settleVerified, true);
+  assert.equal(compileFailure.settleError, "Compilation failed.");
 });

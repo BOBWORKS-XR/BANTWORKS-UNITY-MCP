@@ -236,7 +236,8 @@ export async function checkImportStatus(
 
 export async function waitForUnityCompile(
   timeoutMs: number = 30000,
-  config: BanterMCPConfig
+  config: BanterMCPConfig,
+  options: { waitForFreshHeartbeat?: boolean } = {}
 ): Promise<UnityCompileStatusResult> {
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) {
     return {
@@ -251,6 +252,10 @@ export async function waitForUnityCompile(
   while (Date.now() - startedAt < timeoutMs) {
     const current = readCurrentEditorAndCompilationState(config);
     if (current.stale) {
+      if (options.waitForFreshHeartbeat === true) {
+        await sleep(250);
+        continue;
+      }
       return {
         success: false,
         settled: false,

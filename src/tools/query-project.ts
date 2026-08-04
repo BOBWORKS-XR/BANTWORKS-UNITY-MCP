@@ -56,6 +56,20 @@ interface RefreshResult {
   error?: string;
 }
 
+interface LiveHierarchyQueryResult {
+  commandId?: string;
+  success?: boolean;
+  sceneName?: string;
+  scenePath?: string;
+  objects?: Array<Record<string, unknown>>;
+  components?: Array<Record<string, unknown>>;
+  totalMatches?: number;
+  returned?: number;
+  truncated?: boolean;
+  timestamp?: number;
+  error?: string;
+}
+
 export interface ProjectStateResult {
   success: boolean;
   data?: unknown;
@@ -69,6 +83,31 @@ export interface ProjectStateResult {
 const DEFAULT_MAX_RESULTS = 200;
 const MAX_RESULTS_LIMIT = 5000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 30000;
+const HIERARCHY_FIELDS = new Set([
+  "name",
+  "globalObjectId",
+  "path",
+  "active",
+  "layer",
+  "tag",
+  "depth",
+  "position",
+  "rotation",
+  "scale",
+  "localPosition",
+  "localRotation",
+  "localScale",
+  "components",
+]);
+const COMPONENT_FIELDS = new Set([
+  "objectName",
+  "objectPath",
+  "depth",
+  "type",
+  "fullType",
+  "globalObjectId",
+  "properties",
+]);
 
 /**
  * Query the Unity project state.
@@ -86,13 +125,25 @@ export async function queryProjectState(
     };
   }
 
-  const validationError = validateQueryOptions(options);
+  const validationError = validateQueryOptions(query, options);
   if (validationError) {
     return { success: false, error: validationError };
   }
 
   try {
     const stateBackedQuery = query === "hierarchy" || query === "components" || query === "all";
+    if ((query === "hierarchy" || query === "components") &&
+        options.refresh !== false &&
+        isTargetedHierarchyQuery(filter, options)) {
+      if (!isBridgeLive(config)) {
+        return {
+          success: false,
+          error: "Unity bridge heartbeat is stale or unavailable; a fresh targeted hierarchy query cannot be verified.",
+        };
+      }
+      return requestTargetedHierarchyQuery(query, filter, config, options);
+    }
+
     const refresh = stateBackedQuery
       ? await refreshHierarchyIfRequested(config, options)
       : { requested: false, refreshed: false };
@@ -127,7 +178,7 @@ export async function queryProjectState(
   }
 }
 
-function validateQueryOptions(options: ProjectStateQueryOptions): string | undefined {
+function validateQueryOptions(query: string, options: ProjectStateQueryOptions): string | undefined {
   if (options.match !== undefined && options.match !== "contains" && options.match !== "exact") {
     return "match must be either contains or exact.";
   }
@@ -147,7 +198,141 @@ function validateQueryOptions(options: ProjectStateQueryOptions): string | undef
       (!Array.isArray(options.fields) || options.fields.length > 50 || options.fields.some((field) => typeof field !== "string" || !field))) {
     return "fields must contain at most 50 non-empty field names.";
   }
+  if (options.fields?.length) {
+    const allowed = query === "hierarchy"
+      ? HIERARCHY_FIELDS
+      : query === "components"
+        ? COMPONENT_FIELDS
+        : undefined;
+    if (!allowed) {
+      return `fields are not supported for ${query} queries.`;
+    }
+    const unsupported = Array.from(new Set(options.fields.filter((field) => !allowed.has(field))));
+    if (unsupported.length > 0) {
+      return `Unsupported ${query} fields: ${unsupported.join(", ")}. Supported fields: ${Array.from(allowed).join(", ")}.`;
+    }
+  }
   return undefined;
+}
+
+function isTargetedHierarchyQuery(
+  filter: string | undefined,
+  options: ProjectStateQueryOptions
+): boolean {
+  return Boolean(
+    normalizeObjectPath(options.rootPath) ||
+    options.componentType ||
+    (options.match === "exact" && filter)
+  );
+}
+
+async function requestTargetedHierarchyQuery(
+  query: "hierarchy" | "components",
+  filter: string | undefined,
+  config: BanterMCPConfig,
+  options: ProjectStateQueryOptions
+): Promise<ProjectStateResult> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REFRESH_TIMEOUT_MS;
+  const dispatch = await dispatchUnityBridgeCommand({
+    type: "query_hierarchy",
+    queryKind: query,
+    filter: filter || "",
+    match: options.match ?? "contains",
+    rootPath: normalizeObjectPath(options.rootPath) || "",
+    includeDescendants: options.includeDescendants === true,
+    maxDepth: options.maxDepth ?? -1,
+    maxResults: options.maxResults ?? DEFAULT_MAX_RESULTS,
+    componentType: options.componentType || "",
+  }, config, Math.min(timeoutMs, 3000));
+
+  if (dispatch.acknowledgement?.success === false) {
+    return {
+      success: false,
+      error: dispatch.acknowledgement.error || "Unity rejected the targeted hierarchy query.",
+    };
+  }
+
+  const resultPath = path.join(
+    config.mcpStatePath,
+    "hierarchy-query-results",
+    `${dispatch.commandId}.json`
+  );
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (fs.existsSync(resultPath)) {
+      try {
+        const result = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as LiveHierarchyQueryResult;
+        if (result.commandId !== dispatch.commandId) {
+          throw new Error("Targeted hierarchy result correlation ID did not match the request.");
+        }
+        fs.unlinkSync(resultPath);
+        if (result.success !== true) {
+          return {
+            success: false,
+            error: result.error || "Unity could not complete the targeted hierarchy query.",
+          };
+        }
+
+        const timestamp = result.timestamp;
+        const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
+        const rawItems = query === "hierarchy" ? result.objects || [] : result.components || [];
+        const items = fields ? rawItems.map((item) => pickFields(item, fields)) : rawItems;
+        const querySummary: QuerySummary = {
+          totalMatches: result.totalMatches ?? items.length,
+          returned: result.returned ?? items.length,
+          truncated: result.truncated === true,
+          match: options.match ?? "contains",
+          rootPath: normalizeObjectPath(options.rootPath),
+          includeDescendants: options.includeDescendants === true,
+          maxDepth: options.maxDepth,
+          maxResults: options.maxResults ?? DEFAULT_MAX_RESULTS,
+          fields,
+          componentType: options.componentType,
+        };
+        const snapshot = buildSnapshotInfo(
+          config,
+          { timestamp },
+          { requested: true, refreshed: true }
+        );
+
+        return query === "hierarchy"
+          ? {
+              success: true,
+              source: "unity-live-targeted-query",
+              data: {
+                sceneName: result.sceneName,
+                scenePath: result.scenePath,
+                objects: items,
+                timestamp,
+              },
+              query: querySummary,
+              snapshot,
+            }
+          : {
+              success: true,
+              source: "unity-live-targeted-query",
+              data: items,
+              query: querySummary,
+              snapshot,
+            };
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          await sleep(50);
+          continue;
+        }
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : "Could not read the targeted hierarchy result.",
+        };
+      }
+    }
+    await sleep(50);
+  }
+
+  return {
+    success: false,
+    error: `Timed out after ${timeoutMs}ms waiting for Unity's targeted hierarchy result; no stale snapshot was substituted.`,
+  };
 }
 
 async function refreshHierarchyIfRequested(

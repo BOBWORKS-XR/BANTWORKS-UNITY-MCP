@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -43,6 +43,9 @@ async function createHierarchyFixture() {
         path: "Root",
         active: true,
         depth: 0,
+        localPosition: [1, 2, 3],
+        localRotation: [0, 90, 0],
+        localScale: [1, 1, 1],
         components: [{ type: "Transform", fullType: "UnityEngine.Transform", properties: [] }],
       },
       {
@@ -130,6 +133,96 @@ test("exact filters do not expand matching descendant paths", async () => {
 
     assert.equal(exact.query?.totalMatches, 1);
     assert.equal(contains.query?.totalMatches, 3);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});
+
+test("hierarchy field projections include local transforms and reject unknown fields", async () => {
+  const fixture = await createHierarchyFixture();
+  try {
+    const projected = await queryProjectState("hierarchy", undefined, fixture.config, {
+      rootPath: "Root",
+      refresh: false,
+      fields: ["path", "localPosition", "localRotation", "localScale"],
+    });
+    const invalid = await queryProjectState("hierarchy", undefined, fixture.config, {
+      refresh: false,
+      fields: ["path", "worldMatrix"],
+    });
+
+    assert.deepEqual(projected.data.objects, [{
+      path: "Root",
+      localPosition: [1, 2, 3],
+      localRotation: [0, 90, 0],
+      localScale: [1, 1, 1],
+    }]);
+    assert.equal(invalid.success, false);
+    assert.match(invalid.error ?? "", /Unsupported hierarchy fields: worldMatrix/);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});
+
+test("fresh targeted hierarchy queries use a correlated live result without rewriting the full snapshot", async () => {
+  const fixture = await createHierarchyFixture();
+  try {
+    const resultsPath = path.join(fixture.config.mcpStatePath, "hierarchy-query-results");
+    const commandResultsPath = path.join(fixture.config.mcpStatePath, "command-results");
+    await mkdir(resultsPath, { recursive: true });
+    await mkdir(commandResultsPath, { recursive: true });
+    const snapshotPath = path.join(fixture.config.mcpStatePath, "scene-hierarchy.json");
+    const snapshotBefore = await readFile(snapshotPath, "utf8");
+
+    const bridge = (async () => {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const commands = (await readdir(fixture.config.mcpCommandsPath)).filter((name) => name.endsWith(".json"));
+        if (commands.length === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          continue;
+        }
+
+        const commandPath = path.join(fixture.config.mcpCommandsPath, commands[0]);
+        const command = JSON.parse(await readFile(commandPath, "utf8"));
+        assert.equal(command.type, "query_hierarchy");
+        assert.equal(command.rootPath, "Root");
+        assert.equal(command.maxResults, 5);
+        await writeFile(path.join(resultsPath, `${command.id}.json`), JSON.stringify({
+          commandId: command.id,
+          success: true,
+          sceneName: "Fixture",
+          scenePath: "Assets/Fixture.unity",
+          objects: [{ name: "Root", path: "Root", depth: 0, localPosition: [4, 5, 6] }],
+          components: [],
+          totalMatches: 1,
+          returned: 1,
+          truncated: false,
+          timestamp: Date.now(),
+        }));
+        await writeFile(path.join(commandResultsPath, `${command.id}.json`), JSON.stringify({
+          commandId: command.id,
+          success: true,
+        }));
+        await unlink(commandPath);
+        return;
+      }
+      throw new Error("Timed out waiting for targeted hierarchy command");
+    })();
+
+    const result = await queryProjectState("hierarchy", undefined, fixture.config, {
+      rootPath: "Root",
+      maxResults: 5,
+      fields: ["path", "localPosition"],
+      timeoutMs: 2000,
+    });
+    await bridge;
+
+    assert.equal(result.success, true);
+    assert.equal(result.source, "unity-live-targeted-query");
+    assert.equal(result.snapshot?.refreshed, true);
+    assert.deepEqual(result.data.objects, [{ path: "Root", localPosition: [4, 5, 6] }]);
+    assert.equal(await readFile(snapshotPath, "utf8"), snapshotBefore);
   } finally {
     await rm(fixture.projectPath, { recursive: true, force: true });
   }

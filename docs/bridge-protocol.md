@@ -31,6 +31,7 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | `.bantworks-mcp/state/test-runs/*.json` | Unity to MCP | Persisted Test Runner state and bounded case results |
 | `.bantworks-mcp/state/scene-results/*.json` | Unity to MCP | Correlated open-scene and build-settings results |
 | `.bantworks-mcp/state/editor-menu-results/*.json` | Unity to MCP | Correlated custom Editor menu execution, timing, state, and synchronous diagnostics |
+| `.bantworks-mcp/state/hierarchy-query-results/*.json` | Unity to MCP | Correlated bounded live hierarchy or component query results |
 
 The bridge directory is project-local and ignored by Git through its own `.gitignore` file.
 
@@ -42,12 +43,15 @@ Each mutating command receives a UUID. Unity writes an acknowledgement under tha
 
 State-export requests also receive unique filenames, so simultaneous `query_project_state` calls do not overwrite each other before Unity reads them.
 
-Hierarchy and component queries request a fresh full snapshot when the selected
-Editor heartbeat is live. The response reports whether that refresh completed,
-snapshot/editor ages, dirty-scene state, and bounded query metadata. Exact root,
-descendant, depth, component, field, and result-limit controls keep a narrow
-inspection from returning an entire large subtree. `refresh: false` explicitly
-accepts the latest saved snapshot.
+Hierarchy and component queries with a `rootPath`, `componentType`, or exact
+filter use a correlated live query when the selected Editor heartbeat is live.
+Unity traverses only the requested subtree or scans lightweight object/component
+identities before serializing matches. Results are bounded and do not rewrite
+`scene-hierarchy.json`. Broad reads retain the explicit full-snapshot export
+path. The response reports refresh state, snapshot/editor ages, dirty-scene
+state, and bounded query metadata. Unsupported field names fail explicitly;
+world and local transform projections are available. `refresh: false`
+explicitly accepts the latest saved snapshot.
 
 `compilation-status.json` is independent of asset import status. The bridge
 records compilation start/completion plus bounded compiler errors and warnings,
@@ -202,7 +206,10 @@ Exception, and Assert diagnostics. It blocks Unity's built-in File, Edit,
 Assets, GameObject, Component, Window, Help, and CONTEXT roots. Compilation,
 asset updates, Play Mode, and dirty scenes fail closed unless the applicable
 explicit override is supplied. By default the server also waits for a stable
-post-command compile/import state.
+post-command compile/import state. `executionSucceeded` reports the menu call
+independently of `settled` and `settleVerified`. A stale heartbeat after a long
+synchronous command produces an explicit warning without erasing proven
+execution success; a settled compilation with errors still fails the operation.
 
 ## Unity Test Runner
 

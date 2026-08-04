@@ -75,6 +75,36 @@ test("wait_for_unity_compile returns persistent compiler diagnostics", async () 
   }
 });
 
+test("wait_for_unity_compile can wait for a heartbeat blocked by a long Editor command", async () => {
+  const fixture = await createFixture();
+  try {
+    const editorStatePath = path.join(fixture.config.mcpStatePath, "editor-state.json");
+    const compilationPath = path.join(fixture.config.mcpStatePath, "compilation-status.json");
+    await writeFile(editorStatePath, JSON.stringify({
+      timestamp: Date.now() - 10000,
+      isCompiling: false,
+      isUpdating: false,
+    }));
+    await writeFile(compilationPath, JSON.stringify({ completed: true, hasErrors: false, timestamp: Date.now() }));
+
+    const refresh = setTimeout(async () => {
+      await writeFile(editorStatePath, JSON.stringify({
+        timestamp: Date.now(),
+        isCompiling: false,
+        isUpdating: false,
+      }));
+    }, 100);
+
+    const result = await waitForUnityCompile(2000, fixture.config, { waitForFreshHeartbeat: true });
+    clearTimeout(refresh);
+    assert.equal(result.success, true);
+    assert.equal(result.settled, true);
+    assert.equal(result.stale, false);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});
+
 test("check_import_status cannot report success over a failed current compilation", async () => {
   const fixture = await createFixture();
   try {

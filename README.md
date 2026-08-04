@@ -211,6 +211,10 @@ All 42 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `aut
 
 Scene-mutating tools run through the Unity bridge and return an explicit Unity acknowledgement when one arrives. Scene state exports stable Unity `globalObjectId` values for GameObjects and components; mutation tools prefer those IDs while retaining path selectors for older clients. Typed inspector writes support scalars, vectors, colors, enums, Rects, and Bounds with explicit validation. Ambiguous or stale selectors fail closed rather than modifying an arbitrary object.
 
+Targeted hierarchy reads use a correlated live command when given a `rootPath`, `componentType`, or exact filter. Unity serializes only the requested subtree or matching objects/components, returns world and local transforms, and leaves the full `scene-hierarchy.json` snapshot untouched. Broad hierarchy reads retain the explicit full-snapshot path. Unsupported field projections fail explicitly.
+
+Custom Editor menu results separate proven execution from post-command settling. A long command that returned successfully is not relabelled as failed solely because it temporarily blocked the Editor heartbeat; verified compilation errors still fail the operation.
+
 Batch creation and prefab placement are preflighted and run as one Unity Undo transaction. They roll back on failure by default; partial progress requires the explicit `continueOnError` option.
 
 Unity Test Framework support includes bounded test discovery plus Edit Mode and Play Mode runs filtered by exact names, regex groups, categories, or assemblies. Results survive Play Mode domain reloads, remain queryable by run ID, and distinguish a completed runner operation from failed tests, cancellation, or a zero-test filter. Cancellation uses the public Test Framework API when available (1.6+) and returns an explicit capability error on older packages.

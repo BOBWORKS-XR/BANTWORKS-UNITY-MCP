@@ -9,7 +9,12 @@ import { validateVSGraph, VSValidationResult } from "./validate-vs-graph.js";
 import { writeVSGraph, WriteVSGraphResult } from "./write-vs-graph.js";
 import { generateVSGraph, GenerateVSGraphResult } from "./generate-vs-graph.js";
 import { queryProjectState, ProjectStateResult } from "./query-project.js";
-import { checkImportStatus, ImportStatusResult, waitForUnityCompile } from "./check-import-status.js";
+import {
+  checkImportStatus,
+  ImportStatusResult,
+  waitForUnityCompile,
+  type UnityCompileStatusResult,
+} from "./check-import-status.js";
 import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
 import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
@@ -575,7 +580,7 @@ Every path is preflighted as an existing Assets/.../*.unity asset and duplicate 
 
     {
       name: "execute_editor_menu_item",
-      description: `Execute a project-defined custom Unity Editor MenuItem by exact path and return correlated before/after state, duration, and synchronous Unity errors.
+      description: `Execute a project-defined custom Unity Editor MenuItem by exact path and return correlated execution, settle, before/after state, duration, and synchronous Unity errors.
 Built-in Unity roots such as File, Edit, Assets, GameObject, Component, Window, and Help are blocked. Compilation/update activity, dirty scenes, and Play Mode fail closed unless the relevant explicit override is supplied.`,
       inputSchema: {
         type: "object",
@@ -664,7 +669,7 @@ Requires the BanterMCPBridge Unity extension to be installed and Unity Editor ru
             type: "array",
             maxItems: 50,
             items: { type: "string" },
-            description: "Optional returned fields, such as name, path, active, depth, or components",
+            description: "Optional returned fields. Hierarchy supports name, globalObjectId, path, active, layer, tag, depth, position, rotation, scale, localPosition, localRotation, localScale, and components; component queries support objectName, objectPath, depth, type, fullType, globalObjectId, and properties.",
           },
           componentType: {
             type: "string",
@@ -673,7 +678,7 @@ Requires the BanterMCPBridge Unity extension to be installed and Unity Editor ru
           refresh: {
             type: "boolean",
             default: true,
-            description: "Request a fresh hierarchy snapshot from a live bridge (default: true)",
+            description: "Request live Unity data (default: true). Root, component-type, and exact-filter reads use a correlated targeted query; broader reads refresh the full snapshot.",
           },
           timeoutMs: {
             type: "number",
@@ -2769,21 +2774,19 @@ async function executeEditorMenuItem(
           await new Promise((resolve) => setTimeout(resolve, 250));
           const remaining = timeoutMs - (Date.now() - startedAt);
           if (remaining < 1000) {
-            return {
-              ...menuResult,
-              success: false,
-              settled: false,
-              settleError: "The menu item executed, but no time remained to verify Unity settled.",
-            };
+            return combineEditorMenuSettleResult(
+              menuResult,
+              undefined,
+              "The menu item executed, but no time remained to verify Unity settled."
+            );
           }
 
-          const compileStatus = await waitForUnityCompile(remaining, config);
-          return {
-            ...menuResult,
-            success: menuResult.success === true && compileStatus.success,
-            settled: compileStatus.settled,
-            settleStatus: compileStatus,
-          };
+          const compileStatus = await waitForUnityCompile(
+            remaining,
+            config,
+            { waitForFreshHeartbeat: true }
+          );
+          return combineEditorMenuSettleResult(menuResult, compileStatus);
         }
       } catch {
         // Unity may still be atomically replacing the correlated result.
@@ -2804,6 +2807,35 @@ async function executeEditorMenuItem(
     commandId: command.commandId,
     status: "result_timeout",
     error: `Timed out after ${timeoutMs}ms waiting for the Unity Editor menu result.`,
+  };
+}
+
+export function combineEditorMenuSettleResult(
+  menuResult: Record<string, unknown>,
+  settleStatus?: UnityCompileStatusResult,
+  fallbackWarning?: string
+): Record<string, unknown> {
+  const executionSucceeded = menuResult.success === true;
+  const settled = settleStatus?.settled === true;
+  const settleFailed = settled && settleStatus?.success !== true;
+  const settleVerified = settled && settleStatus?.stale !== true;
+  const warning = !settleVerified
+    ? fallbackWarning || (typeof settleStatus?.message === "string"
+        ? `The menu item executed, but post-command settling was not verified: ${settleStatus.message}`
+        : "The menu item executed, but post-command settling was not verified.")
+    : undefined;
+
+  return {
+    ...menuResult,
+    success: executionSucceeded && !settleFailed,
+    executionSucceeded,
+    settled,
+    settleVerified,
+    settleStatus,
+    settleError: settleFailed && typeof settleStatus?.message === "string"
+      ? settleStatus.message
+      : undefined,
+    warning,
   };
 }
 
