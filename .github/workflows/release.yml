@@ -55,7 +55,9 @@ jobs:
           $artifacts = @($standalone) + $installers
           $checksums = foreach ($artifact in $artifacts) {
             $hash = (Get-FileHash $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $($artifact.Name)"
+            # GitHub normalizes spaces in release asset names to periods.
+            $releaseAssetName = $artifact.Name.Replace(" ", ".")
+            "$hash  $releaseAssetName"
           }
           $checksumPath = Join-Path $PWD "release\SHA256SUMS.txt"
           [System.IO.File]::WriteAllLines($checksumPath, $checksums, [System.Text.UTF8Encoding]::new($false))
