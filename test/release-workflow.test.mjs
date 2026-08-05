@@ -17,3 +17,8 @@ test("release checksums use GitHub-normalized asset names", () => {
   );
   assert.match(releaseWorkflow, /"\$hash  \$releaseAssetName"/);
 });
+
+test("release metadata states the enforced standalone Node requirement", () => {
+  assert.match(releaseWorkflow, /standalone ZIP remains available for manual Node\.js 20\+ deployments/);
+  assert.doesNotMatch(releaseWorkflow, /Node\.js 18\+/);
+});
