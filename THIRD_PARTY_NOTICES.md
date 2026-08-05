@@ -2,7 +2,7 @@
 
 ## Code and Dependencies
 
-No code from the Unity MCP projects listed below is copied, vendored, or linked into this repository. The hardening changes in this repository were implemented independently against the existing BANTWORKS MCP file-bridge design.
+No Unity-owned MCP code or relay binaries are copied, vendored, or linked into this repository. The hybrid bridge changes were independently authored against BANTWORKS MCP's existing command contracts and public platform APIs.
 
 The Node dependency graph is tracked in `package-lock.json`; its direct runtime MCP dependency is `@modelcontextprotocol/sdk`. The release bundle is produced with [esbuild](https://github.com/evanw/esbuild), which is MIT-licensed. Review locked package metadata and licenses when redistributing a bundled build.
 
@@ -19,6 +19,10 @@ The following MIT-licensed projects were reviewed on 2026-07-14 for public docum
 - [ozankasikci/unity-editor-mcp](https://github.com/ozankasikci/unity-editor-mcp) - connection-verification and editor automation documentation patterns.
 
 The research informed this repository's `get_bridge_status` tool, connection-verification documentation, CI, security policy, and contribution guidance. These are independently authored changes; no third-party source, assets, or generated data were imported.
+
+On 2026-07-29, Unity's official `com.unity.ai.assistant` MCP documentation and package metadata were reviewed for protocol versioning, local relay architecture, explicit Editor targeting, capability discovery, and main-thread Unity API boundaries. The Unity package is distributed under Unity's Terms of Service rather than an open-source licence. BANTWORKS MCP does not redistribute or derive code from that package.
+
+[yecats/unity-mcp-toolkit](https://github.com/yecats/unity-mcp-toolkit), released under CC0 1.0 Universal, was also evaluated for optional settings, Scene View, Input System, Recorder, and domain-refresh tools. No toolkit code is included in version 2.2.0; those tools will be added only where they justify their maintenance and runtime surface.
 
 ## Deliberate Non-Adoptions
 

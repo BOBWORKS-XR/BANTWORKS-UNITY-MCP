@@ -1100,6 +1100,7 @@ fn project_setup_status(source_bridge: Option<&Path>, project_path: &Path) -> Pr
         "project-instance.json",
         "console-log.json",
         "import-status.json",
+        "compilation-status.json",
         "prefab-catalog.json",
     ];
     let newest_modified = state_files

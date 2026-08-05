@@ -1,6 +1,16 @@
 # Unity Bridge Protocol
 
-BANTWORKS MCP uses a local, project-scoped file bridge. It does not open an HTTP or WebSocket listener.
+BANTWORKS MCP uses a local, project-scoped hybrid bridge. On Windows, protocol-compatible versions prefer a named pipe for small commands and acknowledgements. Atomic project-local files remain the compatibility fallback and the transport for state snapshots and larger correlated results. The bridge does not open a TCP, HTTP, or WebSocket listener.
+
+## Handshake and Transport
+
+`state/project-instance.json` is the live bridge handshake. It contains the bridge release, protocol range, Editor process identity, heartbeat, capabilities, preferred transport, and current pipe name. Protocol 1 clients accept only a fresh descriptor that explicitly advertises `named_pipe_commands` and a validated project-local pipe name.
+
+The pipe reader runs outside Unity's main thread but only receives bounded UTF-8 JSON and queues it. `EditorApplication.update` drains that queue before checking compatibility command files. Scene traversal, `AssetDatabase`, serialization, test execution, and every other Unity API call therefore remain on the main thread.
+
+If a pipe endpoint is absent, stale, incompatible, unsupported, or cannot be connected before sending, the server atomically publishes the same command under `commands/`. Once a command may have reached the pipe, it is not submitted again through files; this prevents duplicate mutations when an acknowledgement is lost.
+
+Pipe command payloads are limited to 4 MiB and acknowledgements to 64 KiB. Large hierarchy snapshots, screenshots, test runs, asset searches, and other correlated artifacts continue to use bounded project-local files.
 
 ## Locations
 
@@ -9,8 +19,8 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | Location | Direction | Purpose |
 |----------|-----------|---------|
 | `.bantworks-mcp/commands/*.json` | MCP to Unity | Scene, prefab, refresh, and state-export requests |
-| `.bantworks-mcp/state/*.json` | Unity to MCP | Hierarchy, editor state, console, import status, and prefab catalogue |
-| `.bantworks-mcp/state/project-instance.json` | Unity to MCP | Live editor process identity and heartbeat |
+| `.bantworks-mcp/state/*.json` | Unity to MCP | Hierarchy, editor state, console, import status, compilation status, and prefab catalogue |
+| `.bantworks-mcp/state/project-instance.json` | Unity to MCP | Live editor identity, heartbeat, protocol, capabilities, and preferred endpoint |
 | `.bantworks-mcp/state/command-results/*.json` | Unity to MCP | Per-command acknowledgement or failure |
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
@@ -20,6 +30,8 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | `.bantworks-mcp/state/test-discovery/*.json` | Unity to MCP | Correlated, bounded Test Runner discovery results |
 | `.bantworks-mcp/state/test-runs/*.json` | Unity to MCP | Persisted Test Runner state and bounded case results |
 | `.bantworks-mcp/state/scene-results/*.json` | Unity to MCP | Correlated open-scene and build-settings results |
+| `.bantworks-mcp/state/editor-menu-results/*.json` | Unity to MCP | Correlated custom Editor menu execution, timing, state, and synchronous diagnostics |
+| `.bantworks-mcp/state/hierarchy-query-results/*.json` | Unity to MCP | Correlated bounded live hierarchy or component query results |
 
 The bridge directory is project-local and ignored by Git through its own `.gitignore` file.
 
@@ -30,6 +42,20 @@ The MCP server and Unity bridge publish JSON by writing a temporary file in the 
 Each mutating command receives a UUID. Unity writes an acknowledgement under that UUID, and bounds queries use the same UUID for their result file. This prevents one request from consuming a concurrent request's result.
 
 State-export requests also receive unique filenames, so simultaneous `query_project_state` calls do not overwrite each other before Unity reads them.
+
+Hierarchy and component queries with a `rootPath`, `componentType`, or exact
+filter use a correlated live query when the selected Editor heartbeat is live.
+Unity traverses only the requested subtree or scans lightweight object/component
+identities before serializing matches. Results are bounded and do not rewrite
+`scene-hierarchy.json`. Broad reads retain the explicit full-snapshot export
+path. The response reports refresh state, snapshot/editor ages, dirty-scene
+state, and bounded query metadata. Unsupported field names fail explicitly;
+world and local transform projections are available. `refresh: false`
+explicitly accepts the latest saved snapshot.
+
+`compilation-status.json` is independent of asset import status. The bridge
+records compilation start/completion plus bounded compiler errors and warnings,
+and preserves late errors even when the warning limit is reached.
 
 ## Project Routing
 
@@ -152,7 +178,11 @@ bridge forces a synchronous AssetDatabase import, loads the main asset, verifies
 that it is a `Unity.VisualScripting.ScriptGraphAsset`, and reflects its graph
 elements without introducing a compile-time Visual Scripting dependency. The
 correlated result includes the Unity asset GUID, concrete asset and graph types,
-dependency hash, element counts and types, and missing-element diagnostics.
+  dependency hash, element counts and types, missing-element diagnostics,
+  failed unit definitions, and every value input that has neither a valid
+  connection nor a persisted default. Unbound inputs fail by default because
+  Unity Visual Scripting throws `MissingValuePortInputException` if they are
+  evaluated; `allowUnboundValueInputs` is an explicit report-only override.
 Projects without Visual Scripting return an explicit validation failure while
 the bridge itself continues to compile.
 
@@ -166,6 +196,20 @@ returned with bounded stack traces; `diagnosticCount` and
 `diagnosticsTruncated` preserve the total and truncation state. Projects without
 a compatible Banter validator fail explicitly without breaking the generic
 Unity bridge.
+
+## Editor Commands
+
+`execute_editor_menu_item` invokes an exact project-defined Unity `MenuItem`
+path and returns correlated before/after Editor state, duration, the Boolean
+result from `EditorApplication.ExecuteMenuItem`, and bounded synchronous Error,
+Exception, and Assert diagnostics. It blocks Unity's built-in File, Edit,
+Assets, GameObject, Component, Window, Help, and CONTEXT roots. Compilation,
+asset updates, Play Mode, and dirty scenes fail closed unless the applicable
+explicit override is supplied. By default the server also waits for a stable
+post-command compile/import state. `executionSucceeded` reports the menu call
+independently of `settled` and `settleVerified`. A stale heartbeat after a long
+synchronous command produces an explicit warning without erasing proven
+execution success; a settled compilation with errors still fails the operation.
 
 ## Unity Test Runner
 

@@ -26,6 +26,7 @@ the default remains `all` for backward compatibility.
 | Unity | Visual Scripting | Banter SDK | Result |
 |-------|------------------|------------|--------|
 | 2022.3.39f1 | 1.9.4 | None | Manual: bridge compiled; canonical Start graph imported and deserialized with no missing elements |
+| 2022.3.39f1 | None | None | Automated local disposable fixture: 2.3.0 bridge compiled; a live correlated root/subtree query returned local transforms without rewriting the full hierarchy snapshot |
 | 6000.3.2f1 | 1.9.9 | 3.2.2, source fingerprint `c893607975bb44f319445b533b421d184f6a5285` | Manual: bridge and SDK compiled; generated `Banter.VisualScripting.OnGrab` graph imported with one node and no missing elements; SDK validator passed |
 | 6000.3.2f1 | 1.9.9 | Same as above | Manual negative fixture: a forbidden custom unit imported, and the SDK validator returned the expected failure and exact forbidden type |
 | 6000.3.2f1 | 1.9.9 | Observed Git snapshot reporting 3.2.1 at `44e873c3dea26a2d4e12bd2f837d614da926c54f` | Automated local disposable fixture: BANTWORKS generated `OnGrab`; bridge import validation passed; `ScriptMachine` assignment survived scene reload; SDK allow-list positive, forbidden-unit negative, and recovery checks passed |
@@ -33,9 +34,11 @@ the default remains `all` for backward compatibility.
 | 6000.3.2f1 | 1.9.9 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Automated expected incompatibility: package compilation failed with `CS0619`, `CS0029`, and `CS0266` for legacy `PhysicMaterial` APIs |
 | 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Automated local matrix: generated `OnGrab` imported; `ScriptMachine` assignment survived scene reload; SDK allow-list positive, forbidden-unit negative, and recovery checks passed |
 | 6000.3.10f1 | 1.9.9 | None | Automated local disposable fixture: bridge compiled; path/GUID assignment, clear, type mismatch, incompatible type, traversal, and non-reference rejection passed; a real `ScriptGraphAsset` attached to and cleared from `ScriptMachine.nest.macro` |
+| 6000.3.10f1 | None | None | Automated local disposable fixture: 2.3.0 bridge compiled with zero errors |
 | 6000.3.10f1 | 1.9.9 | None | Persistent obstacle fixture: generic course compiled; MCP-generated `Start` graph imported and persisted through the bridge; 4/4 Play Mode tests passed |
 | 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
 | 2022.3.39f1 | 1.9.4 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
+| 2022.3.39f1 authoring to 6000.3.2f1 Banter client | 1.9.4 asset bundle loaded by 1.9.9 client | Authoring SDK 3.1.2; client source reports 3.2.1 | Manual real-client negative: authoring SDK validation passed, but the client rejected `UnityEngine.Rigidbody.velocity` and disabled all four gun-recovery graphs. The two installed allowlists had drifted to `velocity` versus `linearVelocity`. |
 
 The observed Banter 3.2.2 package declares Unity 2022.3.39f1 metadata, but its
 source references Unity 6 `PhysicsMaterial` and `PhysicsMaterialCombine` types.
@@ -59,7 +62,11 @@ package version, and editor combination.
 `validate_vs_graph_in_unity` checks actual import/deserialization, and
 `validate_banter_visual_scripting` invokes the installed SDK's public allow-list
 validator. These checks should be run in the target project before treating a
-generated graph as ready.
+generated graph as ready. When an asset bundle is authored with an older Unity
+and SDK combination than the shipped Banter client, also compare the concrete
+member allowlists or load the bundle in the real client and inspect its AOT
+diagnostics. Passing the authoring SDK validator alone does not prove that the
+client still allows renamed Unity members such as `Rigidbody.velocity`.
 
 The repeatable obstacle fixture and its safety boundary are documented in
 [obstacle-course-compatibility.md](obstacle-course-compatibility.md).

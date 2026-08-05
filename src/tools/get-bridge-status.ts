@@ -5,6 +5,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { BanterMCPConfig } from "../lib/config.js";
+import {
+  BRIDGE_PROTOCOL_VERSION,
+  readBridgeInstanceDescriptor,
+} from "../lib/unity-bridge-transport.js";
 
 const STATE_FILES = [
   "scene-hierarchy.json",
@@ -12,6 +16,7 @@ const STATE_FILES = [
   "project-instance.json",
   "console-log.json",
   "import-status.json",
+  "compilation-status.json",
   "prefab-catalog.json",
 ];
 
@@ -42,6 +47,19 @@ export interface BridgeStatusResult {
     commandsDirectoryExists: boolean;
     stateStatus: "fresh" | "stale" | "missing";
     stateFiles: StateFileStatus[];
+    protocol: {
+      serverVersion: number;
+      bridgeVersion?: number;
+      minimumBridgeVersion?: number;
+      compatible: boolean;
+      bridgeRelease?: string;
+      capabilities: string[];
+    };
+    transport: {
+      preferred: "named_pipe" | "file";
+      namedPipeAdvertised: boolean;
+      pipeName?: string;
+    };
   };
   nextSteps?: string[];
 }
@@ -66,6 +84,7 @@ export function getBridgeStatus(config: BanterMCPConfig): BridgeStatusResult {
   const bridgeInstalled = fs.existsSync(bridgePath);
   const stateDirectoryExists = fs.existsSync(config.mcpStatePath);
   const commandsDirectoryExists = fs.existsSync(config.mcpCommandsPath);
+  const descriptor = readBridgeInstanceDescriptor(config);
   const now = Date.now();
 
   const stateFiles = STATE_FILES.map((name): StateFileStatus => {
@@ -92,7 +111,18 @@ export function getBridgeStatus(config: BanterMCPConfig): BridgeStatusResult {
     : newestAge <= 10_000
       ? "fresh"
       : "stale";
-  const ready = assetsExists && bridgeInstalled && stateDirectoryExists && stateStatus === "fresh";
+  const bridgeProtocol = descriptor?.protocolVersion;
+  const minimumBridgeProtocol = descriptor?.minimumProtocolVersion ?? bridgeProtocol;
+  const protocolCompatible = bridgeProtocol === undefined ||
+    (bridgeProtocol === BRIDGE_PROTOCOL_VERSION &&
+      (minimumBridgeProtocol ?? BRIDGE_PROTOCOL_VERSION) <= BRIDGE_PROTOCOL_VERSION);
+  const capabilities = Array.isArray(descriptor?.capabilities)
+    ? descriptor.capabilities.filter((item): item is string => typeof item === "string")
+    : [];
+  const namedPipeAdvertised = capabilities.includes("named_pipe_commands") &&
+    typeof descriptor?.pipeName === "string";
+  const ready = assetsExists && bridgeInstalled && stateDirectoryExists &&
+    stateStatus === "fresh" && protocolCompatible;
 
   const nextSteps: string[] = [];
   if (!projectExists || !assetsExists) {
@@ -103,6 +133,8 @@ export function getBridgeStatus(config: BanterMCPConfig): BridgeStatusResult {
     nextSteps.push("Open the project in Unity and wait for BANTWORKS MCP to export state.");
   } else if (stateStatus === "stale") {
     nextSteps.push("Open Unity and confirm the bridge is running; the most recent bridge state is older than 10 seconds.");
+  } else if (!protocolCompatible) {
+    nextSteps.push("Update the Unity bridge; its command protocol does not match this MCP server.");
   }
 
   return {
@@ -124,6 +156,19 @@ export function getBridgeStatus(config: BanterMCPConfig): BridgeStatusResult {
       commandsDirectoryExists,
       stateStatus,
       stateFiles,
+      protocol: {
+        serverVersion: BRIDGE_PROTOCOL_VERSION,
+        bridgeVersion: bridgeProtocol,
+        minimumBridgeVersion: minimumBridgeProtocol,
+        compatible: protocolCompatible,
+        bridgeRelease: descriptor?.bridgeVersion,
+        capabilities,
+      },
+      transport: {
+        preferred: namedPipeAdvertised ? "named_pipe" : "file",
+        namedPipeAdvertised,
+        pipeName: namedPipeAdvertised ? descriptor?.pipeName : undefined,
+      },
     },
     nextSteps,
   };

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  combineEditorMenuSettleResult,
   isValidUnityTestRunId,
   normalizeUnityAssetGuid,
   normalizeUnityAssetReferencePath,
+  normalizeCustomEditorMenuPath,
   normalizeUnityVisualScriptingAssetPath,
   normalizeUnitySceneAssetPath,
   playModeStateMatches,
@@ -124,6 +126,34 @@ test("project discovery exposes packages and bounded AssetDatabase search", () =
   assert.equal(assets?.properties.includePackages.default, false);
 });
 
+test("project state queries expose bounded exact hierarchy inspection", () => {
+  const schema = tools.get("query_project_state")?.inputSchema;
+  assert.deepEqual(schema?.properties.match.enum, ["contains", "exact"]);
+  assert.equal(schema?.properties.includeDescendants.default, false);
+  assert.equal(schema?.properties.maxDepth.maximum, 100);
+  assert.equal(schema?.properties.maxResults.default, 200);
+  assert.equal(schema?.properties.maxResults.maximum, 5000);
+  assert.equal(schema?.properties.refresh.default, true);
+  assert.equal(schema?.properties.timeoutMs.maximum, 120000);
+});
+
+test("console queries expose normalized errors and bounded source filters", () => {
+  const schema = tools.get("get_console_logs")?.inputSchema;
+  assert.equal(schema?.properties.limit.maximum, 1000);
+  assert.equal(schema?.properties.limit.default, 50);
+  assert.ok(schema?.properties.sinceTimestamp);
+  assert.ok(schema?.properties.contains);
+  assert.ok(schema?.properties.regex);
+  assert.ok(schema?.properties.stackContains);
+});
+
+test("compile wait is explicit and bounded", () => {
+  const schema = tools.get("wait_for_unity_compile")?.inputSchema;
+  assert.equal(schema?.properties.timeoutMs.default, 30000);
+  assert.equal(schema?.properties.timeoutMs.minimum, 1000);
+  assert.equal(schema?.properties.timeoutMs.maximum, 120000);
+});
+
 test("Visual Scripting write tools constrain asset names", () => {
   for (const name of ["generate_vs_graph", "write_vs_graph"]) {
     const graphName = tools.get(name)?.inputSchema.properties.graphName;
@@ -135,6 +165,7 @@ test("Visual Scripting write tools constrain asset names", () => {
   const unityValidation = tools.get("validate_vs_graph_in_unity")?.inputSchema;
   assert.deepEqual(unityValidation?.required, ["assetPath"]);
   assert.equal(unityValidation?.properties.assetPath.maxLength, 1024);
+  assert.equal(unityValidation?.properties.allowUnboundValueInputs.default, false);
   assert.equal(
     normalizeUnityVisualScriptingAssetPath("Assets\\Graphs\\Respawn.asset"),
     "Assets/Graphs/Respawn.asset"
@@ -183,4 +214,39 @@ test("scene lifecycle tools expose explicit dirty-scene and build-list contracts
   assert.equal(normalizeUnitySceneAssetPath("Assets\\Scenes\\Main.unity"), "Assets/Scenes/Main.unity");
   assert.equal(normalizeUnitySceneAssetPath("Assets/../Outside.unity"), undefined);
   assert.equal(normalizeUnitySceneAssetPath("Packages/demo.unity"), undefined);
+});
+
+test("Editor menu execution is custom-only and fail-closed by default", () => {
+  const schema = tools.get("execute_editor_menu_item")?.inputSchema;
+  assert.deepEqual(schema?.required, ["menuPath"]);
+  assert.equal(schema?.properties.allowInPlayMode.default, false);
+  assert.equal(schema?.properties.allowDirtyScene.default, false);
+  assert.equal(schema?.properties.waitForSettled.default, true);
+  assert.equal(schema?.properties.timeoutMs.maximum, 120000);
+
+  assert.equal(normalizeCustomEditorMenuPath("Banter Kart/Rebuild Bundles"), "Banter Kart/Rebuild Bundles");
+  assert.equal(normalizeCustomEditorMenuPath("Tools/BANTWORKS/Test"), "Tools/BANTWORKS/Test");
+  assert.equal(normalizeCustomEditorMenuPath("File/Exit"), undefined);
+  assert.equal(normalizeCustomEditorMenuPath("Assets/Delete"), undefined);
+  assert.equal(normalizeCustomEditorMenuPath("Window/Layouts/Delete All"), undefined);
+});
+
+test("Editor menu execution remains successful when settling is unverified", () => {
+  const stale = combineEditorMenuSettleResult(
+    { success: true, executionReturnedTrue: true },
+    { success: false, settled: false, stale: true, message: "Unity editor state is stale." }
+  );
+  const compileFailure = combineEditorMenuSettleResult(
+    { success: true, executionReturnedTrue: true },
+    { success: false, settled: true, stale: false, compilationHasErrors: true, message: "Compilation failed." }
+  );
+
+  assert.equal(stale.success, true);
+  assert.equal(stale.executionSucceeded, true);
+  assert.equal(stale.settleVerified, false);
+  assert.match(stale.warning ?? "", /not verified/);
+  assert.equal(compileFailure.success, false);
+  assert.equal(compileFailure.executionSucceeded, true);
+  assert.equal(compileFailure.settleVerified, true);
+  assert.equal(compileFailure.settleError, "Compilation failed.");
 });

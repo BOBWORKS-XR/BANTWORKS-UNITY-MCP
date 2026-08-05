@@ -231,6 +231,12 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
         mimeType: "application/json",
       },
       {
+        uri: "project://compilation-status",
+        name: "Compilation Status",
+        description: "Persistent Unity assembly compilation result and compiler diagnostics",
+        mimeType: "application/json",
+      },
+      {
         uri: "project://prefab-catalog",
         name: "Prefab Catalog",
         description: "Categorized prefab catalog exported by the Unity bridge",
@@ -344,6 +350,10 @@ export function handleResourceRead(
 
     case "project://import-status":
       content = readProjectFile(config.mcpStatePath, "import-status.json");
+      break;
+
+    case "project://compilation-status":
+      content = readProjectFile(config.mcpStatePath, "compilation-status.json");
       break;
 
     case "project://prefab-catalog":

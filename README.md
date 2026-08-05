@@ -16,11 +16,12 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 ## Features
 
 - **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
-- **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files using the bundled Unity Visual Scripting JSON manual and source-observed errata
+- **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files, including resolved unit definitions and required value-port integrity, using the bundled Unity Visual Scripting JSON manual and source-observed errata
 - **Banter Validation**: Invoke the selected SDK's own Visual Scripting allow-list validator and return bounded, structured diagnostics
 - **Evidence-Linked Banter Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
-- **Unity Integration**: Query project state, check import status, refresh assets
+- **Unity Integration**: Run bounded fresh state queries, persist compiler diagnostics, inspect filtered Console windows, refresh assets, and execute guarded project-defined Editor menu commands
+- **Low-Latency Local Bridge**: Prefer versioned project-local named-pipe commands on Windows, with Unity work queued to the main thread and automatic atomic-file compatibility fallback
 - **Closed-Loop Workflow**: Validate → Write → Import and deserialize in Unity → Test
 - **Capability Profiles**: Limit the exposed tool surface to inspection, authoring, testing, Banter workflows, or minimal project routing
 - **Cross-Version Unity Harness**: Provision a deterministic obstacle course that validates physics, serialized scenes, generated Visual Scripting graphs, bridge attachment, Play Mode tests, and optional Banter sync/allow-list behavior
@@ -33,7 +34,7 @@ BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not j
 - **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, compares its C# source classes with the embedded catalogues, and matches exact public release and Unity evidence when available. It does not generalize evidence across different source revisions or editor versions.
 - **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 is preceded by source-observed compatibility errata. Canonical output uses `graph.elements`; referenced nodes use string `$id` values; Visual Scripting 1.9.x may omit `$version` on connections.
 - **Generation, validation, and writing:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split layouts, checks node-reference integrity, and avoids rejecting valid unreferenced nodes. `write_vs_graph` validates again before writing, emits the ScriptGraphAsset class identifier and `NativeFormatImporter`, and preserves an existing asset GUID while migrating old MCP metadata.
-- **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph. `validate_banter_visual_scripting` then invokes the installed SDK's public `CheckVsNodes()` validator across graph assets, embedded prefab graphs, and the active scene, returning the SDK's exact allow-list diagnostics.
+- **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph, rejects failed unit definitions, and reports every resolved value input that lacks both a valid connection and a persisted default. `validate_banter_visual_scripting` then invokes the installed SDK's public `CheckVsNodes()` validator across graph assets, embedded prefab graphs, and the active scene, returning the SDK's exact allow-list diagnostics.
 
 This knowledge improves graph generation and review, but source-class coverage is not proof of runtime behavior. `validate_vs_graph_in_unity` provides an authoritative import and deserialization check in the selected Editor; generated graphs must still be exercised in the target Unity and Banter SDK version.
 
@@ -58,7 +59,7 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 ## Requirements
 
 - Windows 10 or 11 for the guided launcher. The installer includes a private Node.js 24 LTS runtime.
-- Node.js 18 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
+- Node.js 20 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
 - Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
@@ -79,7 +80,7 @@ Open **BANTWORKS MCP**, choose a Unity project folder, select the detected MCP c
 
 Bridge copies are project-local. The launcher compares every configured project against its bundled bridge, labels stale copies as **Update available**, and provides **Update Bridges** to back up and refresh all configured projects in one action.
 
-The MSI and standalone ZIP remain available for managed or manual deployments. Tagged releases include `SHA256SUMS.txt` for artifact verification. The standalone ZIP requires Node.js 18 or newer.
+The MSI and standalone ZIP remain available for managed or manual deployments. Tagged releases include `SHA256SUMS.txt` for artifact verification. The standalone ZIP requires Node.js 20 or newer.
 
 From an extracted standalone ZIP, validate the included server with:
 
@@ -157,7 +158,9 @@ The guided setup installs the bridge automatically. For a manual install, use th
   → YourProject/Assets/Editor/BanterMCPBridge.cs
 ```
 
-Unity will compile it automatically and start exporting project state to `YourProject/.bantworks-mcp/state`.
+Unity will compile it automatically, advertise its protocol and capabilities in `YourProject/.bantworks-mcp/state/project-instance.json`, and start exporting project state.
+
+On Windows, current server and bridge versions prefer a project-local named pipe for small command and acknowledgement messages. Unity API calls are still executed only from `EditorApplication.update` on Unity's main thread. Large state snapshots and correlated artifacts remain atomic project-local files. Legacy bridges, unsupported platforms, stale endpoints, and connection failures automatically use the existing file command channel.
 
 In Edit mode, the bridge keeps a lightweight editor-status heartbeat and debounces full-state exports after actual hierarchy, project, property, undo, scene-open, and scene-save changes. It does not repeatedly traverse an unchanged scene. Automatic full-state export is disabled during Play mode by default to avoid main-thread hierarchy and `SerializedObject` traversal hitches. Command polling and explicit exports remain active during Play mode. Use **BANTWORKS MCP > Refresh State** or the `export-state` bridge command for an on-demand snapshot, or opt in to periodic Play-mode snapshots with the checkable **BANTWORKS MCP > Background State Export In Play Mode** menu item. The opt-in is persisted in Unity `EditorPrefs`.
 
@@ -186,18 +189,19 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `unity://types` | Unity fundamentals (Vector3, Quaternion, etc.) |
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
+| `project://compilation-status` | Persistent Unity compiler result and diagnostics (requires extension) |
 
-### Tools (40 focused actions available to MCP clients)
+### Tools (42 focused actions available to MCP clients)
 
-All 40 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
+All 42 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
 
 | Category | Tools |
 |----------|-------|
 | Visual Scripting | `generate_vs_graph`, `validate_vs_graph`, `write_vs_graph`, `validate_vs_graph_in_unity`, `validate_banter_visual_scripting` |
 | Banter WebRoot | `write_webroot_js` |
 | Project routing | `list_unity_projects`, `select_unity_project` |
-| Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `get_console_logs`, `refresh_unity_assets` |
-| Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot` |
+| Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `wait_for_unity_compile`, `get_console_logs`, `refresh_unity_assets` |
+| Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot`, `execute_editor_menu_item` |
 | Project and asset discovery | `get_unity_packages`, `get_banter_sdk_info`, `search_unity_assets` |
 | Unity tests | `discover_unity_tests`, `run_unity_tests`, `cancel_unity_test_run`, `get_unity_test_run` |
 | Scene lifecycle and builds | `get_unity_scenes`, `save_unity_scene`, `open_unity_scene`, `set_unity_build_scenes` |
@@ -206,6 +210,10 @@ All 40 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `aut
 | Prefabs and batches | `batch_create`, `instantiate_prefab`, `batch_instantiate_prefabs`, `get_prefab_catalog`, `scan_prefabs` |
 
 Scene-mutating tools run through the Unity bridge and return an explicit Unity acknowledgement when one arrives. Scene state exports stable Unity `globalObjectId` values for GameObjects and components; mutation tools prefer those IDs while retaining path selectors for older clients. Typed inspector writes support scalars, vectors, colors, enums, Rects, and Bounds with explicit validation. Ambiguous or stale selectors fail closed rather than modifying an arbitrary object.
+
+Targeted hierarchy reads use a correlated live command when given a `rootPath`, `componentType`, or exact filter. Unity serializes only the requested subtree or matching objects/components, returns world and local transforms, and leaves the full `scene-hierarchy.json` snapshot untouched. Broad hierarchy reads retain the explicit full-snapshot path. Unsupported field projections fail explicitly.
+
+Custom Editor menu results separate proven execution from post-command settling. A long command that returned successfully is not relabelled as failed solely because it temporarily blocked the Editor heartbeat; verified compilation errors still fail the operation.
 
 Batch creation and prefab placement are preflighted and run as one Unity Undo transaction. They roll back on failure by default; partial progress requires the explicit `continueOnError` option.
 
@@ -357,7 +365,7 @@ public release and writes an ignored JSON evidence report under `artifacts/`.
 Expected incompatibilities only satisfy the matrix when their exact compiler
 diagnostics recur.
 
-The GitHub Actions workflow runs the Node test suite and standalone-bundle smoke on Node 18, 20, 22, and 24, plus the dependency audit and Tauri launcher tests. Version tags build draft NSIS/MSI releases and a standalone ZIP. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, [docs/compatibility.md](docs/compatibility.md) for the verified matrix, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
+The GitHub Actions workflow runs the Node test suite and standalone-bundle smoke on Node 20, 22, and 24, plus the dependency audit and Tauri launcher tests. Version tags build draft NSIS/MSI releases and a standalone ZIP. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, [docs/compatibility.md](docs/compatibility.md) for the verified matrix, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
 
 The evidence-based capability comparison and ordered roadmap are maintained in [docs/unity-mcp-benchmark.md](docs/unity-mcp-benchmark.md).
 

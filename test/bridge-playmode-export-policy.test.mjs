@@ -20,14 +20,18 @@ function blockStartingAt(marker) {
   assert.fail(`Missing closing brace after: ${marker}`);
 }
 
-test("automatic full-state export is disabled throughout Play-mode transitions by default", () => {
+test("automatic full-state export is disabled in Edit and Play mode by default", () => {
   assert.match(
     bridge,
     /get\s*=>\s*EditorPrefs\.GetBool\(BackgroundStateExportKey, false\)/
   );
   assert.match(
     bridge,
-    /!EditorApplication\.isPlayingOrWillChangePlaymode\s*\|\|\s*BackgroundStateExportInPlayMode/
+    /get\s*=>\s*EditorPrefs\.GetBool\(BackgroundEditModeStateExportKey, false\)/
+  );
+  assert.match(
+    bridge,
+    /EditorApplication\.isPlayingOrWillChangePlaymode\s*\?\s*BackgroundStateExportInPlayMode\s*:\s*BackgroundStateExportInEditMode/
   );
 
   const automaticExport = blockStartingAt("private static void ExportProjectStateAutomatically()");
@@ -47,7 +51,7 @@ test("automatic full-state export is disabled throughout Play-mode transitions b
   }
 });
 
-test("Edit mode uses lightweight heartbeats and event-driven full exports", () => {
+test("Edit mode uses lightweight heartbeats without per-edit full exports", () => {
   const update = blockStartingAt("private static void OnEditorUpdate()");
   assert.match(update, /ProcessCommands\(\);/);
   assert.match(update, /ExportEditorState\(\);/);
@@ -64,13 +68,25 @@ test("Edit mode uses lightweight heartbeats and event-driven full exports", () =
   );
 
   for (const callback of [
-    "private static void OnHierarchyChanged",
     "private static void OnProjectChanged",
     "private static void OnUndoRedoPerformed",
-    "private static UndoPropertyModification[] OnPostprocessModifications",
   ]) {
     assert.match(blockStartingAt(callback), /ScheduleAutomaticStateExport\(\);/);
   }
+
+  assert.doesNotMatch(bridge, /EditorApplication\.hierarchyChanged\s*\+=/);
+  assert.doesNotMatch(bridge, /Undo\.postprocessModifications\s*\+=/);
+  assert.doesNotMatch(bridge, /private static void OnHierarchyChanged\s*\(/);
+  assert.doesNotMatch(bridge, /private static UndoPropertyModification\[\] OnPostprocessModifications\s*\(/);
+
+  const toggle = blockStartingAt("private static void ToggleBackgroundStateExportInEditMode()");
+  assert.match(toggle, /BackgroundStateExportInEditMode = enabled;/);
+  assert.match(toggle, /ScheduleAutomaticStateExport\(0\);/);
+  assert.match(toggle, /automaticStateExportPending = false;/);
+  assert.match(
+    bridge,
+    /BANTWORKS MCP\/Background State Export In Edit Mode/
+  );
 });
 
 test("Play mode keeps command polling and explicit full exports operational", () => {
