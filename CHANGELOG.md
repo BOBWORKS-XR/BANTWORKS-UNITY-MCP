@@ -6,11 +6,20 @@
 
 - Added deterministic topology-aware layout for generated Visual Scripting nodes whose positions are omitted. The layout preserves authored positions, handles cycles, follows connected explicit anchors, snaps to a configurable grid, and uses node-size estimates or hints to avoid overlap.
 - Added a disposable Unity import smoke that verifies generated positions survive Visual Scripting deserialization in Unity 2022.3.39f1/Visual Scripting 1.9.4 and Unity 6000.3.10f1/Visual Scripting 1.9.9.
+- Added an experimental clean-room Shader Graph tool group for capability probing, structural inspection, functional Built-in/URP Lit/Unlit creation, topology-aware node placement, guarded connections, and compiler validation.
+
+### Safety
+
+- Shader Graph assets are read and written through Unity's installed GraphData/FileUtilities/MultiJson APIs rather than regex or JSON text surgery.
+- Existing-asset mutations require an inspection SHA-256 precondition, reject assets open in Shader Graph, and refuse to replace occupied inputs without explicit opt-in.
+- Failed Shader Graph writes restore original bytes atomically, verify the restored SHA-256, preserve existing metadata, and report rollback failure separately from the original mutation failure.
 
 ### Verified
 
-- 100 Node tests pass, including chains, fan-in, cycles, explicit anchors, invalid hints, schema bounds, and generated graph serialization.
+- 104 Node tests pass, including chains, fan-in, cycles, explicit anchors, invalid hints, Shader Graph safety contracts, schema bounds, and generated graph serialization.
 - The spatial-layout fixture imported with zero new compiler errors in both tested Unity generations; all three positions persisted, the explicit anchor remained unchanged, the consumer followed its producers, and no units shared a position.
+- Unity 2022.3.39f1/Shader Graph 14.0.11, Unity 6000.1.14f1/Shader Graph 17.1.0, and Unity 6000.3.10f1/Shader Graph 17.3.0 each created, imported, re-deserialized, mutated, connected, and compiler-validated a functional graph; stale, invalid, occupied-input, and destructive mutations were rejected with byte-preserving rollback.
+- The same bridge compiled and executed its asset-reference smoke in a fresh Unity 6000.3.10f1 project without Shader Graph installed.
 
 ## 2.3.0 - 2026-08-04
 

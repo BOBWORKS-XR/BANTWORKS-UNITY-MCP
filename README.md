@@ -17,6 +17,7 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 
 - **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
 - **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files, including topology-aware grid layout, resolved unit definitions, and required value-port integrity, using the bundled Unity Visual Scripting JSON manual and source-observed errata
+- **Experimental Shader Graph Authoring**: Inspect real GraphData nodes/slots/targets, create functional Built-in or URP Lit/Unlit graphs, add and connect nodes with topology-aware layout, and roll back failed imports or shader compilation
 - **Banter Validation**: Invoke the selected SDK's own Visual Scripting allow-list validator and return bounded, structured diagnostics
 - **Evidence-Linked Banter Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
@@ -62,7 +63,7 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 - Node.js 20 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
 - A Unity project root containing `Assets`.
 - The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
-- Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
+- Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. Experimental Shader Graph authoring is acceptance-tested with Unity 2022.3.39f1/Shader Graph 14.0.11, Unity 6000.1.14f1/Shader Graph 17.1.0, and Unity 6000.3.10f1/Shader Graph 17.3.0; other combinations fail closed unless their required internal API signatures are detected. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
 
 ## Quick Start
 
@@ -191,9 +192,9 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `project://console` | Unity console logs (requires extension) |
 | `project://compilation-status` | Persistent Unity compiler result and diagnostics (requires extension) |
 
-### Tools (42 focused actions available to MCP clients)
+### Tools (49 focused actions available to MCP clients)
 
-All 42 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
+All 49 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
 
 | Category | Tools |
 |----------|-------|
@@ -210,6 +211,8 @@ All 42 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `aut
 | Prefabs and batches | `batch_create`, `instantiate_prefab`, `batch_instantiate_prefabs`, `get_prefab_catalog`, `scan_prefabs` |
 
 Scene-mutating tools run through the Unity bridge and return an explicit Unity acknowledgement when one arrives. Scene state exports stable Unity `globalObjectId` values for GameObjects and components; mutation tools prefer those IDs while retaining path selectors for older clients. Typed inspector writes support scalars, vectors, colors, enums, Rects, and Bounds with explicit validation. Ambiguous or stale selectors fail closed rather than modifying an arbitrary object.
+
+Shader Graph authoring is an experimental, separately scoped capability. Start with `get_shader_graph_capabilities`, inspect an asset to obtain exact node/slot IDs and its `contentHash`, pass that hash into every mutation, then call `validate_shader_graph`. Mutations reject open Shader Graph windows, stale hashes, ambiguous node names, and occupied inputs unless replacement is explicit. See [docs/shader-graph-experiment.md](docs/shader-graph-experiment.md).
 
 Targeted hierarchy reads use a correlated live command when given a `rootPath`, `componentType`, or exact filter. Unity serializes only the requested subtree or matching objects/components, returns world and local transforms, and leaves the full `scene-hierarchy.json` snapshot untouched. Broad hierarchy reads retain the explicit full-snapshot path. Unsupported field projections fail explicitly.
 

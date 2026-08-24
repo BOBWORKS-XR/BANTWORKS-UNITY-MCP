@@ -20,7 +20,7 @@ test("tool groups cover every registered tool", () => {
     for (const name of TOOL_GROUP_MEMBERSHIP[group]) covered.add(name);
   }
 
-  assert.equal(allTools.length, 42);
+  assert.equal(allTools.length, 49);
   assert.deepEqual([...covered].sort(), [...allTools].sort());
 });
 

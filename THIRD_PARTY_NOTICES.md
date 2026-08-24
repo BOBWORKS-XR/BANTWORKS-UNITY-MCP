@@ -24,6 +24,12 @@ On 2026-07-29, Unity's official `com.unity.ai.assistant` MCP documentation and p
 
 [yecats/unity-mcp-toolkit](https://github.com/yecats/unity-mcp-toolkit), released under CC0 1.0 Universal, was also evaluated for optional settings, Scene View, Input System, Recorder, and domain-refresh tools. No toolkit code is included in version 2.2.0; those tools will be added only where they justify their maintenance and runtime surface.
 
+On 2026-08-24, [AnkleBreaker-Studio/unity-mcp-plugin](https://github.com/AnkleBreaker-Studio/unity-mcp-plugin) was reviewed as a behavioral research reference for Shader Graph workflows and published failure modes. Its custom AnkleBreaker Open License v1.0 requires visible attribution and restricts commercial distribution of the software and derivatives. No source, assets, schemas, or serialized data from that repository were copied into BANTWORKS MCP. The implementation here was independently authored against the installed Unity package APIs and official Unity documentation.
+
+[AlexeyPerov/Unity-Open-MCP](https://github.com/AlexeyPerov/Unity-Open-MCP), released under the MIT license, was also reviewed at commit `961fae1c4f1cb51046397a3fb6c06b522f094689` for extension discovery and fail-closed optional-package ideas. No source was imported. Its public Shader Graph behavior helped define independent negative tests around reflection availability, asset detection, and validation.
+
+Unity's public Shader Graph documentation and locally installed package source were consulted to identify the GraphData, FileUtilities, MultiJson, target, block, node, slot, and importer contracts. Unity package source is governed by the Unity Companion License. No Unity source is redistributed; BANTWORKS calls the user's installed package through a version-checked reflection adapter.
+
 ## Deliberate Non-Adoptions
 
 Remote WebSocket/HTTP listeners and arbitrary C# execution appear in parts of the broader Unity MCP ecosystem. They are not adopted here because BANTWORKS MCP is intentionally local and project-scoped, and those capabilities need a separate authentication and authorization design.

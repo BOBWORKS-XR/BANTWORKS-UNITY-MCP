@@ -21,6 +21,15 @@ import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
 import { getUnityPackages } from "./get-unity-packages.js";
 import { getBanterSDKInfo } from "./get-banter-sdk-info.js";
 import {
+  addShaderGraphNode,
+  connectShaderGraphNodes,
+  createShaderGraph,
+  getShaderGraphCapabilities,
+  inspectShaderGraph,
+  listShaderGraphs,
+  validateShaderGraph,
+} from "./shader-graph.js";
+import {
   dispatchUnityBridgeCommand,
   type BridgeCommandResult,
 } from "../lib/unity-bridge-transport.js";
@@ -289,6 +298,173 @@ The SDK scans Script Graph and State Graph assets, embedded prefab graphs, and e
       inputSchema: {
         type: "object",
         properties: {},
+      },
+    },
+
+    {
+      name: "get_shader_graph_capabilities",
+      description: `Probe the selected Unity project's installed Shader Graph package and the exact reflected GraphData, MultiJson, target, node, slot, and connection APIs available to BANTWORKS.
+Read this before authoring. Missing or shifted internal package APIs are reported explicitly; the bridge remains compilable when Shader Graph is absent.`,
+      inputSchema: { type: "object", properties: {} },
+    },
+
+    {
+      name: "list_shader_graphs",
+      description: "List project-local .shadergraph assets with GUIDs, dependency hashes, and current Unity compile-error state.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          limit: { type: "integer", minimum: 1, maximum: 1000, default: 200 },
+        },
+      },
+    },
+
+    {
+      name: "inspect_shader_graph",
+      description: `Deserialize a Shader Graph through the installed package's GraphData reader and return targets, properties, nodes, real slot ids/directions/types, edges, positions, unresolved objects, and ShaderUtil compiler diagnostics.
+This never hand-parses or rewrites Shader Graph JSON. It can optionally open the asset in Unity after inspection.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: {
+            type: "string",
+            minLength: 20,
+            maxLength: 1024,
+            pattern: "^Assets/.+\\.shadergraph$",
+          },
+          openInEditor: { type: "boolean", default: false },
+        },
+        required: ["assetPath"],
+      },
+    },
+
+    {
+      name: "create_shader_graph",
+      description: `Create a functional Lit or Unlit Shader Graph with an active Built-in or URP target using Unity's GraphData and MultiJson APIs.
+Optional nodes are topology-laid out before creation; connections may address request ids or output blocks such as block:BaseColor. Unity synchronously imports and compiles the graph. Any deserialization, target, unresolved-object, or compiler failure rolls the write back.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: {
+            type: "string",
+            minLength: 20,
+            maxLength: 1024,
+            pattern: "^Assets/.+\\.shadergraph$",
+          },
+          pipeline: { type: "string", enum: ["auto", "built_in", "urp"], default: "auto" },
+          shaderType: { type: "string", enum: ["lit", "unlit"], default: "unlit" },
+          overwrite: { type: "boolean", default: false },
+          expectedContentHash: {
+            type: "string",
+            pattern: "^[a-fA-F0-9]{64}$",
+            description: "Required with overwrite=true; use contentHash from inspect_shader_graph.",
+          },
+          openInEditor: { type: "boolean", default: false },
+          nodes: {
+            type: "array",
+            maxItems: 200,
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", minLength: 1, maxLength: 128 },
+                nodeType: { type: "string", minLength: 1, maxLength: 256 },
+                position: {
+                  type: "object",
+                  properties: { x: { type: "number" }, y: { type: "number" } },
+                  required: ["x", "y"],
+                },
+                size: {
+                  type: "object",
+                  properties: {
+                    width: { type: "number", minimum: 24, maximum: 2048 },
+                    height: { type: "number", minimum: 24, maximum: 4096 },
+                  },
+                  required: ["width", "height"],
+                },
+              },
+              required: ["nodeType"],
+            },
+          },
+          connections: {
+            type: "array",
+            maxItems: 400,
+            items: {
+              type: "object",
+              properties: {
+                from: { type: "string", minLength: 1, maxLength: 128 },
+                fromSlot: { type: "integer", minimum: 0 },
+                to: { type: "string", minLength: 1, maxLength: 128 },
+                toSlot: { type: "integer", minimum: 0 },
+              },
+              required: ["from", "fromSlot", "to", "toSlot"],
+            },
+          },
+          layout: {
+            type: "object",
+            properties: {
+              origin: {
+                type: "object",
+                properties: { x: { type: "number" }, y: { type: "number" } },
+                required: ["x", "y"],
+              },
+              gridSize: { type: "number", minimum: 1, maximum: 256 },
+              horizontalGap: { type: "number", minimum: 1, maximum: 2048 },
+              verticalGap: { type: "number", minimum: 1, maximum: 2048 },
+            },
+          },
+        },
+        required: ["assetPath"],
+      },
+    },
+
+    {
+      name: "add_shader_graph_node",
+      description: `Add one concrete AbstractMaterialNode to an existing Shader Graph through GraphData. Pass contentHash from inspect_shader_graph as expectedContentHash so stale edits fail closed.
+When position is omitted, BANTWORKS places the node on a 24-pixel grid to the right of the current graph without overlap. Open Shader Graph editor assets are rejected, and the original asset is restored if Unity import or shader compilation fails.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: { type: "string", maxLength: 1024, pattern: "^Assets/.+\\.shadergraph$" },
+          nodeType: { type: "string", minLength: 1, maxLength: 256 },
+          expectedContentHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+          position: {
+            type: "object",
+            properties: { x: { type: "number" }, y: { type: "number" } },
+            required: ["x", "y"],
+          },
+        },
+        required: ["assetPath", "nodeType", "expectedContentHash"],
+      },
+    },
+
+    {
+      name: "connect_shader_graph_nodes",
+      description: `Connect a real output slot to a real input slot by node object ids returned from inspect_shader_graph. Pass that inspection's contentHash so stale edits fail closed.
+The bridge verifies directions, compatibility, and that the input is unoccupied before GraphData.Connect, then reimports and compiles transactionally. Set replaceExistingInput=true only to explicitly replace an existing edge.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: { type: "string", maxLength: 1024, pattern: "^Assets/.+\\.shadergraph$" },
+          sourceNodeId: { type: "string", minLength: 1, maxLength: 128 },
+          sourceSlotId: { type: "integer", minimum: 0 },
+          destinationNodeId: { type: "string", minLength: 1, maxLength: 128 },
+          destinationSlotId: { type: "integer", minimum: 0 },
+          expectedContentHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+          replaceExistingInput: { type: "boolean", default: false },
+        },
+        required: ["assetPath", "sourceNodeId", "sourceSlotId", "destinationNodeId", "destinationSlotId", "expectedContentHash"],
+      },
+    },
+
+    {
+      name: "validate_shader_graph",
+      description: "Force synchronous import and fail unless GraphData deserializes, at least one target exists, no recognized serialized object is unresolved, a Shader asset loads, and ShaderUtil reports no compiler errors.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: { type: "string", maxLength: 1024, pattern: "^Assets/.+\\.shadergraph$" },
+        },
+        required: ["assetPath"],
       },
     },
 
@@ -1497,6 +1673,65 @@ export async function handleToolCall(
 
     case "validate_banter_visual_scripting":
       result = await validateBanterVisualScripting(config);
+      break;
+
+    case "get_shader_graph_capabilities":
+      result = await getShaderGraphCapabilities(config);
+      break;
+
+    case "list_shader_graphs":
+      result = await listShaderGraphs(args.limit as number | undefined, config);
+      break;
+
+    case "inspect_shader_graph":
+      result = await inspectShaderGraph(
+        args.assetPath as string,
+        args.openInEditor as boolean | undefined,
+        config
+      );
+      break;
+
+    case "create_shader_graph":
+      result = await createShaderGraph({
+        assetPath: args.assetPath as string,
+        pipeline: args.pipeline as "auto" | "built_in" | "urp" | undefined,
+        shaderType: args.shaderType as "lit" | "unlit" | undefined,
+        overwrite: args.overwrite as boolean | undefined,
+        expectedContentHash: args.expectedContentHash as string | undefined,
+        openInEditor: args.openInEditor as boolean | undefined,
+        nodes: args.nodes as import("./shader-graph.js").ShaderGraphNodeSpec[] | undefined,
+        connections: args.connections as import("./shader-graph.js").ShaderGraphConnectionSpec[] | undefined,
+        layout: args.layout as import("../lib/graph-layout.js").GraphLayoutOptions | undefined,
+      }, config);
+      break;
+
+    case "add_shader_graph_node":
+      result = await addShaderGraphNode(
+        args.assetPath as string,
+        args.nodeType as string,
+        args.position as import("../lib/graph-layout.js").GraphPoint | undefined,
+        args.expectedContentHash as string,
+        config
+      );
+      break;
+
+    case "connect_shader_graph_nodes":
+      result = await connectShaderGraphNodes(
+        args.assetPath as string,
+        {
+          from: args.sourceNodeId as string,
+          fromSlot: args.sourceSlotId as number,
+          to: args.destinationNodeId as string,
+          toSlot: args.destinationSlotId as number,
+          expectedContentHash: args.expectedContentHash as string,
+          replaceExistingInput: args.replaceExistingInput as boolean | undefined,
+        },
+        config
+      );
+      break;
+
+    case "validate_shader_graph":
+      result = await validateShaderGraph(args.assetPath as string, config);
       break;
 
     case "list_unity_projects":

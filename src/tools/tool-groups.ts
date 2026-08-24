@@ -1,4 +1,4 @@
-export const TOOL_GROUP_NAMES = ["read", "author", "test", "banter"] as const;
+export const TOOL_GROUP_NAMES = ["read", "author", "test", "banter", "shadergraph"] as const;
 
 export type ToolGroupName = typeof TOOL_GROUP_NAMES[number];
 export type ToolGroupSelection = "all" | ReadonlySet<ToolGroupName>;
@@ -27,6 +27,10 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "capture_unity_screenshot",
     "get_prefab_catalog",
     "get_object_bounds",
+    "get_shader_graph_capabilities",
+    "list_shader_graphs",
+    "inspect_shader_graph",
+    "validate_shader_graph",
   ]),
   author: new Set([
     "generate_vs_graph",
@@ -51,6 +55,10 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "instantiate_prefab",
     "batch_instantiate_prefabs",
     "scan_prefabs",
+    "create_shader_graph",
+    "add_shader_graph_node",
+    "connect_shader_graph_nodes",
+    "validate_shader_graph",
   ]),
   test: new Set([
     "discover_unity_tests",
@@ -61,6 +69,7 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "wait_for_unity_compile",
     "control_play_mode",
     "capture_unity_screenshot",
+    "validate_shader_graph",
   ]),
   banter: new Set([
     "validate_vs_graph",
@@ -71,6 +80,15 @@ export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<s
     "validate_banter_visual_scripting",
     "get_banter_sdk_info",
   ]),
+  shadergraph: new Set([
+    "get_shader_graph_capabilities",
+    "list_shader_graphs",
+    "inspect_shader_graph",
+    "create_shader_graph",
+    "add_shader_graph_node",
+    "connect_shader_graph_nodes",
+    "validate_shader_graph",
+  ]),
 };
 
 export function parseToolGroupSelection(value: string | undefined): ToolGroupSelection {
@@ -80,7 +98,9 @@ export function parseToolGroupSelection(value: string | undefined): ToolGroupSel
 
   const entries = [...new Set(value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean))];
   if (entries.length === 0) {
-    throw new Error("BANTWORKS_TOOL_GROUPS must contain all, none, read, author, test, or banter.");
+    throw new Error(
+      `BANTWORKS_TOOL_GROUPS must contain all, none, or one of: ${TOOL_GROUP_NAMES.join(", ")}.`
+    );
   }
   if (entries.includes("all") || entries.includes("none")) {
     if (entries.length !== 1) {

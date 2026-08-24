@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -38,6 +39,7 @@ namespace BantworksMCP
         private static readonly string BoundsResultsFolder = Path.Combine(StateFolder, "bounds-results");
         private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
         private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
+        private static readonly string ShaderGraphResultsFolder = Path.Combine(StateFolder, "shader-graph-results");
         private static readonly string VisualScriptingValidationResultsFolder = Path.Combine(StateFolder, "vs-validation-results");
         private static readonly string BanterValidationResultsFolder = Path.Combine(StateFolder, "banter-validation-results");
         private static readonly string TestRunResultsFolder = Path.Combine(StateFolder, "test-runs");
@@ -198,6 +200,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(ScreenshotResultsFolder);
             if (!Directory.Exists(AssetSearchResultsFolder))
                 Directory.CreateDirectory(AssetSearchResultsFolder);
+            if (!Directory.Exists(ShaderGraphResultsFolder))
+                Directory.CreateDirectory(ShaderGraphResultsFolder);
             if (!Directory.Exists(VisualScriptingValidationResultsFolder))
                 Directory.CreateDirectory(VisualScriptingValidationResultsFolder);
             if (!Directory.Exists(BanterValidationResultsFolder))
@@ -877,6 +881,41 @@ namespace BantworksMCP
                     var assetSearchCmd = JsonUtility.FromJson<AssetSearchCommand>(json);
                     SearchAssets(assetSearchCmd);
                     return $"Searched Unity assets: {assetSearchCmd.query}";
+
+                case "shader_graph_capabilities":
+                    var shaderCapabilitiesCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(shaderCapabilitiesCmd, ShaderGraphOperation.Capabilities);
+                    return "Read Shader Graph capabilities";
+
+                case "list_shader_graphs":
+                    var listShaderGraphsCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(listShaderGraphsCmd, ShaderGraphOperation.List);
+                    return "Listed Shader Graph assets";
+
+                case "inspect_shader_graph":
+                    var inspectShaderGraphCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(inspectShaderGraphCmd, ShaderGraphOperation.Inspect);
+                    return $"Inspected Shader Graph: {inspectShaderGraphCmd.assetPath}";
+
+                case "create_shader_graph":
+                    var createShaderGraphCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(createShaderGraphCmd, ShaderGraphOperation.Create);
+                    return $"Created Shader Graph: {createShaderGraphCmd.assetPath}";
+
+                case "add_shader_graph_node":
+                    var addShaderGraphNodeCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(addShaderGraphNodeCmd, ShaderGraphOperation.AddNode);
+                    return $"Added Shader Graph node: {addShaderGraphNodeCmd.nodeType}";
+
+                case "connect_shader_graph_nodes":
+                    var connectShaderGraphNodesCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(connectShaderGraphNodesCmd, ShaderGraphOperation.Connect);
+                    return $"Connected Shader Graph nodes in: {connectShaderGraphNodesCmd.assetPath}";
+
+                case "validate_shader_graph":
+                    var validateShaderGraphCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(validateShaderGraphCmd, ShaderGraphOperation.Validate);
+                    return $"Validated Shader Graph: {validateShaderGraphCmd.assetPath}";
 
                 case "validate_vs_graph_asset":
                     var validateGraphCmd = JsonUtility.FromJson<ValidateVSGraphAssetCommand>(json);
@@ -4283,6 +4322,1252 @@ namespace BantworksMCP
             }
         }
 
+        private static void ExecuteShaderGraphCommand(ShaderGraphCommand cmd, ShaderGraphOperation operation)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Shader Graph commands require a safe correlation ID");
+
+            var result = new ShaderGraphCommandResult
+            {
+                commandId = cmd.id,
+                success = false,
+                operation = operation.ToString(),
+                assetPath = cmd.assetPath,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                warnings = new List<string>()
+            };
+
+            try
+            {
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                    throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle.");
+
+                switch (operation)
+                {
+                    case ShaderGraphOperation.Capabilities:
+                        result.capabilities = ProbeShaderGraphCapabilities();
+                        result.success = true;
+                        break;
+                    case ShaderGraphOperation.List:
+                        result.capabilities = ProbeShaderGraphCapabilities();
+                        result.assets = ListShaderGraphAssets(cmd.limit <= 0 ? 200 : Mathf.Clamp(cmd.limit, 1, 1000));
+                        result.success = true;
+                        break;
+                    case ShaderGraphOperation.Inspect:
+                        result.assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+                        result.graph = InspectShaderGraph(result.assetPath, cmd.openInEditor);
+                        result.success = result.graph.graphDeserialized;
+                        if (!result.success)
+                            result.error = "Unity could not deserialize the Shader Graph with the installed package API.";
+                        break;
+                    case ShaderGraphOperation.Validate:
+                        result.assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+                        result.graph = InspectShaderGraph(result.assetPath, false);
+                        result.success = result.graph.validationPassed;
+                        if (!result.success)
+                            result.error = BuildShaderGraphValidationError(result.graph);
+                        break;
+                    case ShaderGraphOperation.Create:
+                        CreateShaderGraphTransactional(cmd, result);
+                        break;
+                    case ShaderGraphOperation.AddNode:
+                        MutateShaderGraphTransactional(cmd, result, ShaderGraphOperation.AddNode);
+                        break;
+                    case ShaderGraphOperation.Connect:
+                        MutateShaderGraphTransactional(cmd, result, ShaderGraphOperation.Connect);
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception;
+                while (actual is TargetInvocationException && actual.InnerException != null)
+                    actual = actual.InnerException;
+                result.error = actual.Message;
+                result.errorType = actual.GetType().FullName;
+            }
+
+            WriteAtomicText(
+                Path.Combine(ShaderGraphResultsFolder, cmd.id + ".json"),
+                JsonUtility.ToJson(result, true));
+            DeleteOldFiles(ShaderGraphResultsFolder, "*.json", 50);
+        }
+
+        private static ShaderGraphCapabilities ProbeShaderGraphCapabilities()
+        {
+            var missing = new List<string>();
+            var package = UnityEditor.PackageManager.PackageInfo.GetAllRegisteredPackages()
+                .FirstOrDefault(item => string.Equals(item.name, "com.unity.shadergraph", StringComparison.Ordinal));
+            System.Reflection.Assembly assembly = GetShaderGraphAssembly();
+            Type graphData = FindLoadedType("UnityEditor.ShaderGraph.GraphData");
+            Type fileUtilities = FindLoadedType("UnityEditor.ShaderGraph.FileUtilities");
+            Type multiJson = FindLoadedType("UnityEditor.ShaderGraph.Serialization.MultiJson");
+            Type abstractNode = FindLoadedType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            Type materialSlot = FindLoadedType("UnityEditor.ShaderGraph.MaterialSlot");
+            Type target = FindLoadedType("UnityEditor.ShaderGraph.Target");
+            Type block = FindLoadedType("UnityEditor.ShaderGraph.BlockFieldDescriptor");
+            Type category = FindLoadedType("UnityEditor.ShaderGraph.CategoryData");
+
+            if (graphData == null) missing.Add("UnityEditor.ShaderGraph.GraphData");
+            if ((fileUtilities == null || FindTryReadGraphMethod(fileUtilities) == null) &&
+                (multiJson == null || FindMultiJsonDeserializeMethod(multiJson, graphData) == null))
+                missing.Add("FileUtilities.TryReadGraphDataFromDisk or MultiJson.Deserialize<GraphData>");
+            if (multiJson == null || FindMultiJsonSerializeMethod(multiJson, graphData) == null)
+                missing.Add("MultiJson.Serialize");
+            if (abstractNode == null) missing.Add("AbstractMaterialNode");
+            if (materialSlot == null) missing.Add("MaterialSlot");
+            if (target == null) missing.Add("Target");
+            if (block == null) missing.Add("BlockFieldDescriptor");
+            if (category == null || !category.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .Any(method => method.Name == "DefaultCategory" &&
+                    method.GetParameters().All(parameter => parameter.IsOptional)))
+                missing.Add("CategoryData.DefaultCategory(optional arguments)");
+
+            bool canRead = graphData != null &&
+                ((fileUtilities != null && FindTryReadGraphMethod(fileUtilities) != null) ||
+                    (multiJson != null && FindMultiJsonDeserializeMethod(multiJson, graphData) != null));
+            bool canWrite = canRead && multiJson != null &&
+                FindMultiJsonSerializeMethod(multiJson, graphData) != null;
+            bool canCreate = canWrite && target != null && block != null && category != null &&
+                graphData.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "InitializeOutputs" && method.GetParameters().Length == 2) &&
+                graphData.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "AddCategory" && method.GetParameters().Length == 1);
+            bool canMutateNodes = canWrite && abstractNode != null &&
+                graphData.GetMethod("AddNode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null;
+            bool canConnect = canMutateNodes && materialSlot != null &&
+                graphData.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "Connect" && method.GetParameters().Length == 2) &&
+                materialSlot.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "IsCompatibleWith" && method.GetParameters().Length == 1);
+
+            return new ShaderGraphCapabilities
+            {
+                packageInstalled = package != null,
+                assemblyLoaded = assembly != null,
+                readSupported = canRead,
+                writeSupported = canWrite,
+                createSupported = canCreate,
+                nodeMutationSupported = canMutateNodes,
+                connectionSupported = canConnect,
+                packageVersion = package?.version,
+                assemblyVersion = assembly?.GetName().Version?.ToString(),
+                activeRenderPipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null
+                    ? "BuiltIn"
+                    : UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline.GetType().FullName,
+                supportedTemplates = DiscoverShaderGraphTemplates(),
+                missingMembers = missing
+            };
+        }
+
+        private static List<string> DiscoverShaderGraphTemplates()
+        {
+            var templates = new List<string>();
+            if (FindLoadedType("UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInTarget") != null)
+            {
+                templates.Add("built_in/unlit");
+                templates.Add("built_in/lit");
+            }
+            if (FindLoadedType("UnityEditor.Rendering.Universal.ShaderGraph.UniversalTarget") != null)
+            {
+                templates.Add("urp/unlit");
+                templates.Add("urp/lit");
+            }
+            return templates;
+        }
+
+        private static List<ShaderGraphAssetEntry> ListShaderGraphAssets(int limit)
+        {
+            var results = new List<ShaderGraphAssetEntry>();
+            foreach (string assetPath in AssetDatabase.GetAllAssetPaths()
+                .Where(path => path.StartsWith("Assets/", StringComparison.Ordinal) &&
+                    path.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .Take(limit))
+            {
+                Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(assetPath);
+                results.Add(new ShaderGraphAssetEntry
+                {
+                    assetPath = assetPath,
+                    guid = AssetDatabase.AssetPathToGUID(assetPath),
+                    name = Path.GetFileNameWithoutExtension(assetPath),
+                    dependencyHash = AssetDatabase.GetAssetDependencyHash(assetPath).ToString(),
+                    hasCompileErrors = shader != null && ShaderUtil.ShaderHasError(shader)
+                });
+            }
+            return results;
+        }
+
+        private static ShaderGraphSummary InspectShaderGraph(string assetPath, bool openInEditor)
+        {
+            string normalized = NormalizeShaderGraphAssetPath(assetPath);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException("Shader Graph asset does not exist", normalized);
+
+            ShaderGraphCapabilities capabilities = ProbeShaderGraphCapabilities();
+            if (!capabilities.readSupported)
+                throw new InvalidOperationException(
+                    "The installed Shader Graph package does not expose the required GraphData reader: " +
+                    string.Join(", ", capabilities.missingMembers));
+
+            AssetDatabase.ImportAsset(
+                normalized,
+                ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+            Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(normalized);
+            object graph = ReadShaderGraphData(normalized);
+            var summary = BuildShaderGraphSummary(normalized, graph, shader);
+            if (openInEditor && shader != null)
+                AssetDatabase.OpenAsset(shader);
+            return summary;
+        }
+
+        private static ShaderGraphSummary BuildShaderGraphSummary(string assetPath, object graph, Shader shader)
+        {
+            var summary = new ShaderGraphSummary
+            {
+                assetPath = assetPath,
+                assetGuid = AssetDatabase.AssetPathToGUID(assetPath),
+                dependencyHash = AssetDatabase.GetAssetDependencyHash(assetPath).ToString(),
+                contentHash = ComputeSha256(File.ReadAllBytes(Path.GetFullPath(Path.Combine(ProjectRoot, assetPath)))),
+                shaderLoaded = shader != null,
+                shaderName = shader?.name,
+                graphDeserialized = graph != null,
+                nodes = new List<ShaderGraphNodeInfo>(),
+                edges = new List<ShaderGraphEdgeInfo>(),
+                targets = new List<ShaderGraphTargetInfo>(),
+                properties = new List<ShaderGraphPropertyInfo>(),
+                diagnostics = ReadShaderDiagnostics(shader),
+                warnings = new List<string>()
+            };
+            if (graph == null)
+                return summary;
+
+            var unknownObjects = new HashSet<object>();
+
+            Type abstractNodeType = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            IEnumerable nodes = InvokeGenericEnumerable(graph, "GetNodes", abstractNodeType);
+            if (nodes == null)
+                throw new InvalidOperationException("GraphData.GetNodes<AbstractMaterialNode>() was unavailable.");
+
+            foreach (object node in nodes)
+            {
+                if (node == null)
+                {
+                    unknownObjects.Add("null-node:" + summary.nodes.Count);
+                    continue;
+                }
+                ShaderGraphNodeInfo info = BuildShaderGraphNodeInfo(node);
+                summary.nodes.Add(info);
+                TrackUnknownShaderGraphObject(node, unknownObjects);
+                foreach (ShaderGraphSlotInfo slot in info.slots)
+                {
+                    if (slot.type.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                        unknownObjects.Add(slot.type + ":" + info.id + ":" + slot.id);
+                }
+                object descriptor = ReadMember(node, "descriptor");
+                if (descriptor != null && ReadBoolMember(descriptor, "isUnknown"))
+                    unknownObjects.Add(descriptor);
+            }
+
+            foreach (object edge in ReadEnumerableMember(graph, "edges"))
+            {
+                object output = ReadMember(edge, "outputSlot");
+                object input = ReadMember(edge, "inputSlot");
+                summary.edges.Add(new ShaderGraphEdgeInfo
+                {
+                    outputNodeId = ReadStringMember(ReadMember(output, "node"), "objectId"),
+                    outputSlotId = ReadIntMember(output, "slotId"),
+                    inputNodeId = ReadStringMember(ReadMember(input, "node"), "objectId"),
+                    inputSlotId = ReadIntMember(input, "slotId")
+                });
+            }
+
+            foreach (object target in ReadEnumerableMember(graph, "activeTargets"))
+            {
+                if (target == null)
+                {
+                    unknownObjects.Add("null-target:" + summary.targets.Count);
+                    continue;
+                }
+                string type = target.GetType().FullName ?? target.GetType().Name;
+                summary.targets.Add(new ShaderGraphTargetInfo
+                {
+                    type = type,
+                    displayName = ReadStringMember(target, "displayName") ?? target.GetType().Name
+                });
+                TrackUnknownShaderGraphObject(target, unknownObjects);
+                TrackUnknownShaderGraphObject(ReadMember(target, "activeSubTarget"), unknownObjects);
+            }
+
+            foreach (object property in ReadEnumerableMember(graph, "properties"))
+            {
+                if (property == null)
+                {
+                    unknownObjects.Add("null-property:" + summary.properties.Count);
+                    continue;
+                }
+                string type = property.GetType().FullName ?? property.GetType().Name;
+                summary.properties.Add(new ShaderGraphPropertyInfo
+                {
+                    id = ReadStringMember(property, "objectId"),
+                    type = type,
+                    displayName = ReadStringMember(property, "displayName"),
+                    referenceName = ReadStringMember(property, "referenceName"),
+                    exposed = ReadBoolMember(property, "isExposed") || ReadBoolMember(property, "generatePropertyBlock")
+                });
+                TrackUnknownShaderGraphObject(property, unknownObjects);
+            }
+
+            foreach (object target in ReadEnumerableMember(graph, "allPotentialTargets"))
+            {
+                TrackUnknownShaderGraphObject(target, unknownObjects);
+                TrackUnknownShaderGraphObject(ReadMember(target, "activeSubTarget"), unknownObjects);
+            }
+            foreach (object extension in ReadEnumerableMember(graph, "SubDatas"))
+                TrackUnknownShaderGraphObject(extension, unknownObjects);
+
+            summary.nodeCount = summary.nodes.Count;
+            summary.edgeCount = summary.edges.Count;
+            summary.targetCount = summary.targets.Count;
+            summary.propertyCount = summary.properties.Count;
+            summary.unknownObjectCount = unknownObjects.Count;
+            summary.hasCompileErrors = summary.diagnostics.Any(item =>
+                item.severity.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0) ||
+                (shader != null && ShaderUtil.ShaderHasError(shader));
+            if (summary.targetCount == 0)
+                summary.warnings.Add("The graph has no active target and cannot generate a functional shader.");
+            if (summary.unknownObjectCount > 0)
+                summary.warnings.Add($"The graph contains {summary.unknownObjectCount} unresolved serialized objects.");
+            if (summary.hasCompileErrors)
+                summary.warnings.Add("Unity reports Shader Graph compiler errors.");
+            summary.validationPassed = summary.graphDeserialized && shader != null &&
+                summary.targetCount > 0 && summary.unknownObjectCount == 0 && !summary.hasCompileErrors;
+            return summary;
+        }
+
+        private static void TrackUnknownShaderGraphObject(object value, HashSet<object> unknownObjects)
+        {
+            if (value == null)
+                return;
+            string type = value.GetType().FullName ?? value.GetType().Name;
+            if (type.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                type.IndexOf("LegacyUnknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                unknownObjects.Add(value);
+        }
+
+        private static ShaderGraphNodeInfo BuildShaderGraphNodeInfo(object node)
+        {
+            Rect rect = ReadShaderGraphNodeRect(node);
+            string type = node.GetType().FullName ?? node.GetType().Name;
+            object descriptor = ReadMember(node, "descriptor");
+            return new ShaderGraphNodeInfo
+            {
+                id = ReadStringMember(node, "objectId"),
+                name = ReadStringMember(node, "name") ?? node.GetType().Name,
+                type = type,
+                isBlock = type.EndsWith(".BlockNode", StringComparison.Ordinal) || node.GetType().Name == "BlockNode",
+                blockDescriptor = descriptor == null
+                    ? null
+                    : ReadStringMember(descriptor, "name") ?? ReadStringMember(descriptor, "displayName"),
+                position = new[] { rect.x, rect.y, rect.width, rect.height },
+                slots = ReadShaderGraphSlots(node)
+            };
+        }
+
+        private static List<ShaderGraphSlotInfo> ReadShaderGraphSlots(object node)
+        {
+            Type slotType = RequireShaderGraphType("UnityEditor.ShaderGraph.MaterialSlot");
+            Type listType = typeof(List<>).MakeGenericType(slotType);
+            object list = Activator.CreateInstance(listType);
+            MethodInfo method = node.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(item => item.Name == "GetSlots" && item.IsGenericMethodDefinition &&
+                    item.GetParameters().Length == 1);
+            if (method == null)
+                throw new InvalidOperationException($"{node.GetType().FullName} does not expose GetSlots<T>.");
+            method.MakeGenericMethod(slotType).Invoke(node, new[] { list });
+
+            var slots = new List<ShaderGraphSlotInfo>();
+            foreach (object slot in (IEnumerable)list)
+            {
+                slots.Add(new ShaderGraphSlotInfo
+                {
+                    id = ReadIntMember(slot, "id"),
+                    name = ReadStringMember(slot, "displayName"),
+                    type = slot.GetType().FullName ?? slot.GetType().Name,
+                    direction = ReadBoolMember(slot, "isInputSlot") ? "input" : "output",
+                    valueType = ReadMember(slot, "concreteValueType")?.ToString() ??
+                        ReadMember(slot, "valueType")?.ToString()
+                });
+            }
+            return slots;
+        }
+
+        private static List<ShaderGraphCompilerDiagnostic> ReadShaderDiagnostics(Shader shader)
+        {
+            var diagnostics = new List<ShaderGraphCompilerDiagnostic>();
+            if (shader == null)
+                return diagnostics;
+
+            MethodInfo getMessages = typeof(ShaderUtil).GetMethod(
+                "GetShaderMessages",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(Shader) },
+                null);
+            var messages = getMessages?.Invoke(null, new object[] { shader }) as IEnumerable;
+            if (messages == null)
+                return diagnostics;
+
+            foreach (object message in messages)
+            {
+                diagnostics.Add(new ShaderGraphCompilerDiagnostic
+                {
+                    severity = ReadMember(message, "severity")?.ToString() ?? "Unknown",
+                    message = ReadStringMember(message, "message"),
+                    file = ReadStringMember(message, "file"),
+                    line = ReadIntMember(message, "line")
+                });
+                if (diagnostics.Count >= 200)
+                    break;
+            }
+            return diagnostics;
+        }
+
+        private static void CreateShaderGraphTransactional(ShaderGraphCommand cmd, ShaderGraphCommandResult result)
+        {
+            string assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            bool existed = File.Exists(fullPath);
+            if (existed && !cmd.overwrite)
+                throw new InvalidOperationException("Shader Graph already exists. Set overwrite=true to replace it.");
+
+            byte[] original = existed ? File.ReadAllBytes(fullPath) : null;
+            result.assetPath = assetPath;
+            result.originalHash = ComputeSha256(original);
+            if (existed)
+            {
+                EnsureShaderGraphAssetIsNotOpen(assetPath);
+                EnsureExpectedShaderGraphHash(cmd.expectedContentHash, result.originalHash);
+            }
+            try
+            {
+                EnsureUnityAssetFolder(Path.GetDirectoryName(assetPath).Replace('\\', '/'));
+                object graph = CreateTargetedShaderGraphData(cmd.pipeline, cmd.shaderType);
+                var requestedNodes = new Dictionary<string, object>(StringComparer.Ordinal);
+                foreach (ShaderGraphNodeRequest request in cmd.nodes ?? Array.Empty<ShaderGraphNodeRequest>())
+                {
+                    if (request == null || string.IsNullOrWhiteSpace(request.id))
+                        throw new InvalidOperationException("Every Shader Graph node requires a non-empty request id.");
+                    if (requestedNodes.ContainsKey(request.id))
+                        throw new InvalidOperationException("Duplicate Shader Graph node request id: " + request.id);
+                    object node = AddShaderGraphNodeToData(graph, request.nodeType, request.position, true);
+                    requestedNodes.Add(request.id, node);
+                }
+                foreach (ShaderGraphConnectionRequest connection in cmd.connections ?? Array.Empty<ShaderGraphConnectionRequest>())
+                {
+                    object source = ResolveShaderGraphNode(graph, requestedNodes, connection.from);
+                    object destination = ResolveShaderGraphNode(graph, requestedNodes, connection.to);
+                    ConnectShaderGraphNodeData(
+                        graph,
+                        source,
+                        connection.fromSlot,
+                        destination,
+                        connection.toSlot,
+                        false);
+                }
+
+                result.writeAttempted = true;
+                WriteShaderGraphData(assetPath, graph);
+                result.writeCompleted = true;
+                result.writtenHash = ComputeSha256(File.ReadAllBytes(fullPath));
+                result.graph = InspectShaderGraph(assetPath, cmd.openInEditor);
+                if (!result.graph.validationPassed)
+                    throw new InvalidOperationException(BuildShaderGraphValidationError(result.graph));
+                result.success = true;
+            }
+            catch (Exception mutationException)
+            {
+                TryRollBackShaderGraphAsset(assetPath, original, existed, mutationException, result);
+                throw;
+            }
+        }
+
+        private static void MutateShaderGraphTransactional(
+            ShaderGraphCommand cmd,
+            ShaderGraphCommandResult result,
+            ShaderGraphOperation operation)
+        {
+            string assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException("Shader Graph asset does not exist", assetPath);
+
+            byte[] original = File.ReadAllBytes(fullPath);
+            result.assetPath = assetPath;
+            result.originalHash = ComputeSha256(original);
+            EnsureShaderGraphAssetIsNotOpen(assetPath);
+            EnsureExpectedShaderGraphHash(cmd.expectedContentHash, result.originalHash);
+            try
+            {
+                object graph = ReadShaderGraphData(assetPath);
+                if (operation == ShaderGraphOperation.AddNode)
+                {
+                    ShaderGraphPoint position = cmd.hasPosition ? cmd.position : FindOpenShaderGraphPosition(graph);
+                    object node = AddShaderGraphNodeToData(graph, cmd.nodeType, position, true);
+                    result.mutation = new ShaderGraphMutationResult
+                    {
+                        nodeId = ReadStringMember(node, "objectId"),
+                        nodeType = node.GetType().FullName,
+                        slots = ReadShaderGraphSlots(node)
+                    };
+                }
+                else
+                {
+                    object source = ResolveShaderGraphNode(graph, null, cmd.sourceNodeId);
+                    object destination = ResolveShaderGraphNode(graph, null, cmd.destinationNodeId);
+                    ConnectShaderGraphNodeData(
+                        graph,
+                        source,
+                        cmd.sourceSlotId,
+                        destination,
+                        cmd.destinationSlotId,
+                        cmd.replaceExistingInput);
+                    result.mutation = new ShaderGraphMutationResult { connectionCreated = true };
+                }
+
+                result.writeAttempted = true;
+                WriteShaderGraphData(assetPath, graph);
+                result.writeCompleted = true;
+                result.writtenHash = ComputeSha256(File.ReadAllBytes(fullPath));
+                result.graph = InspectShaderGraph(assetPath, false);
+                if (!result.graph.validationPassed)
+                    throw new InvalidOperationException(BuildShaderGraphValidationError(result.graph));
+                result.success = true;
+            }
+            catch (Exception mutationException)
+            {
+                TryRollBackShaderGraphAsset(assetPath, original, true, mutationException, result);
+                throw;
+            }
+        }
+
+        private static void EnsureExpectedShaderGraphHash(string expectedHash, string actualHash)
+        {
+            if (string.IsNullOrWhiteSpace(expectedHash) ||
+                !System.Text.RegularExpressions.Regex.IsMatch(expectedHash, "^[a-fA-F0-9]{64}$"))
+                throw new InvalidOperationException(
+                    "Shader Graph mutation requires expectedContentHash from inspect_shader_graph.");
+            if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Shader Graph changed since inspection. Expected {expectedHash.ToLowerInvariant()}, " +
+                    $"but current content hash is {actualHash}. Inspect the graph again before mutating it.");
+        }
+
+        private static void EnsureShaderGraphAssetIsNotOpen(string assetPath)
+        {
+            string guid = AssetDatabase.AssetPathToGUID(assetPath);
+            if (string.IsNullOrEmpty(guid))
+                return;
+            foreach (EditorWindow window in UnityEngine.Resources.FindObjectsOfTypeAll<EditorWindow>())
+            {
+                if (window == null || window.GetType().FullName !=
+                    "UnityEditor.ShaderGraph.Drawing.MaterialGraphEditWindow")
+                    continue;
+                if (string.Equals(ReadStringMember(window, "selectedGuid"), guid, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Close this asset's Shader Graph window before mutating it. " +
+                        "This prevents overwriting unsaved or stale in-memory graph state.");
+                }
+            }
+        }
+
+        private static object CreateTargetedShaderGraphData(string requestedPipeline, string requestedShaderType)
+        {
+            ShaderGraphCapabilities capabilities = ProbeShaderGraphCapabilities();
+            if (!capabilities.createSupported)
+                throw new InvalidOperationException(
+                    "Shader Graph creation is unavailable: " + string.Join(", ", capabilities.missingMembers));
+
+            string pipeline = string.IsNullOrWhiteSpace(requestedPipeline)
+                ? "auto"
+                : requestedPipeline.Trim().ToLowerInvariant();
+            string shaderType = string.IsNullOrWhiteSpace(requestedShaderType)
+                ? "unlit"
+                : requestedShaderType.Trim().ToLowerInvariant();
+            if (shaderType != "lit" && shaderType != "unlit")
+                throw new InvalidOperationException("shaderType must be 'lit' or 'unlit'.");
+            if (pipeline == "auto")
+            {
+                string current = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline?.GetType().FullName ?? "";
+                if (string.IsNullOrEmpty(current))
+                    pipeline = "built_in";
+                else if (current.IndexOf("Universal", StringComparison.OrdinalIgnoreCase) >= 0)
+                    pipeline = "urp";
+                else
+                    throw new InvalidOperationException(
+                        "pipeline=auto does not support the active render pipeline: " + current +
+                        ". Select a supported pipeline explicitly or use inspection-only tools.");
+            }
+            if (pipeline != "built_in" && pipeline != "urp")
+                throw new InvalidOperationException("pipeline must be 'auto', 'built_in', or 'urp'.");
+
+            string targetName = pipeline == "urp"
+                ? "UnityEditor.Rendering.Universal.ShaderGraph.UniversalTarget"
+                : "UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInTarget";
+            string subTargetName = pipeline == "urp"
+                ? (shaderType == "lit"
+                    ? "UnityEditor.Rendering.Universal.ShaderGraph.UniversalLitSubTarget"
+                    : "UnityEditor.Rendering.Universal.ShaderGraph.UniversalUnlitSubTarget")
+                : (shaderType == "lit"
+                    ? "UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInLitSubTarget"
+                    : "UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInUnlitSubTarget");
+            Type targetType = FindLoadedType(targetName);
+            Type subTargetType = FindLoadedType(subTargetName);
+            if (targetType == null || subTargetType == null)
+                throw new InvalidOperationException(
+                    $"The installed packages do not provide the requested {pipeline}/{shaderType} Shader Graph target.");
+
+            object target = Activator.CreateInstance(targetType, true);
+            MethodInfo setSubTarget = targetType.GetMethod(
+                "TrySetActiveSubTarget",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(Type) },
+                null);
+            if (setSubTarget == null || !(bool)setSubTarget.Invoke(target, new object[] { subTargetType }))
+                throw new InvalidOperationException("Shader Graph rejected the requested active sub-target.");
+
+            Type targetBase = RequireShaderGraphType("UnityEditor.ShaderGraph.Target");
+            Array targets = Array.CreateInstance(targetBase, 1);
+            targets.SetValue(target, 0);
+            Array blocks = BuildShaderGraphBlockDescriptors(shaderType);
+
+            Type graphType = RequireShaderGraphType("UnityEditor.ShaderGraph.GraphData");
+            object graph = Activator.CreateInstance(graphType, true);
+            InvokeRequired(graph, "AddContexts");
+            InvokeRequired(graph, "InitializeOutputs", targets, blocks);
+            TryAddDefaultShaderGraphCategory(graph);
+            SetMember(graph, "path", "Shader Graphs");
+            return graph;
+        }
+
+        private static Array BuildShaderGraphBlockDescriptors(string shaderType)
+        {
+            Type blockType = RequireShaderGraphType("UnityEditor.ShaderGraph.BlockFieldDescriptor");
+            Type blockFields = RequireShaderGraphType("UnityEditor.ShaderGraph.BlockFields");
+            var names = new List<string>
+            {
+                "VertexDescription.Position",
+                "VertexDescription.Normal",
+                "VertexDescription.Tangent",
+                "SurfaceDescription.BaseColor"
+            };
+            if (shaderType == "lit")
+            {
+                names.AddRange(new[]
+                {
+                    "SurfaceDescription.NormalTS",
+                    "SurfaceDescription.Metallic",
+                    "SurfaceDescription.Smoothness",
+                    "SurfaceDescription.Emission",
+                    "SurfaceDescription.Occlusion"
+                });
+            }
+
+            Array blocks = Array.CreateInstance(blockType, names.Count);
+            for (int index = 0; index < names.Count; index++)
+            {
+                string[] parts = names[index].Split('.');
+                Type nested = blockFields.GetNestedType(parts[0], BindingFlags.Public | BindingFlags.NonPublic);
+                FieldInfo field = nested?.GetField(parts[1], BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                object descriptor = field?.GetValue(null);
+                if (descriptor == null)
+                    throw new InvalidOperationException("Shader Graph block descriptor is unavailable: " + names[index]);
+                blocks.SetValue(descriptor, index);
+            }
+            return blocks;
+        }
+
+        private static void TryAddDefaultShaderGraphCategory(object graph)
+        {
+            Type categoryType = FindLoadedType("UnityEditor.ShaderGraph.CategoryData");
+            const BindingFlags staticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            const BindingFlags instanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            MethodInfo defaultCategory = categoryType?.GetMethods(staticFlags)
+                .Where(method => method.Name == "DefaultCategory")
+                .OrderBy(method => method.GetParameters().Length)
+                .FirstOrDefault(method => method.GetParameters().All(parameter => parameter.IsOptional));
+            if (defaultCategory == null)
+                throw new InvalidOperationException("Shader Graph CategoryData.DefaultCategory is unavailable.");
+
+            object category = defaultCategory.Invoke(
+                null,
+                defaultCategory.GetParameters()
+                    .Select(parameter => parameter.DefaultValue == DBNull.Value ? Type.Missing : parameter.DefaultValue)
+                    .ToArray());
+            MethodInfo addCategory = graph.GetType().GetMethods(instanceFlags)
+                .FirstOrDefault(method =>
+                    method.Name == "AddCategory" &&
+                    method.GetParameters().Length == 1 &&
+                    method.GetParameters()[0].ParameterType.IsInstanceOfType(category));
+            if (addCategory == null)
+                throw new InvalidOperationException("Shader Graph GraphData.AddCategory is unavailable.");
+            addCategory.Invoke(graph, new[] { category });
+        }
+
+        private static object AddShaderGraphNodeToData(
+            object graph,
+            string nodeTypeName,
+            ShaderGraphPoint position,
+            bool positionRequired)
+        {
+            Type nodeType = ResolveShaderGraphNodeType(nodeTypeName);
+            if (nodeType == null)
+                throw new InvalidOperationException("Unknown or unsupported Shader Graph node type: " + nodeTypeName);
+            object node = Activator.CreateInstance(nodeType, true);
+            InvokeOptional(node, "UpdateNodeAfterDeserialization");
+            SetShaderGraphNodePosition(node, positionRequired ? position : null);
+            InvokeRequired(graph, "AddNode", node);
+            InvokeOptional(node, "UpdateNodeAfterDeserialization");
+            string objectId = ReadStringMember(node, "objectId");
+            if (string.IsNullOrEmpty(objectId))
+                throw new InvalidOperationException("Shader Graph did not assign an object ID to the new node.");
+            return node;
+        }
+
+        private static Type ResolveShaderGraphNodeType(string requested)
+        {
+            if (string.IsNullOrWhiteSpace(requested))
+                return null;
+            Type baseType = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            Type exact = FindLoadedType(requested.Trim());
+            if (exact != null && !exact.IsAbstract && baseType.IsAssignableFrom(exact))
+                return exact;
+
+            string normalized = new string(requested.Where(char.IsLetterOrDigit).ToArray());
+            if (!normalized.EndsWith("Node", StringComparison.OrdinalIgnoreCase))
+                normalized += "Node";
+            var matches = new List<Type>();
+            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                foreach (Type candidate in GetLoadableTypes(assembly))
+                {
+                    if (candidate == null || candidate.IsAbstract || !baseType.IsAssignableFrom(candidate))
+                        continue;
+                    if (string.Equals(candidate.Name, normalized, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matches.Add(candidate);
+                        continue;
+                    }
+                    string candidateLabel = new string(candidate.Name.Where(char.IsLetterOrDigit).ToArray());
+                    if (string.Equals(candidateLabel, normalized, StringComparison.OrdinalIgnoreCase))
+                        matches.Add(candidate);
+                }
+            }
+            matches = matches.Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal).ToList();
+            if (matches.Count > 1)
+            {
+                throw new InvalidOperationException(
+                    "Shader Graph node name is ambiguous. Use one of these fully-qualified types: " +
+                    string.Join(", ", matches.Select(type => type.FullName)));
+            }
+            return matches.SingleOrDefault();
+        }
+
+        private static object ResolveShaderGraphNode(
+            object graph,
+            Dictionary<string, object> requestedNodes,
+            string selector)
+        {
+            if (string.IsNullOrWhiteSpace(selector))
+                throw new InvalidOperationException("Shader Graph connections require node selectors.");
+            if (requestedNodes != null && requestedNodes.TryGetValue(selector, out object requested))
+                return requested;
+
+            Type abstractNode = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            IEnumerable nodes = InvokeGenericEnumerable(graph, "GetNodes", abstractNode);
+            string blockName = selector.StartsWith("block:", StringComparison.OrdinalIgnoreCase)
+                ? selector.Substring("block:".Length)
+                : null;
+            foreach (object node in nodes)
+            {
+                if (string.Equals(ReadStringMember(node, "objectId"), selector, StringComparison.Ordinal))
+                    return node;
+                if (blockName != null)
+                {
+                    object descriptor = ReadMember(node, "descriptor");
+                    string name = ReadStringMember(descriptor, "name") ?? ReadStringMember(descriptor, "displayName");
+                    if (string.Equals(name, blockName, StringComparison.OrdinalIgnoreCase))
+                        return node;
+                }
+            }
+            throw new InvalidOperationException("Shader Graph node was not found: " + selector);
+        }
+
+        private static void ConnectShaderGraphNodeData(
+            object graph,
+            object sourceNode,
+            int sourceSlotId,
+            object destinationNode,
+            int destinationSlotId,
+            bool replaceExistingInput)
+        {
+            object sourceSlot = FindShaderGraphSlot(sourceNode, sourceSlotId);
+            object destinationSlot = FindShaderGraphSlot(destinationNode, destinationSlotId);
+            if (!ReadBoolMember(sourceSlot, "isOutputSlot"))
+                throw new InvalidOperationException($"Source slot {sourceSlotId} is not an output slot.");
+            if (!ReadBoolMember(destinationSlot, "isInputSlot"))
+                throw new InvalidOperationException($"Destination slot {destinationSlotId} is not an input slot.");
+
+            MethodInfo compatible = sourceSlot.GetType()
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method =>
+                    method.Name == "IsCompatibleWith" &&
+                    method.GetParameters().Length == 1 &&
+                    method.GetParameters()[0].ParameterType.IsInstanceOfType(destinationSlot));
+            if (compatible != null && !(bool)compatible.Invoke(sourceSlot, new[] { destinationSlot }))
+                throw new InvalidOperationException("Shader Graph rejected the connection because the slots are incompatible.");
+
+            object sourceReference = ReadMember(sourceSlot, "slotReference");
+            object destinationReference = ReadMember(destinationSlot, "slotReference");
+            bool destinationOccupied = ReadEnumerableMember(graph, "edges").Cast<object>().Any(edge =>
+            {
+                object input = ReadMember(edge, "inputSlot");
+                return ReferenceEquals(ReadMember(input, "node"), destinationNode) &&
+                    ReadIntMember(input, "slotId") == destinationSlotId;
+            });
+            if (destinationOccupied && !replaceExistingInput)
+            {
+                throw new InvalidOperationException(
+                    $"Destination input slot {destinationSlotId} already has a connection. " +
+                    "Set replaceExistingInput=true only if replacing that edge is intentional.");
+            }
+            MethodInfo connect = graph.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "Connect" && method.GetParameters().Length == 2 &&
+                    method.GetParameters()[0].ParameterType.IsInstanceOfType(sourceReference) &&
+                    method.GetParameters()[1].ParameterType.IsInstanceOfType(destinationReference));
+            if (connect == null)
+                throw new InvalidOperationException("GraphData.Connect(SlotReference, SlotReference) is unavailable.");
+            object edge = connect.Invoke(graph, new[] { sourceReference, destinationReference });
+            if (edge == null)
+                throw new InvalidOperationException("Shader Graph did not create the requested connection.");
+            InvokeOptional(graph, "ValidateGraph");
+        }
+
+        private static object FindShaderGraphSlot(object node, int slotId)
+        {
+            Type slotType = RequireShaderGraphType("UnityEditor.ShaderGraph.MaterialSlot");
+            Type listType = typeof(List<>).MakeGenericType(slotType);
+            object list = Activator.CreateInstance(listType);
+            MethodInfo method = node.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(item => item.Name == "GetSlots" && item.IsGenericMethodDefinition &&
+                    item.GetParameters().Length == 1);
+            method?.MakeGenericMethod(slotType).Invoke(node, new[] { list });
+            foreach (object slot in (IEnumerable)list)
+            {
+                if (ReadIntMember(slot, "id") == slotId)
+                    return slot;
+            }
+            throw new InvalidOperationException($"Slot {slotId} was not found on node {ReadStringMember(node, "objectId")}.");
+        }
+
+        private static ShaderGraphPoint FindOpenShaderGraphPosition(object graph)
+        {
+            Type abstractNode = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            var occupied = new List<Rect>();
+            foreach (object node in InvokeGenericEnumerable(graph, "GetNodes", abstractNode))
+                occupied.Add(ReadShaderGraphNodeRect(node));
+
+            float x = occupied.Count == 0 ? 0 : Mathf.Ceil(occupied.Max(rect => rect.xMax) / 24f) * 24f + 96f;
+            float y = 0;
+            var candidate = new Rect(x, y, 240, 144);
+            while (occupied.Any(rect => RectsOverlapWithPadding(candidate, rect, 24f)))
+            {
+                y += 192f;
+                candidate.y = y;
+            }
+            return new ShaderGraphPoint { x = x, y = y };
+        }
+
+        private static bool RectsOverlapWithPadding(Rect left, Rect right, float padding)
+        {
+            return left.xMin < right.xMax + padding && left.xMax + padding > right.xMin &&
+                left.yMin < right.yMax + padding && left.yMax + padding > right.yMin;
+        }
+
+        private static Rect ReadShaderGraphNodeRect(object node)
+        {
+            object drawState = ReadMember(node, "drawState");
+            object position = ReadMember(drawState, "position");
+            return position is Rect ? (Rect)position : new Rect(0, 0, 240, 144);
+        }
+
+        private static void SetShaderGraphNodePosition(object node, ShaderGraphPoint position)
+        {
+            if (position == null || float.IsNaN(position.x) || float.IsInfinity(position.x) ||
+                float.IsNaN(position.y) || float.IsInfinity(position.y))
+            {
+                throw new InvalidOperationException("Shader Graph node positions must contain finite x and y values.");
+            }
+
+            System.Reflection.PropertyInfo drawStateProperty = node.GetType().GetProperty(
+                "drawState",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (drawStateProperty == null || !drawStateProperty.CanWrite)
+                throw new InvalidOperationException("Shader Graph node drawState is unavailable.");
+            object drawState = drawStateProperty.GetValue(node);
+            Rect current = ReadMember(drawState, "position") is Rect
+                ? (Rect)ReadMember(drawState, "position")
+                : new Rect(0, 0, 240, 144);
+            SetMember(drawState, "position", new Rect(position.x, position.y, current.width, current.height));
+            drawStateProperty.SetValue(node, drawState);
+        }
+
+        private static object ReadShaderGraphData(string assetPath)
+        {
+            Type fileUtilities = FindLoadedType("UnityEditor.ShaderGraph.FileUtilities");
+            MethodInfo reader = FindTryReadGraphMethod(fileUtilities);
+            if (reader != null)
+            {
+                object[] args = { assetPath, null };
+                bool read = (bool)reader.Invoke(null, args);
+                if (!read || args[1] == null)
+                    throw new InvalidOperationException("Shader Graph MultiJson deserialization failed.");
+                return args[1];
+            }
+
+            Type graphType = RequireShaderGraphType("UnityEditor.ShaderGraph.GraphData");
+            Type multiJson = RequireShaderGraphType("UnityEditor.ShaderGraph.Serialization.MultiJson");
+            MethodInfo deserialize = FindMultiJsonDeserializeMethod(multiJson, graphType);
+            if (deserialize == null)
+                throw new InvalidOperationException(
+                    "Neither FileUtilities.TryReadGraphDataFromDisk nor MultiJson.Deserialize<GraphData> is available.");
+
+            object graph = Activator.CreateInstance(graphType, true);
+            SetMember(graph, "assetGuid", AssetDatabase.AssetPathToGUID(assetPath));
+            Type messageManager = FindLoadedType("UnityEditor.ShaderGraph.MessageManager");
+            if (messageManager != null)
+                SetMember(graph, "messageManager", Activator.CreateInstance(messageManager, true));
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            string contents = File.ReadAllText(fullPath, Encoding.UTF8);
+            MethodInfo closedDeserialize = deserialize.MakeGenericMethod(graphType);
+            object[] deserializeArgs = closedDeserialize.GetParameters()
+                .Select((parameter, index) => index == 0
+                    ? graph
+                    : index == 1
+                        ? contents
+                        : parameter.DefaultValue == DBNull.Value ? Type.Missing : parameter.DefaultValue)
+                .ToArray();
+            closedDeserialize.Invoke(null, deserializeArgs);
+            InvokeOptional(graph, "OnEnable");
+            InvokeOptional(graph, "ValidateGraph");
+            return graph;
+        }
+
+        private static void WriteShaderGraphData(string assetPath, object graph)
+        {
+            Type multiJson = RequireShaderGraphType("UnityEditor.ShaderGraph.Serialization.MultiJson");
+            MethodInfo serialize = FindMultiJsonSerializeMethod(multiJson, graph.GetType());
+            if (serialize == null)
+                throw new InvalidOperationException("MultiJson.Serialize(GraphData) is unavailable.");
+            string contents = serialize.Invoke(null, new[] { graph }) as string;
+            if (string.IsNullOrWhiteSpace(contents))
+                throw new InvalidOperationException("Shader Graph serialization produced no content.");
+
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            WriteAtomicText(fullPath, contents);
+            AssetDatabase.ImportAsset(
+                assetPath,
+                ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+        }
+
+        private static void TryRollBackShaderGraphAsset(
+            string assetPath,
+            byte[] original,
+            bool existed,
+            Exception mutationException,
+            ShaderGraphCommandResult result)
+        {
+            try
+            {
+                RollBackShaderGraphAsset(assetPath, original, existed);
+                result.rolledBack = true;
+            }
+            catch (Exception rollbackException)
+            {
+                result.rollbackError = rollbackException.Message;
+                throw new InvalidOperationException(
+                    $"Shader Graph mutation failed: {mutationException.Message} " +
+                    $"Rollback also failed: {rollbackException.Message}",
+                    new AggregateException(mutationException, rollbackException));
+            }
+        }
+
+        private static void RollBackShaderGraphAsset(string assetPath, byte[] original, bool existed)
+        {
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            if (existed && original != null)
+            {
+                WriteAtomicBytes(fullPath, original);
+                string restoredHash = ComputeSha256(File.ReadAllBytes(fullPath));
+                string expectedHash = ComputeSha256(original);
+                if (!string.Equals(restoredHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Restored Shader Graph bytes did not match the original SHA-256 hash.");
+                AssetDatabase.ImportAsset(
+                    assetPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+            }
+            else
+            {
+                string metaPath = fullPath + ".meta";
+                bool deletedByAssetDatabase = AssetDatabase.DeleteAsset(assetPath);
+                if (!deletedByAssetDatabase && File.Exists(fullPath))
+                    File.Delete(fullPath);
+                if (!deletedByAssetDatabase && File.Exists(metaPath))
+                    File.Delete(metaPath);
+                if (File.Exists(fullPath) || File.Exists(metaPath))
+                    throw new IOException("New Shader Graph asset or metadata remained after rollback.");
+            }
+        }
+
+        private static string BuildShaderGraphValidationError(ShaderGraphSummary graph)
+        {
+            if (graph == null || !graph.graphDeserialized)
+                return "Unity could not deserialize the Shader Graph.";
+            if (graph.targetCount == 0)
+                return "Shader Graph has no active target.";
+            if (!graph.shaderLoaded)
+                return "Shader Graph import did not produce a loadable Shader asset.";
+            if (graph.unknownObjectCount > 0)
+                return $"Shader Graph contains {graph.unknownObjectCount} unresolved serialized objects.";
+            ShaderGraphCompilerDiagnostic firstError = graph.diagnostics?.FirstOrDefault(item =>
+                item.severity.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (firstError != null)
+                return "Shader Graph compilation failed: " + firstError.message;
+            if (graph.hasCompileErrors)
+                return "Unity reports Shader Graph compiler errors.";
+            return "Shader Graph validation did not pass.";
+        }
+
+        private static string NormalizeShaderGraphAssetPath(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length > 1024)
+                throw new InvalidOperationException("assetPath is required and must be at most 1024 characters.");
+            string normalized = value.Trim().Replace('\\', '/');
+            if (!normalized.StartsWith("Assets/", StringComparison.Ordinal) ||
+                !normalized.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Split('/').Any(part => part == ".." || part.Length == 0))
+            {
+                throw new InvalidOperationException("assetPath must be a normalized Assets/... path ending in .shadergraph.");
+            }
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
+            string assetsRoot = Path.GetFullPath(Application.dataPath).TrimEnd(Path.DirectorySeparatorChar) +
+                Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(assetsRoot, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Shader Graph assetPath escaped the project's Assets folder.");
+            return normalized;
+        }
+
+        private static void EnsureUnityAssetFolder(string assetFolder)
+        {
+            if (string.IsNullOrEmpty(assetFolder) || assetFolder == "Assets")
+                return;
+            string[] parts = assetFolder.Split('/');
+            string current = parts[0];
+            for (int index = 1; index < parts.Length; index++)
+            {
+                string next = current + "/" + parts[index];
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    string guid = AssetDatabase.CreateFolder(current, parts[index]);
+                    if (string.IsNullOrEmpty(guid))
+                        throw new InvalidOperationException("Could not create Shader Graph folder: " + next);
+                }
+                current = next;
+            }
+        }
+
+        private static System.Reflection.Assembly GetShaderGraphAssembly()
+        {
+            System.Reflection.Assembly assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item =>
+                string.Equals(item.GetName().Name, "Unity.ShaderGraph.Editor", StringComparison.Ordinal));
+            if (assembly != null)
+                return assembly;
+            try
+            {
+                return System.Reflection.Assembly.Load("Unity.ShaderGraph.Editor");
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Type FindLoadedType(string fullName)
+        {
+            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = assembly.GetType(fullName, false);
+                if (type != null)
+                    return type;
+            }
+            GetShaderGraphAssembly();
+            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = assembly.GetType(fullName, false);
+                if (type != null)
+                    return type;
+            }
+            return null;
+        }
+
+        private static Type RequireShaderGraphType(string fullName)
+        {
+            Type type = FindLoadedType(fullName);
+            if (type == null)
+                throw new InvalidOperationException("Shader Graph API type is unavailable: " + fullName);
+            return type;
+        }
+
+        private static Type[] GetLoadableTypes(System.Reflection.Assembly assembly)
+        {
+            try
+            {
+                return assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException exception)
+            {
+                return exception.Types.Where(type => type != null).ToArray();
+            }
+            catch
+            {
+                return Array.Empty<Type>();
+            }
+        }
+
+        private static MethodInfo FindTryReadGraphMethod(Type fileUtilities)
+        {
+            return fileUtilities?.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "TryReadGraphDataFromDisk" &&
+                    method.GetParameters().Length == 2 && method.GetParameters()[1].IsOut);
+        }
+
+        private static MethodInfo FindMultiJsonDeserializeMethod(Type multiJson, Type graphType)
+        {
+            if (multiJson == null || graphType == null)
+                return null;
+
+            return multiJson.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "Deserialize" &&
+                    method.IsGenericMethodDefinition && method.GetGenericArguments().Length == 1 &&
+                    method.GetParameters().Length >= 2 &&
+                    method.GetParameters()[0].ParameterType.IsGenericParameter &&
+                    method.GetParameters()[1].ParameterType == typeof(string) &&
+                    method.GetParameters().Skip(2).All(parameter => parameter.IsOptional));
+        }
+
+        private static MethodInfo FindMultiJsonSerializeMethod(Type multiJson, Type graphType)
+        {
+            if (multiJson == null || graphType == null)
+                return null;
+            return multiJson.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "Serialize" && method.GetParameters().Length == 1 &&
+                    method.GetParameters()[0].ParameterType.IsAssignableFrom(graphType));
+        }
+
+        private static IEnumerable InvokeGenericEnumerable(object target, string methodName, Type genericType)
+        {
+            MethodInfo method = target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(item => item.Name == methodName && item.IsGenericMethodDefinition &&
+                    item.GetGenericArguments().Length == 1 && item.GetParameters().Length == 0);
+            return method?.MakeGenericMethod(genericType).Invoke(target, null) as IEnumerable;
+        }
+
+        private static IEnumerable ReadEnumerableMember(object target, string name)
+        {
+            return ReadMember(target, name) as IEnumerable ?? Array.Empty<object>();
+        }
+
+        private static object ReadMember(object target, string name)
+        {
+            if (target == null)
+                return null;
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Static |
+                BindingFlags.Public | BindingFlags.NonPublic;
+            Type type = target as Type ?? target.GetType();
+            object instance = target is Type ? null : target;
+            System.Reflection.PropertyInfo property = type.GetProperty(name, flags);
+            if (property != null && property.GetIndexParameters().Length == 0)
+                return property.GetValue(instance);
+            FieldInfo field = type.GetField(name, flags) ?? type.GetField("m_" + char.ToUpperInvariant(name[0]) + name.Substring(1), flags);
+            return field?.GetValue(instance);
+        }
+
+        private static void SetMember(object target, string name, object value)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            Type type = target.GetType();
+            System.Reflection.PropertyInfo property = type.GetProperty(name, flags);
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(target, value);
+                return;
+            }
+            FieldInfo field = type.GetField(name, flags) ?? type.GetField("m_" + char.ToUpperInvariant(name[0]) + name.Substring(1), flags);
+            if (field == null)
+                throw new InvalidOperationException($"{type.FullName}.{name} is unavailable.");
+            field.SetValue(target, value);
+        }
+
+        private static string ReadStringMember(object target, string name)
+        {
+            return ReadMember(target, name)?.ToString();
+        }
+
+        private static int ReadIntMember(object target, string name)
+        {
+            object value = ReadMember(target, name);
+            return value == null ? 0 : Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }
+
+        private static bool ReadBoolMember(object target, string name)
+        {
+            object value = ReadMember(target, name);
+            return value != null && Convert.ToBoolean(value, CultureInfo.InvariantCulture);
+        }
+
+        private static object InvokeRequired(object target, string methodName, params object[] args)
+        {
+            MethodInfo method = FindCompatibleMethod(target.GetType(), methodName, args);
+            if (method == null)
+                throw new InvalidOperationException($"{target.GetType().FullName}.{methodName} is unavailable.");
+            return method.Invoke(target, args);
+        }
+
+        private static object InvokeOptional(object target, string methodName, params object[] args)
+        {
+            MethodInfo method = FindCompatibleMethod(target.GetType(), methodName, args);
+            return method?.Invoke(target, args);
+        }
+
+        private static MethodInfo FindCompatibleMethod(Type type, string name, object[] args)
+        {
+            return type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == name && method.GetParameters().Length == args.Length &&
+                    method.GetParameters().Select((parameter, index) =>
+                        args[index] == null || parameter.ParameterType.IsInstanceOfType(args[index])).All(matches => matches));
+        }
+
+        private static string ComputeSha256(byte[] bytes)
+        {
+            if (bytes == null)
+                return null;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+        }
+
         #endregion
 
         #region State Export
@@ -4637,7 +5922,8 @@ namespace BantworksMCP
                 "targeted_hierarchy_queries",
                 "main_thread_unity_api",
                 "unity_test_runner",
-                "banter_visual_scripting"
+                "banter_visual_scripting",
+                "shader_graph_commands"
             };
             if (pipeServerAvailable)
                 capabilities.Insert(0, "named_pipe_commands");
@@ -5187,6 +6473,207 @@ namespace BantworksMCP
             public string name;
             public string type;
             public bool isFolder;
+        }
+
+        private enum ShaderGraphOperation
+        {
+            Capabilities,
+            List,
+            Inspect,
+            Create,
+            AddNode,
+            Connect,
+            Validate
+        }
+
+        [Serializable]
+        private class ShaderGraphCommand
+        {
+            public string id;
+            public string type;
+            public string assetPath;
+            public string pipeline;
+            public string shaderType;
+            public bool overwrite;
+            public string expectedContentHash;
+            public bool openInEditor;
+            public int limit;
+            public string nodeType;
+            public bool hasPosition;
+            public ShaderGraphPoint position;
+            public string sourceNodeId;
+            public int sourceSlotId;
+            public string destinationNodeId;
+            public int destinationSlotId;
+            public bool replaceExistingInput;
+            public ShaderGraphNodeRequest[] nodes;
+            public ShaderGraphConnectionRequest[] connections;
+        }
+
+        [Serializable]
+        private class ShaderGraphPoint
+        {
+            public float x;
+            public float y;
+        }
+
+        [Serializable]
+        private class ShaderGraphNodeRequest
+        {
+            public string id;
+            public string nodeType;
+            public ShaderGraphPoint position;
+        }
+
+        [Serializable]
+        private class ShaderGraphConnectionRequest
+        {
+            public string from;
+            public int fromSlot;
+            public string to;
+            public int toSlot;
+        }
+
+        [Serializable]
+        private class ShaderGraphCommandResult
+        {
+            public string commandId;
+            public bool success;
+            public string operation;
+            public string assetPath;
+            public string error;
+            public string errorType;
+            public bool rolledBack;
+            public string rollbackError;
+            public bool writeAttempted;
+            public bool writeCompleted;
+            public string originalHash;
+            public string writtenHash;
+            public long timestamp;
+            public ShaderGraphCapabilities capabilities;
+            public List<ShaderGraphAssetEntry> assets;
+            public ShaderGraphSummary graph;
+            public ShaderGraphMutationResult mutation;
+            public List<string> warnings;
+        }
+
+        [Serializable]
+        private class ShaderGraphCapabilities
+        {
+            public bool packageInstalled;
+            public bool assemblyLoaded;
+            public bool readSupported;
+            public bool writeSupported;
+            public bool createSupported;
+            public bool nodeMutationSupported;
+            public bool connectionSupported;
+            public string packageVersion;
+            public string assemblyVersion;
+            public string activeRenderPipeline;
+            public List<string> supportedTemplates;
+            public List<string> missingMembers;
+        }
+
+        [Serializable]
+        private class ShaderGraphAssetEntry
+        {
+            public string assetPath;
+            public string guid;
+            public string name;
+            public string dependencyHash;
+            public bool hasCompileErrors;
+        }
+
+        [Serializable]
+        private class ShaderGraphSummary
+        {
+            public string assetPath;
+            public string assetGuid;
+            public string dependencyHash;
+            public string contentHash;
+            public string shaderName;
+            public bool shaderLoaded;
+            public int nodeCount;
+            public int edgeCount;
+            public int targetCount;
+            public int propertyCount;
+            public int unknownObjectCount;
+            public bool graphDeserialized;
+            public bool hasCompileErrors;
+            public bool validationPassed;
+            public List<ShaderGraphNodeInfo> nodes;
+            public List<ShaderGraphEdgeInfo> edges;
+            public List<ShaderGraphTargetInfo> targets;
+            public List<ShaderGraphPropertyInfo> properties;
+            public List<ShaderGraphCompilerDiagnostic> diagnostics;
+            public List<string> warnings;
+        }
+
+        [Serializable]
+        private class ShaderGraphNodeInfo
+        {
+            public string id;
+            public string name;
+            public string type;
+            public bool isBlock;
+            public string blockDescriptor;
+            public float[] position;
+            public List<ShaderGraphSlotInfo> slots;
+        }
+
+        [Serializable]
+        private class ShaderGraphSlotInfo
+        {
+            public int id;
+            public string name;
+            public string type;
+            public string direction;
+            public string valueType;
+        }
+
+        [Serializable]
+        private class ShaderGraphEdgeInfo
+        {
+            public string outputNodeId;
+            public int outputSlotId;
+            public string inputNodeId;
+            public int inputSlotId;
+        }
+
+        [Serializable]
+        private class ShaderGraphTargetInfo
+        {
+            public string type;
+            public string displayName;
+        }
+
+        [Serializable]
+        private class ShaderGraphPropertyInfo
+        {
+            public string id;
+            public string type;
+            public string displayName;
+            public string referenceName;
+            public bool exposed;
+        }
+
+        [Serializable]
+        private class ShaderGraphCompilerDiagnostic
+        {
+            public string severity;
+            public string message;
+            public string file;
+            public int line;
+        }
+
+        [Serializable]
+        private class ShaderGraphMutationResult
+        {
+            public string requestedId;
+            public string nodeId;
+            public string nodeType;
+            public List<ShaderGraphSlotInfo> slots;
+            public bool connectionCreated;
         }
 
         [Serializable]
