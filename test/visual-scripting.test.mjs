@@ -65,6 +65,57 @@ test("generator emits canonical elements and versionless connections", () => {
   assert.match(result.assetContent, /m_EditorClassIdentifier: Unity\.VisualScripting\.Flow::Unity\.VisualScripting\.ScriptGraphAsset/);
 });
 
+test("generator auto-positions omitted nodes without overlap", () => {
+  const result = generateVSGraph({
+    graphName: "Auto Layout",
+    nodes: [
+      { type: "Start", id: "start" },
+      { type: "Literal", id: "value", properties: { valueType: "System.Boolean", value: true } },
+      { type: "SetVariable", id: "set", properties: { name: "ready" } },
+    ],
+    connections: [
+      { from: "start", fromPort: "trigger", to: "set", toPort: "assign", type: "control" },
+      { from: "value", fromPort: "output", to: "set", toPort: "input", type: "value" },
+    ],
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.layout.autoPositionedNodeCount, 3);
+  const generated = JSON.parse(result.graphJson);
+  const nodes = generated.graph.elements.filter((element) => !element.$type.endsWith("Connection"));
+  assert.equal(new Set(nodes.map((element) => `${element.position.x},${element.position.y}`)).size, 3);
+  const set = nodes.find((element) => element.$type === "Unity.VisualScripting.SetVariable");
+  const start = nodes.find((element) => element.$type === "Unity.VisualScripting.Start");
+  const value = nodes.find((element) => element.$type === "Unity.VisualScripting.Literal");
+  assert.ok(set.position.x > start.position.x);
+  assert.ok(set.position.x > value.position.x);
+});
+
+test("generator preserves explicit positions while laying out missing nodes", () => {
+  const result = generateVSGraph({
+    graphName: "Mixed Layout",
+    nodes: [
+      { type: "Start", id: "start", position: { x: -720, y: 144 } },
+      { type: "Debug", id: "debug" },
+    ],
+    connections: [
+      { from: "start", fromPort: "trigger", to: "debug", toPort: "enter", type: "control" },
+    ],
+  });
+
+  assert.equal(result.success, true);
+  const generated = JSON.parse(result.graphJson);
+  const start = generated.graph.elements.find((element) => element.$type === "Unity.VisualScripting.Start");
+  const debug = generated.graph.elements.find((element) => element.$type === "Unity.VisualScripting.Debug");
+  assert.deepEqual(start.position, { x: -720, y: 144 });
+  assert.notDeepEqual(debug.position, start.position);
+  assert.ok(debug.position.x > start.position.x);
+  assert.ok(debug.position.x - start.position.x <= 360);
+  assert.ok(Math.abs(debug.position.y - start.position.y) <= 24);
+  assert.equal(result.layout.explicitNodeCount, 1);
+  assert.equal(result.layout.autoPositionedNodeCount, 1);
+});
+
 test("generator uses the singular space-state type and valid empty Banter flow ports", () => {
   const result = generateVSGraph({
     graphName: "Networking",

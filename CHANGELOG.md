@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added deterministic topology-aware layout for generated Visual Scripting nodes whose positions are omitted. The layout preserves authored positions, handles cycles, follows connected explicit anchors, snaps to a configurable grid, and uses node-size estimates or hints to avoid overlap.
+- Added a disposable Unity import smoke that verifies generated positions survive Visual Scripting deserialization in Unity 2022.3.39f1/Visual Scripting 1.9.4 and Unity 6000.3.10f1/Visual Scripting 1.9.9.
+
+### Verified
+
+- 100 Node tests pass, including chains, fan-in, cycles, explicit anchors, invalid hints, schema bounds, and generated graph serialization.
+- The spatial-layout fixture imported with zero new compiler errors in both tested Unity generations; all three positions persisted, the explicit anchor remained unchanged, the consumer followed its producers, and no units shared a position.
+
 ## 2.3.0 - 2026-08-04
 
 ### Added

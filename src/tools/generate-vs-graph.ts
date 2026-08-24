@@ -6,6 +6,12 @@
  */
 
 import { randomUUID } from "crypto";
+import {
+  GraphLayoutOptions,
+  GraphLayoutResult,
+  GraphSize,
+  layoutDirectedGraph,
+} from "../lib/graph-layout.js";
 import { BANTER_CUSTOM_VS_NODES } from "../resources/banter-custom-vs-nodes.js";
 
 export interface NodeSpec {
@@ -13,6 +19,7 @@ export interface NodeSpec {
   id: string;
   properties?: Record<string, unknown>;
   position?: { x: number; y: number };
+  size?: GraphSize;
 }
 
 export interface ConnectionSpec {
@@ -36,6 +43,7 @@ export interface GenerateVSGraphParams {
   nodes?: Array<unknown>;
   connections?: Array<unknown>;
   variables?: Array<unknown>;
+  layout?: GraphLayoutOptions;
 }
 
 export interface GenerateVSGraphResult {
@@ -45,6 +53,7 @@ export interface GenerateVSGraphResult {
   error?: string;
   nodeCount: number;
   connectionCount: number;
+  layout?: Omit<GraphLayoutResult, "positions">;
 }
 
 // Type mappings for variables
@@ -197,6 +206,15 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
     const connections = (params.connections || []) as ConnectionSpec[];
     const variables = (params.variables || []) as VariableSpec[];
     const coroutineEventIds = inferCoroutineEventIds(nodes, connections);
+    const layout = layoutDirectedGraph(
+      nodes.map((node) => ({
+        id: node.id,
+        position: node.position,
+        size: node.size || estimateVisualScriptingNodeSize(node),
+      })),
+      connections.map((connection) => ({ from: connection.from, to: connection.to })),
+      params.layout
+    );
 
     // Generate node objects
     const nodeObjects: unknown[] = [];
@@ -211,7 +229,7 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
       const nodeObj = createNodeObject(
         fullType,
         $id,
-        node.position,
+        layout.positions[node.id],
         node.properties,
         coroutineEventIds.has(node.id)
       );
@@ -277,6 +295,12 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
       assetContent,
       nodeCount: nodes.length,
       connectionCount: connections.length,
+      layout: {
+        bounds: layout.bounds,
+        explicitNodeCount: layout.explicitNodeCount,
+        autoPositionedNodeCount: layout.autoPositionedNodeCount,
+        preservedExplicitOverlapCount: layout.preservedExplicitOverlapCount,
+      },
     };
   } catch (error) {
     return {
@@ -286,6 +310,20 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
       connectionCount: 0,
     };
   }
+}
+
+function estimateVisualScriptingNodeSize(node: NodeSpec): GraphSize {
+  const fullType = NODE_TYPE_MAP[node.type] || node.type;
+  const displayName = fullType.split(".").pop() || fullType;
+  const customNode = BANTER_CUSTOM_NODES_BY_FULL_TYPE.get(fullType);
+  const defaults = node.properties?.defaultValues;
+  const defaultRows = defaults && typeof defaults === "object" && !Array.isArray(defaults)
+    ? Object.keys(defaults).length
+    : 0;
+  const rowCount = Math.max(1, customNode?.defaultValues.length || 0, defaultRows);
+  const width = Math.min(360, Math.max(216, Math.ceil((144 + displayName.length * 7) / 24) * 24));
+  const height = Math.ceil((88 + rowCount * 24) / 24) * 24;
+  return { width, height };
 }
 
 function createNodeObject(

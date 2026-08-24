@@ -175,6 +175,13 @@ test("Visual Scripting write tools constrain asset names", () => {
 
   const banterValidation = tools.get("validate_banter_visual_scripting")?.inputSchema;
   assert.deepEqual(banterValidation?.properties, {});
+
+  const generation = tools.get("generate_vs_graph")?.inputSchema;
+  const node = generation?.properties.nodes.items;
+  assert.deepEqual(node?.properties.position.required, ["x", "y"]);
+  assert.deepEqual(node?.properties.size.required, ["width", "height"]);
+  assert.equal(generation?.properties.layout.properties.gridSize.minimum, 1);
+  assert.equal(generation?.properties.layout.properties.horizontalGap.maximum, 2048);
 });
 
 test("Unity Test Runner tools expose bounded filters and safe run IDs", () => {

@@ -105,6 +105,7 @@ Handles all the complexity:
 - Generates valid GUIDs
 - Sets up connections
 - Includes required properties
+- Auto-positions nodes by graph topology when position is omitted, preserving explicit positions
 
 Returns the graph JSON which you should validate before writing.`,
       inputSchema: {
@@ -132,7 +133,18 @@ Returns the graph JSON which you should validate before writing.`,
                 properties: { type: "object", description: "Node-specific properties" },
                 position: {
                   type: "object",
+                  description: "Optional explicit top-left graph position. Omit to use spatial auto-layout.",
                   properties: { x: { type: "number" }, y: { type: "number" } },
+                  required: ["x", "y"],
+                },
+                size: {
+                  type: "object",
+                  description: "Optional layout-only node size hint used for collision avoidance.",
+                  properties: {
+                    width: { type: "number", minimum: 24, maximum: 2048 },
+                    height: { type: "number", minimum: 24, maximum: 4096 },
+                  },
+                  required: ["width", "height"],
                 },
               },
             },
@@ -161,6 +173,20 @@ Returns the graph JSON which you should validate before writing.`,
                 type: { type: "string" },
                 defaultValue: { description: "Default value for the variable" },
               },
+            },
+          },
+          layout: {
+            type: "object",
+            description: "Optional left-to-right auto-layout settings for nodes without explicit positions.",
+            properties: {
+              origin: {
+                type: "object",
+                properties: { x: { type: "number" }, y: { type: "number" } },
+                required: ["x", "y"],
+              },
+              gridSize: { type: "number", minimum: 1, maximum: 256 },
+              horizontalGap: { type: "number", minimum: 1, maximum: 2048 },
+              verticalGap: { type: "number", minimum: 1, maximum: 2048 },
             },
           },
         },
@@ -1421,6 +1447,7 @@ export async function handleToolCall(
         nodes: args.nodes as Array<unknown>,
         connections: args.connections as Array<unknown>,
         variables: args.variables as Array<unknown>,
+        layout: args.layout as import("../lib/graph-layout.js").GraphLayoutOptions | undefined,
       });
       break;
 

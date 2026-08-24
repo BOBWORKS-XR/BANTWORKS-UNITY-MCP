@@ -16,7 +16,7 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 ## Features
 
 - **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
-- **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files, including resolved unit definitions and required value-port integrity, using the bundled Unity Visual Scripting JSON manual and source-observed errata
+- **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files, including topology-aware grid layout, resolved unit definitions, and required value-port integrity, using the bundled Unity Visual Scripting JSON manual and source-observed errata
 - **Banter Validation**: Invoke the selected SDK's own Visual Scripting allow-list validator and return bounded, structured diagnostics
 - **Evidence-Linked Banter Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
@@ -224,6 +224,8 @@ Scene lifecycle tools expose open and build-scene state, save without dialogs, a
 Project routing deduplicates environment and launcher projects by canonical path, assigns stable path-derived IDs, and reports the live Unity editor process identity. Each tool call snapshots its selected project, so switching projects cannot redirect an already-running command.
 
 The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md). The versions exercised in release checks and their known limits are documented in [docs/compatibility.md](docs/compatibility.md). The latest Visual Scripting and desktop integration findings are in [docs/visual-scripting-audit-2026-07-15.md](docs/visual-scripting-audit-2026-07-15.md).
+
+`generate_vs_graph` preserves every explicit node `position`. Nodes without one are arranged left-to-right from graph topology, snapped to a configurable grid, kept near explicitly positioned connected nodes, and separated with estimated or caller-supplied node sizes. Cycles are laid out deterministically. Explicit overlaps are reported rather than silently moving authored nodes.
 
 ### Prompts (Guided workflows)
 
