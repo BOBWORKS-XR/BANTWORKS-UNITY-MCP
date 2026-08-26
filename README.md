@@ -79,6 +79,8 @@ Verify downloaded artifacts against the release's `SHA256SUMS.txt`. Builds that 
 
 Open **Creator Works MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up Creator Works MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports project, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
 
+When upgrading from **BANTWORKS MCP**, install and open Creator Works MCP before uninstalling the old application. On first load, the launcher imports the former `%APPDATA%\banter-mcp\launcher-config.json`, including configured Unity projects, the active project, automatic-start, custom-component, and tool-group settings. It replaces legacy server bundle paths and setup removes the former `banter` entries from supported AI-client configurations. Because the rebranded launcher is a separate Windows application, BANTWORKS remains listed in **Installed apps** until it is manually uninstalled. Verify the imported projects and run **Set Up Creator Works MCP** or **Update Bridges** before removing BANTWORKS; project-local `.bantworks-mcp` state and existing Unity content are retained.
+
 ![Creator Works MCP guided Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
 *The guided launcher manages the private runtime, MCP client configuration, Unity projects, and project-local bridge updates.*

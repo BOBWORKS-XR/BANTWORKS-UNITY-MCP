@@ -368,6 +368,29 @@ fn get_legacy_config_path() -> PathBuf {
     config_path_for(LEGACY_APP_CONFIG_DIR)
 }
 
+fn upgrade_loaded_config(
+    config: &mut LauncherConfig,
+    replacement_server_path: Option<&Path>,
+) -> Result<bool, String> {
+    let mut changed = false;
+
+    if let Some(path) = replacement_server_path {
+        let replacement = path.to_string_lossy().to_string();
+        if config.mcp_server_path != replacement {
+            config.mcp_server_path = replacement;
+            changed = true;
+        }
+    }
+
+    let normalized_tool_groups = normalize_tool_groups(&config.tool_groups)?;
+    if config.tool_groups != normalized_tool_groups {
+        config.tool_groups = normalized_tool_groups;
+        changed = true;
+    }
+
+    Ok(changed)
+}
+
 /// Write a text file by publishing a complete temporary file in the same directory.
 /// This prevents launcher/config readers from observing truncated JSON or TOML.
 fn publish_temporary_file(temporary_path: &Path, destination: &Path) -> std::io::Result<()> {
@@ -467,14 +490,17 @@ fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
             .map_err(|e| format!("Failed to read config: {}", e))?;
         let mut config: LauncherConfig =
             serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
-        if config.mcp_server_path.trim().is_empty()
+        let needs_server_migration = config.mcp_server_path.trim().is_empty()
             || is_legacy_server_path(&config.mcp_server_path)
-            || is_legacy_server_bundle_path(&config.mcp_server_path)
-        {
-            config.mcp_server_path = default_mcp_server_path(&app)?.to_string_lossy().to_string();
-        }
-        config.tool_groups = normalize_tool_groups(&config.tool_groups)?;
-        if source_path != config_path {
+            || is_legacy_server_bundle_path(&config.mcp_server_path);
+        let replacement_server_path = if needs_server_migration {
+            Some(default_mcp_server_path(&app)?)
+        } else {
+            None
+        };
+        let config_changed =
+            upgrade_loaded_config(&mut config, replacement_server_path.as_deref())?;
+        if source_path != config_path || config_changed {
             let migrated = serde_json::to_string_pretty(&config)
                 .map_err(|e| format!("Failed to migrate launcher config: {}", e))?;
             atomic_write(&config_path, &migrated)?;
@@ -1397,6 +1423,27 @@ mod tests {
         assert!(!is_legacy_server_bundle_path(
             "D:/installed/server/creator-works-mcp.mjs"
         ));
+    }
+
+    #[test]
+    fn persists_loaded_config_upgrades_for_existing_creator_works_configs() {
+        let mut config = LauncherConfig {
+            channels: vec![],
+            active_channel_id: None,
+            mcp_server_path: "D:/installed/server/banter-mcp.mjs".to_string(),
+            auto_start: true,
+            enable_custom_scripts: false,
+            tool_groups: " ShaderGraph, Read, read ".to_string(),
+        };
+        let replacement = Path::new("D:/installed/server/creator-works-mcp.mjs");
+
+        assert!(upgrade_loaded_config(&mut config, Some(replacement)).unwrap());
+        assert_eq!(
+            config.mcp_server_path,
+            "D:/installed/server/creator-works-mcp.mjs"
+        );
+        assert_eq!(config.tool_groups, "read,shadergraph");
+        assert!(!upgrade_loaded_config(&mut config, None).unwrap());
     }
 
     #[test]

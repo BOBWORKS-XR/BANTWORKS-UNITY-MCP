@@ -16,6 +16,8 @@ This is an unsigned preview build. Windows may show an Unknown publisher or Smar
 
 The launcher keeps the existing `BanterMCPBridge.cs` filename and `.bantworks-mcp` project folder as internal compatibility contracts. Those names do not change the AI-facing Creator Works identity.
 
+If BANTWORKS MCP is already installed, install and open this preview first. Creator Works imports its launcher settings and configured projects, but Windows treats the renamed launcher as a separate application. Verify the imported project list, run **Set Up Creator Works MCP** or **Update Bridges**, restart the selected AI client, and only then uninstall BANTWORKS MCP from **Installed apps**.
+
 ## Shader Graph Test Flow
 
 1. Call `get_shader_graph_capabilities` and stop if the installed package API is unsupported.
