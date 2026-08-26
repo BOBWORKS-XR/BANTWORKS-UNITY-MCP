@@ -2,7 +2,7 @@
 
 Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Download Creator Works MCP 2.4.0-2](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-2) | [Preview source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/tree/feature/dual-sidequest-sdk) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Download Creator Works MCP 2.4.0-3](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-3) | [Preview source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/tree/feature/dual-sidequest-sdk) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
 ![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
@@ -21,7 +21,7 @@ Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients 
 
 ## Quick Start
 
-1. Download `Creator.Works.MCP_2.4.0-2_x64-setup.exe` from the [2.4.0-2 preview release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-2).
+1. Download `Creator.Works.MCP_2.4.0-3_x64-setup.exe` from the [2.4.0-3 preview release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-3).
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -88,20 +88,22 @@ Tool profiles can expose `read`, `author`, `test`, `banter`, `shadergraph`, a co
 
 ## Manual Bridge Installation
 
-The launcher installs the bridge automatically. For a manual setup, copy:
+The launcher installs the bridge automatically. For a manual setup, download the [2.4.0-3 bridge script](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/v2.4.0-3/unity-extension/Editor/BanterMCPBridge.cs) and [matching logo asset](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/v2.4.0-3/unity-extension/Editor/CreatorWorksMCPLogo.png), then copy both files:
 
 ```text
-unity-extension/Editor/BanterMCPBridge.cs
+BanterMCPBridge.cs
   -> YourProject/Assets/Editor/BanterMCPBridge.cs
+CreatorWorksMCPLogo.png
+  -> YourProject/Assets/Editor/CreatorWorksMCPLogo.png
 ```
 
 After Unity compiles, call `get_bridge_status`. Scene-changing tools require an explicit acknowledgement from the selected Unity Editor and fail closed on stale or ambiguous object selectors.
 
 ## Preview Status
 
-The `2.4.0-2` release gate passed:
+The `2.4.0-3` release gate passed:
 
-- 118 Node tests
+- 119 Node tests
 - 13 native launcher tests
 - Node 20, 22, and 24 CI
 - Windows launcher packaging and standalone installation smoke tests
