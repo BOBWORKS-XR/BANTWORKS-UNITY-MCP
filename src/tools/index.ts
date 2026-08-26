@@ -19,7 +19,10 @@ import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
 import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
 import { getUnityPackages } from "./get-unity-packages.js";
-import { getBanterSDKInfo } from "./get-banter-sdk-info.js";
+import {
+  detectSidequestSDKProfile,
+  getBanterSDKInfo,
+} from "./get-banter-sdk-info.js";
 import {
   addShaderGraphNode,
   connectShaderGraphNodes,
@@ -87,7 +90,7 @@ export function registerTools(selection: ToolGroupSelection = "all"): Tool[] {
       name: "validate_vs_graph",
       description: `Validate a Visual Scripting graph JSON before writing to Unity.
 Checks:
-- Banter node types use known flat namespaces
+- Creator SDK and Banter node types use their known flat namespaces
 - Connections reference node IDs that exist
 - GUIDs are properly formatted
 - Required properties are set
@@ -293,8 +296,8 @@ This is the authoritative import check after write_vs_graph. It uses reflection 
 
     {
       name: "validate_banter_visual_scripting",
-      description: `Run the selected Banter SDK's own Visual Scripting allow-list validator inside Unity.
-The SDK scans Script Graph and State Graph assets, embedded prefab graphs, and embedded graphs in the active scene. The bridge invokes the public validator through reflection, captures its [VisualScripting] diagnostics, and remains compilable in non-Banter projects. This is read-only apart from the SDK's AssetDatabase refresh and may take time in large projects.`,
+      description: `Run the selected SideQuest SDK's Visual Scripting allow-list validator inside Unity.
+The legacy tool name is retained for client compatibility. The bridge prefers BS.SDKEditor.ValidateVisualScripting for Creator SDK projects and falls back to Banter.SDKEditor.ValidateVisualScripting for legacy projects. The SDK scans Script Graph and State Graph assets, embedded prefab graphs, and embedded graphs in the active scene. The bridge invokes the public validator through reflection, captures its [VisualScripting] diagnostics, and remains compilable in projects with neither SDK. This is read-only apart from the SDK's AssetDatabase refresh and may take time in large projects.`,
       inputSchema: {
         type: "object",
         properties: {},
@@ -520,8 +523,8 @@ Returns requested and resolved versions, package source, revision hash, dependen
 
     {
       name: "get_banter_sdk_info",
-      description: `Inspect the selected project's Banter SDK package provenance and source coverage.
-Returns the requested package source, resolved metadata, git revision or package-cache identity, Unity version, and compares source classes against the embedded Banter Visual Scripting node and component catalogues. This tool is read-only and does not require the Editor to be running.`,
+      description: `Detect and inspect the selected project's SideQuest SDK profile.
+The legacy tool name is retained for client compatibility. Detects com.sidequest.creator-sdk, com.sidequest.banter, hybrid, or no-SDK projects; returns profile-correct component and Visual Scripting namespaces, validator candidates, requested and resolved package provenance, Unity version, and live source coverage against the embedded catalogue. Run this before authoring SideQuest components or custom nodes. This tool is read-only and does not require the Editor to be running.`,
       inputSchema: {
         type: "object",
         properties: {},
@@ -1613,7 +1616,9 @@ export async function handleToolCall(
 
   switch (name) {
     case "validate_vs_graph":
-      result = validateVSGraph(args.graphJson as string);
+      result = validateVSGraph(args.graphJson as string, {
+        sdkProfile: detectSidequestSDKProfile(config),
+      });
       break;
 
     case "generate_vs_graph":
@@ -1624,6 +1629,7 @@ export async function handleToolCall(
         connections: args.connections as Array<unknown>,
         variables: args.variables as Array<unknown>,
         layout: args.layout as import("../lib/graph-layout.js").GraphLayoutOptions | undefined,
+        sdkProfile: detectSidequestSDKProfile(config),
       });
       break;
 
@@ -2561,7 +2567,7 @@ async function validateBanterVisualScripting(config: BanterMCPConfig): Promise<u
   return {
     success: false,
     commandId: result.commandId,
-    error: "Timed out after 300000ms waiting for Banter's Visual Scripting validator.",
+    error: "Timed out after 300000ms waiting for the installed SideQuest SDK Visual Scripting validator.",
   };
 }
 

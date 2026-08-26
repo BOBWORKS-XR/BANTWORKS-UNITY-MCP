@@ -1,8 +1,8 @@
 # Creator Works MCP
 
-A Model Context Protocol (MCP) server and Unity Editor bridge for Banter SDK development. It gives Codex, Claude Code, and other compatible MCP clients awareness of a selected Unity project, with tools to create Visual Scripting graphs, WebRoot JavaScript, and more.
+A Model Context Protocol (MCP) server and Unity Editor bridge for Unity development, with first-class support for both the SideQuest Creator SDK/BS contract and the legacy Banter SDK. It gives Codex, Claude Code, and other compatible MCP clients awareness of a selected Unity project, with tools to create Visual Scripting graphs, WebRoot JavaScript, and more.
 
-> **Shader Graph preview:** Version `2.4.0-1` is an experimental build for Aline. It includes the clean-room Shader Graph authoring branch and is intended for disposable or version-controlled test projects until the remaining compatibility matrix and mutation-safety review are complete.
+> **Shader Graph preview:** Version `2.4.0-2` is an experimental build for Aline. It includes the clean-room Shader Graph authoring branch and the dual SideQuest SDK transition support described below. Use disposable or version-controlled test projects until the remaining compatibility matrix and mutation-safety review are complete.
 
 ## Client Compatibility
 
@@ -19,11 +19,12 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 
 ## Features
 
-- **Banter SDK Knowledge**: 63 source-checked public scene components, one runtime helper, 163 represented Banter Visual Scripting node types, and the BS.* JavaScript API
+- **Dual SideQuest SDK Awareness**: Detect Creator SDK, legacy Banter, hybrid, Unity-only, and unknown projects; select concrete component, Visual Scripting, and validator namespaces without breaking existing MCP client names
+- **Banter and Creator SDK Knowledge**: 63 source-checked legacy public scene components, one runtime helper, 163 represented custom Visual Scripting node types, dynamic source coverage, and the BS.* JavaScript API
 - **Visual Scripting Authoring**: Create, validate, and safely write native VS graph `.asset` files, including topology-aware grid layout, resolved unit definitions, and required value-port integrity, using the bundled Unity Visual Scripting JSON manual and source-observed errata
 - **Experimental Shader Graph Authoring**: Inspect real GraphData nodes/slots/targets, create functional Built-in or URP Lit/Unlit graphs, add and connect nodes with topology-aware layout, and roll back failed imports or shader compilation
-- **Banter Validation**: Invoke the selected SDK's own Visual Scripting allow-list validator and return bounded, structured diagnostics
-- **Evidence-Linked Banter Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
+- **SideQuest SDK Validation**: Invoke the installed Creator SDK or Banter SDK Visual Scripting allow-list validator and return bounded, structured diagnostics
+- **Evidence-Linked SideQuest Workflows**: Execute synced-object, interaction, UI, audio, networking, and WebRoot contracts whose catalogue and tool references are enforced by tests
 - **WebRoot JS Generation**: Write JavaScript for built Banter scenes
 - **Unity Integration**: Run bounded fresh state queries, persist compiler diagnostics, inspect filtered Console windows, refresh assets, and execute guarded project-defined Editor menu commands
 - **Low-Latency Local Bridge**: Prefer versioned project-local named-pipe commands on Windows, with Unity work queued to the main thread and automatic atomic-file compatibility fallback
@@ -31,17 +32,17 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 - **Capability Profiles**: Limit the exposed tool surface to inspection, authoring, testing, Banter workflows, or minimal project routing
 - **Cross-Version Unity Harness**: Provision a deterministic obstacle course that validates physics, serialized scenes, generated Visual Scripting graphs, bridge attachment, Play Mode tests, and optional Banter sync/allow-list behavior
 
-## Banter Visual Scripting Expertise
+## SideQuest Visual Scripting Expertise
 
-Creator Works MCP is specifically informed by Banter's Visual Scripting model, not just generic Unity graph syntax:
+Creator Works MCP is specifically informed by the Creator SDK and Banter Visual Scripting models, not just generic Unity graph syntax:
 
 - **Node catalogue:** 163 unique Banter node types are represented across the bundled references. This includes 162 exact custom node types extracted from a real Banter `AllCustomNodes.asset`, with categories, serialized defaults, sample GUIDs, event metadata, and source hashes.
-- **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, compares its C# source classes with the embedded catalogues, and matches exact public release and Unity evidence when available. It does not generalize evidence across different source revisions or editor versions.
+- **SDK-aware coverage:** `get_banter_sdk_info` keeps its legacy client-compatible name but detects `com.sidequest.creator-sdk`, `com.sidequest.banter`, hybrid, and no-SDK projects. It reports the profile-correct namespaces and validator, reads package provenance, compares live C# source classes with the embedded catalogues, and does not generalize evidence across different source revisions or editor versions.
 - **Graph-writing rules:** the bundled Unity Visual Scripting JSON manual v2.2 is preceded by source-observed compatibility errata. Canonical output uses `graph.elements`; referenced nodes use string `$id` values; Visual Scripting 1.9.x may omit `$version` on connections.
-- **Generation, validation, and writing:** `generate_vs_graph` resolves captured custom node names and applies their serialized defaults. `validate_vs_graph` accepts current `graph.elements` and older split layouts, checks node-reference integrity, and avoids rejecting valid unreferenced nodes. `write_vs_graph` validates again before writing, emits the ScriptGraphAsset class identifier and `NativeFormatImporter`, and preserves an existing asset GUID while migrating old MCP metadata.
-- **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph, rejects failed unit definitions, and reports every resolved value input that lacks both a valid connection and a persisted default. `validate_banter_visual_scripting` then invokes the installed SDK's public `CheckVsNodes()` validator across graph assets, embedded prefab graphs, and the active scene, returning the SDK's exact allow-list diagnostics.
+- **Generation, validation, and writing:** `generate_vs_graph` resolves captured custom node names into `BS.VisualScripting` for Creator SDK projects or `Banter.VisualScripting` for legacy projects, including profile-correct variable and serialized enum types. It refuses SideQuest-only shorthand when no SDK is detected. `validate_vs_graph` accepts both namespaces and current or older graph layouts. `write_vs_graph` validates again before writing, emits the ScriptGraphAsset class identifier and `NativeFormatImporter`, and preserves an existing asset GUID while migrating old MCP metadata.
+- **Authoritative Editor checks:** `validate_vs_graph_in_unity` forces Unity import and deserialization of one graph, rejects failed unit definitions, and reports every resolved value input that lacks both a valid connection and a persisted default. `validate_banter_visual_scripting` keeps its compatibility name while selecting `BS.SDKEditor.ValidateVisualScripting` or `Banter.SDKEditor.ValidateVisualScripting`. The SDK result remains separate because some validator versions do not enumerate every nested or additional embedded machine.
 
-This knowledge improves graph generation and review, but source-class coverage is not proof of runtime behavior. `validate_vs_graph_in_unity` provides an authoritative import and deserialization check in the selected Editor; generated graphs must still be exercised in the target Unity and Banter SDK version.
+This knowledge improves graph generation and review, but source-class coverage and Creator SDK legacy stubs are not proof of hosted runtime behavior. `validate_vs_graph_in_unity` provides an authoritative import and deserialization check in the selected Editor; generated graphs must still be exercised in the target Unity and Banter/Greenfield client. See [docs/sidequest-sdk-transition.md](docs/sidequest-sdk-transition.md) for profile rules and the guarded conversion design.
 
 ## AI-Generated Scene Examples
 
@@ -66,7 +67,7 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 - Windows 10 or 11 for the guided launcher. The installer includes a private Node.js 24 LTS runtime.
 - Node.js 20 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
 - A Unity project root containing `Assets`.
-- The Banter SDK for Banter-specific components, Visual Scripting nodes, and WebRoot use.
+- The SideQuest Creator SDK or legacy Banter SDK for its components, custom Visual Scripting nodes, and WebRoot use. Generic Unity tools remain available without either package.
 - Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. Experimental Shader Graph authoring is acceptance-tested with Unity 2022.3.39f1/Shader Graph 14.0.11, Unity 6000.1.14f1/Shader Graph 17.1.0, and Unity 6000.3.10f1/Shader Graph 17.3.0; other combinations fail closed unless their required internal API signatures are detected. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
 
 ## Quick Start
@@ -77,7 +78,9 @@ Download and run the Windows setup executable from the latest GitHub release. It
 
 Verify downloaded artifacts against the release's `SHA256SUMS.txt`. Builds that are not Authenticode-signed can show an **Unknown publisher** or Microsoft Defender SmartScreen warning; a matching checksum verifies file integrity but does not replace publisher identity signing.
 
-Open **Creator Works MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up Creator Works MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports project, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
+Open **Creator Works MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up Creator Works MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports the Unity project, detected SDK profile, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
+
+The SDK label is package detection, not a compile or runtime claim. Run `validate_banter_visual_scripting` after Unity has compiled to prove that the selected SDK validator is loaded in the current Editor domain, then test the built content in its target client.
 
 When upgrading from **BANTWORKS MCP**, install and open Creator Works MCP before uninstalling the old application. On first load, the launcher imports the former `%APPDATA%\banter-mcp\launcher-config.json`, including configured Unity projects, the active project, automatic-start, custom-component, and tool-group settings. It replaces legacy server bundle paths and setup removes the former `banter` entries from supported AI-client configurations. Because the rebranded launcher is a separate Windows application, BANTWORKS remains listed in **Installed apps** until it is manually uninstalled. Verify the imported projects and run **Set Up Creator Works MCP** or **Update Bridges** before removing BANTWORKS; project-local `.bantworks-mcp` state and existing Unity content are retained.
 
@@ -183,15 +186,15 @@ The Unity Console should also show `[Creator Works MCP] Bridge initialized` afte
 
 | Resource | Description |
 |----------|-------------|
-| `banter://components` | 63 source-checked public scene components plus the `BanterObjectId` runtime helper |
-| `banter://sdk-compatibility` | Catalogue hashes, observed package profiles, and interpretation limits |
+| `banter://components` | 63 source-checked legacy catalogue keys plus the object-ID runtime helper; resolve concrete names through the selected SDK profile |
+| `banter://sdk-compatibility` | Creator/Banter namespace policy, catalogue hashes, observed package profiles, and interpretation limits |
 | `banter://tool-groups` | Exact capability-group membership, special values, and launcher presets |
 | `banter://workflows` | Evidence-linked execution contracts for six focused Banter domains |
 | `banter://vs-nodes` | Hand-authored Banter node reference with port notes |
 | `banter://custom-vs-nodes` | Exact catalogue of 162 custom Banter node types extracted from a real graph asset |
 | `banter://custom-vs-node-log` | Markdown log with every captured custom node, category, and serialized default |
 | `banter://js-api` | Complete BS.* JavaScript API |
-| `banter://vs-instructions` | How to create Banter Visual Scripting graph files |
+| `banter://vs-instructions` | How to create profile-correct Creator SDK or Banter Visual Scripting graph files |
 | `banter://unity-vs-json-manual` | Unity Visual Scripting JSON manual v2.2 with higher-priority Creator Works compatibility errata |
 | `unity://types` | Unity fundamentals (Vector3, Quaternion, etc.) |
 | `project://state` | Current scene hierarchy (requires extension) |
@@ -205,7 +208,7 @@ All 49 tools are exposed by default. Set `CREATOR_WORKS_TOOL_GROUPS` to `read`, 
 | Category | Tools |
 |----------|-------|
 | Visual Scripting | `generate_vs_graph`, `validate_vs_graph`, `write_vs_graph`, `validate_vs_graph_in_unity`, `validate_banter_visual_scripting` |
-| Banter WebRoot | `write_webroot_js` |
+| SideQuest WebRoot | `write_webroot_js` |
 | Project routing | `list_unity_projects`, `select_unity_project` |
 | Bridge health and diagnostics | `get_bridge_status`, `query_project_state`, `check_import_status`, `wait_for_unity_compile`, `get_console_logs`, `refresh_unity_assets` |
 | Editor control and visual inspection | `control_play_mode`, `capture_unity_screenshot`, `execute_editor_menu_item` |
@@ -232,7 +235,7 @@ Scene lifecycle tools expose open and build-scene state, save without dialogs, a
 
 Project routing deduplicates environment and launcher projects by canonical path, assigns stable path-derived IDs, and reports the live Unity editor process identity. Each tool call snapshots its selected project, so switching projects cannot redirect an already-running command.
 
-The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md). The versions exercised in release checks and their known limits are documented in [docs/compatibility.md](docs/compatibility.md). The latest Visual Scripting and desktop integration findings are in [docs/visual-scripting-audit-2026-07-15.md](docs/visual-scripting-audit-2026-07-15.md).
+The complete command transport, identity, and inspector-value contract is documented in [docs/bridge-protocol.md](docs/bridge-protocol.md). The versions exercised in release checks and their known limits are documented in [docs/compatibility.md](docs/compatibility.md). The dual-SDK authoring and conversion boundary is documented in [docs/sidequest-sdk-transition.md](docs/sidequest-sdk-transition.md). The latest Visual Scripting and desktop integration findings are in [docs/visual-scripting-audit-2026-07-15.md](docs/visual-scripting-audit-2026-07-15.md).
 
 `generate_vs_graph` preserves every explicit node `position`. Nodes without one are arranged left-to-right from graph topology, snapped to a configurable grid, kept near explicitly positioned connected nodes, and separated with estimated or caller-supplied node sizes. Cycles are laid out deterministically. Explicit overlaps are reported rather than silently moving authored nodes.
 

@@ -591,6 +591,31 @@ h2 {
   color: var(--cyan);
 }
 
+.sdk-badge.sdk-creator {
+  background: rgba(0, 204, 232, 0.08);
+  border-color: rgba(0, 204, 232, 0.35);
+  color: #64dff0;
+}
+
+.sdk-badge.sdk-banter {
+  background: rgba(255, 77, 77, 0.08);
+  border-color: rgba(255, 77, 77, 0.34);
+  color: #ff9292;
+}
+
+.sdk-badge.sdk-hybrid {
+  background: rgba(51, 197, 107, 0.08);
+  border-color: rgba(51, 197, 107, 0.34);
+  color: #79df9f;
+}
+
+.sdk-badge.sdk-none,
+.sdk-badge.sdk-unknown {
+  background: rgba(233, 169, 58, 0.08);
+  border-color: rgba(233, 169, 58, 0.34);
+  color: #efbf6c;
+}
+
 .icon-button {
   align-items: center;
   background: transparent;

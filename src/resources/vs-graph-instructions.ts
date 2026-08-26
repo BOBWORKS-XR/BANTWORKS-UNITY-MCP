@@ -2,19 +2,23 @@
  * Visual Scripting Graph Creation Instructions
  *
  * Detailed guide for programmatically creating .asset files.
- * Based on working patterns from Banter SDK.
+ * Based on working patterns from the Creator SDK and legacy Banter SDK.
  */
 
 export const VS_GRAPH_INSTRUCTIONS = `
 # Instructions for Creating Unity Visual Scripting Graphs
 
 ## Overview
-This guide explains how to programmatically create Unity Visual Scripting \`.asset\` files that work with the Banter SDK.
+This guide explains how to programmatically create Unity Visual Scripting \`.asset\` files that work with the selected SideQuest SDK contract.
 
 ## Critical Rules
 
-### 0. Inspect the Selected Banter SDK
-- Run \`get_banter_sdk_info\` before using Banter custom nodes.
+### 0. Inspect the Selected SideQuest SDK
+- Run \`get_banter_sdk_info\` before using SideQuest custom nodes. The legacy tool name covers both SDK families.
+- Follow its \`sdkProfile\`, \`namespaces\`, and \`compatibility.authoringPolicy\` fields.
+- Creator SDK: use concrete \`BS.*\` component types and \`BS.VisualScripting.*\` nodes for new content.
+- Legacy Banter SDK: use \`Banter.SDK.*\` component types and \`Banter.VisualScripting.*\` nodes.
+- Hybrid: prefer Creator types for new content, but do not rewrite existing legacy assets without an explicit migration audit.
 - Match the package source and revision, not only its semantic version.
 - The 162-node captured catalogue is complete for observed SDK 3.2.2 and selected git revisions, but older registry packages contain fewer nodes.
 
@@ -23,15 +27,21 @@ This guide explains how to programmatically create Unity Visual Scripting \`.ass
 - **ALWAYS** generate real random hex GUIDs
 - Unity's deserializer will fail with "Could not find any recognizable digits" if GUIDs aren't valid
 
-### 2. Banter SDK Node Type Names
-Banter custom nodes are in the \`Banter.VisualScripting\` namespace, NOT subdirectories:
+### 2. SideQuest SDK Node Type Names
+Custom nodes use one flat namespace selected by the installed package, NOT their source-code subdirectories:
 
-**CORRECT:**
+**CORRECT for Creator SDK:**
+- \`BS.VisualScripting.OnGrab\`
+- \`BS.VisualScripting.OnRelease\`
+- \`BS.VisualScripting.GetLocalUserState\`
+
+**CORRECT for legacy Banter SDK:**
 - \`Banter.VisualScripting.OnGrab\`
 - \`Banter.VisualScripting.OnRelease\`
 - \`Banter.VisualScripting.GetLocalUserState\`
 
 **WRONG:**
+- Using \`Banter.VisualScripting.*\` for new Creator SDK content merely because legacy stubs compile
 - \`Banter.VisualScripting.Events.OnGrab\` ❌
 - \`Banter.VisualScripting.User.GetLocalUserState\` ❌
 
@@ -52,7 +62,7 @@ Don't use \`Unity.VisualScripting.GetComponent\` - it doesn't exist as a node ty
   },
   "defaultValues": {
     "target": null,
-    "%type": {"$content": "Banter.SDK.BanterSyncedObject", "$type": "System.RuntimeType"}
+    "%type": {"$content": "BS.BSSyncedObject", "$type": "System.RuntimeType"}
   },
   "position": {"x": -456.0, "y": -321.0},
   "guid": "d3bb1652-1c16-4f7b-ad2a-6f7e88c31091",
@@ -62,7 +72,7 @@ Don't use \`Unity.VisualScripting.GetComponent\` - it doesn't exist as a node ty
 }
 \`\`\`
 
-**Note:** The \`%type\` parameter must specify a type using \`System.RuntimeType\`, not null!
+**Note:** The \`%type\` parameter must specify a type using \`System.RuntimeType\`, not null. The example is for Creator SDK; use \`Banter.SDK.BanterSyncedObject\` only when \`sdkProfile\` is \`banter\`.
 
 ### 4. SetVariable and GetVariable Structure
 
@@ -145,7 +155,7 @@ Must have \`"coroutine": false\`:
   "position": {"x": -800.0, "y": 0.0},
   "guid": "19f0bbfa-1c40-494e-b284-0c58c1b3819e",
   "$version": "A",
-  "$type": "Banter.VisualScripting.OnGrab",
+  "$type": "BS.VisualScripting.OnGrab",
   "$id": "45"
 }
 \`\`\`
@@ -186,7 +196,7 @@ All are EMPTY arrays!
         "name": "syncedObject",
         "value": null,
         "typeHandle": {
-          "Identification": "Banter.SDK.BanterSyncedObject, Banter.SDK",
+          "Identification": "BS.BSSyncedObject, BS.SDK",
           "$version": "A"
         },
         "$version": "A"
@@ -279,8 +289,9 @@ NativeFormatImporter:
 ❌ Using numbers for $id: \`"$id": 9\`
 ✅ Use strings: \`"$id": "9"\`
 
-❌ Wrong Banter namespaces: \`Banter.VisualScripting.Events.OnGrab\`
-✅ Correct: \`Banter.VisualScripting.OnGrab\`
+❌ Wrong source-folder namespace: \`Banter.VisualScripting.Events.OnGrab\`
+✅ Creator SDK: \`BS.VisualScripting.OnGrab\`
+✅ Legacy Banter SDK: \`Banter.VisualScripting.OnGrab\`
 
 ❌ Missing \`"coroutine": false\` on event nodes
 ✅ Always add to Start, OnGrab, OnRelease, OnCollisionEnter

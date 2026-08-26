@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.4.0-2 - 2026-08-26
+
+### Added
+
+- Added Creator SDK, legacy Banter, hybrid, Unity-only, and unknown SDK profile detection to the MCP and Windows launcher.
+- Added profile badges for configured Unity projects and a Quick Setup SDK status row.
+- Added Creator SDK source coverage, namespace selection, and `BS.SDKEditor.ValidateVisualScripting` discovery while retaining compatibility tool names.
+
+### Changed
+
+- `generate_vs_graph` now emits `BS.VisualScripting` nodes, `BS.SDK` type handles, and Creator enum namespaces for Creator/hybrid projects while preserving legacy Banter output for legacy projects.
+- AI-facing resources now require SDK detection before SideQuest authoring and distinguish package aliases from hosted-runtime support.
+- The portable graph validator accepts both flat custom-node namespaces and reports SideQuest SDK diagnostics without assuming Banter.
+
+### Safety
+
+- SideQuest shorthand generation fails closed when no supported SDK is detected.
+- Graph validation and writing reject legacy custom-node namespaces in Creator-only projects, Creator namespaces in legacy-only projects, and SideQuest component type handles when no SDK is detected. Hybrid projects preserve both families with an explicit warning.
+- Existing scenes and prefabs are never rewritten merely because Creator compatibility stubs exist. The documented converter design requires an audit, explicit mappings, duplicated assets, Unity serialization APIs, validation, and separately proven reverse mappings.
+
+### Verified
+
+- 118 Node tests and 13 native launcher tests pass.
+- Read-only local fixtures detect legacy Banter SDK 3.1.2 and Creator SDK 3.2.17 profiles without modifying either project.
+- Creator SDK 3.2.17 source contains all 162 captured custom-node class names plus 16 additional classes; one legacy catalogue component has no concrete Creator counterpart, so universal name replacement remains unsupported.
+- The exact updated bridge compiled with zero C# errors in isolated Unity 2022.3.39f1 and Unity 6000.3.21f1 projects. Installation in a Creator SDK project, invocation of the real Creator validator, and hosted-runtime acceptance remain explicit follow-up gates.
+- The unsigned NSIS installer was extracted after build; its MCP server, Node 24 runtime, and Unity bridge hashes exactly match the staged source payloads.
+
 ## 2.4.0-1 - 2026-08-26
 
 ### Changed

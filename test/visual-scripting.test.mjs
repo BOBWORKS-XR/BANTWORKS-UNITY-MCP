@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { createConfigForProject } from "../dist/lib/config.js";
 import { generateVSGraph } from "../dist/tools/generate-vs-graph.js";
+import { handleToolCall } from "../dist/tools/index.js";
 import { validateVSGraph } from "../dist/tools/validate-vs-graph.js";
 import { writeVSGraph } from "../dist/tools/write-vs-graph.js";
 
@@ -138,6 +139,88 @@ test("generator uses the singular space-state type and valid empty Banter flow p
   assert.equal(validateVSGraph(result.graphJson).valid, true);
 });
 
+test("generator emits Creator SDK namespaces and type handles for creator projects", () => {
+  const result = generateVSGraph({
+    graphName: "Creator Grab",
+    sdkProfile: "creator",
+    nodes: [
+      { type: "OnGrab", id: "grab" },
+      { type: "LoadTextUrl", id: "load" },
+      { type: "CreateUIElement", id: "ui" },
+    ],
+    connections: [
+      { from: "grab", fromPort: "trigger", to: "load", toPort: "Load", type: "control" },
+    ],
+    variables: [
+      { name: "synced", type: "BanterSyncedObject" },
+    ],
+  });
+
+  assert.equal(result.success, true, result.error);
+  assert.equal(result.sdkProfile, "creator");
+  assert.equal(result.customNodeNamespace, "BS.VisualScripting");
+  const generated = JSON.parse(result.graphJson);
+  const grab = generated.graph.elements.find((element) => element.$id === "1");
+  const load = generated.graph.elements.find((element) => element.$id === "2");
+  const ui = generated.graph.elements.find((element) => element.$id === "3");
+  assert.equal(grab.$type, "BS.VisualScripting.OnGrab");
+  assert.equal(grab.coroutine, true);
+  assert.equal(load.$type, "BS.VisualScripting.LoadTextUrl");
+  assert.equal(ui.$type, "BS.VisualScripting.CreateUIElement");
+  assert.equal(ui.defaultValues["Element Type"].$type, "BS.VisualScripting.UIElementTypeVS");
+  assert.equal(
+    generated.graph.variables.collection.$content[0].typeHandle.Identification,
+    "BS.BSSyncedObject, BS.SDK"
+  );
+  assert.equal(validateVSGraph(result.graphJson).valid, true);
+});
+
+test("generator refuses SideQuest custom nodes when no SDK is installed", () => {
+  const result = generateVSGraph({
+    graphName: "No SDK",
+    sdkProfile: "none",
+    nodes: [{ type: "OnGrab", id: "grab" }],
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /no supported SDK profile was detected/i);
+});
+
+test("generator refuses SideQuest variable aliases when no SDK is installed", () => {
+  const result = generateVSGraph({
+    graphName: "No SDK Variable",
+    sdkProfile: "none",
+    variables: [{ name: "synced", type: "BanterSyncedObject" }],
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.error, /SideQuest variable type/i);
+});
+
+test("MCP graph tool detects the selected project profile automatically", async () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "creator-works-profile-"));
+  try {
+    fs.mkdirSync(path.join(project, "Assets"));
+    fs.mkdirSync(path.join(project, "Packages"));
+    fs.writeFileSync(path.join(project, "Packages", "manifest.json"), JSON.stringify({
+      dependencies: { "com.sidequest.creator-sdk": "3.2.17" },
+    }));
+
+    const response = await handleToolCall(
+      "generate_vs_graph",
+      { graphName: "Detected Creator", nodes: [{ type: "OnGrab", id: "grab" }] },
+      createConfigForProject(project)
+    );
+    const result = JSON.parse(response.content[0].text);
+    const graph = JSON.parse(result.graphJson);
+
+    assert.equal(result.sdkProfile, "creator");
+    assert.equal(graph.graph.elements[0].$type, "BS.VisualScripting.OnGrab");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test("generator enables coroutine events when their flow reaches a coroutine unit", () => {
   const result = generateVSGraph({
     graphName: "HTTP Loader",
@@ -176,6 +259,45 @@ test("validator rejects a non-coroutine event that reaches a coroutine unit", ()
   const validation = validateVSGraph(graphJson);
   assert.equal(validation.valid, false);
   assert.ok(validation.errors.some((error) => error.includes("reaches coroutine unit")));
+});
+
+test("validator enforces project namespaces while allowing hybrid preservation", () => {
+  const legacyGrab = node("1", UUIDS.one, "Banter.VisualScripting.OnGrab");
+  legacyGrab.coroutine = false;
+  const graphJson = graphWith([legacyGrab]);
+
+  const creator = validateVSGraph(graphJson, { sdkProfile: "creator" });
+  assert.equal(creator.valid, false);
+  assert.ok(creator.errors.some((error) => error.includes("legacy type")));
+
+  const hybrid = validateVSGraph(graphJson, { sdkProfile: "hybrid" });
+  assert.equal(hybrid.valid, true, hybrid.errors.join("\n"));
+  assert.ok(hybrid.warnings.some((warning) => warning.includes("hybrid project")));
+});
+
+test("validator classifies all SideQuest variable namespace handles", () => {
+  const creatorGraph = JSON.parse(graphWith([]));
+  creatorGraph.graph.variables.collection.$content.push({
+    name: "ratio",
+    value: null,
+    typeHandle: { Identification: "BS.AiImageRatio", $version: "A" },
+    $version: "A",
+  });
+  const legacyGraph = JSON.parse(graphWith([]));
+  legacyGraph.graph.variables.collection.$content.push({
+    name: "element",
+    value: null,
+    typeHandle: { Identification: "Banter.UI.BanterElement", $version: "A" },
+    $version: "A",
+  });
+
+  const creatorInLegacy = validateVSGraph(JSON.stringify(creatorGraph), { sdkProfile: "banter" });
+  assert.equal(creatorInLegacy.valid, false);
+  assert.ok(creatorInLegacy.errors.some((error) => error.includes("Creator type handle")));
+
+  const legacyInCreator = validateVSGraph(JSON.stringify(legacyGraph), { sdkProfile: "creator" });
+  assert.equal(legacyInCreator.valid, false);
+  assert.ok(legacyInCreator.errors.some((error) => error.includes("legacy type handle")));
 });
 
 test("validator accepts Unity 1.9 serialization details", () => {
@@ -238,6 +360,34 @@ test("writer rejects invalid graphs before writing", async () => {
     assert.equal(result.success, false);
     assert.equal(fs.existsSync(path.join(project, "Assets", "Graphs", "Invalid.asset")), false);
     assert.ok(result.errors.some((error) => error.includes("Missing 'graph'")));
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("writer rejects a legacy custom-node namespace in a Creator SDK project", async () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "creator-works-vs-profile-"));
+  const legacyGrab = node("1", UUIDS.one, "Banter.VisualScripting.OnGrab");
+  legacyGrab.coroutine = false;
+  try {
+    fs.mkdirSync(path.join(project, "Assets"));
+    fs.mkdirSync(path.join(project, "Packages"));
+    fs.writeFileSync(path.join(project, "Packages", "manifest.json"), JSON.stringify({
+      dependencies: { "com.sidequest.creator-sdk": "3.2.17" },
+    }));
+
+    const result = await writeVSGraph(
+      graphWith([legacyGrab]),
+      "Legacy In Creator",
+      "Graphs",
+      createConfigForProject(project)
+    );
+    assert.equal(result.success, false);
+    assert.ok(result.errors.some((error) => error.includes("legacy type")));
+    assert.equal(
+      fs.existsSync(path.join(project, "Assets", "Graphs", "Legacy In Creator.asset")),
+      false
+    );
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }

@@ -7,6 +7,7 @@
 
 import { BANTER_VS_NODES, VS_CRITICAL_NOTES } from "../resources/banter-vs-nodes.js";
 import { BANTER_CUSTOM_VS_NODES } from "../resources/banter-custom-vs-nodes.js";
+import type { SidequestSDKProfile } from "./get-banter-sdk-info.js";
 
 export interface VSValidationResult {
   valid: boolean;
@@ -16,7 +17,12 @@ export interface VSValidationResult {
   connectionCount: number;
 }
 
-// Known Banter node types
+export interface VSValidationOptions {
+  sdkProfile?: SidequestSDKProfile;
+}
+
+// Known SideQuest node types are stored in their captured legacy catalogue
+// form and normalized during validation for Creator SDK graphs.
 const BANTER_NODE_TYPES = new Set(
   [
     ...Object.values(BANTER_VS_NODES).map((node) => node.fullType),
@@ -79,7 +85,7 @@ const FAKE_GUID_PATTERNS = [
 /**
  * Validate a Visual Scripting graph JSON
  */
-export function validateVSGraph(graphJson: string): VSValidationResult {
+export function validateVSGraph(graphJson: string, options: VSValidationOptions = {}): VSValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   let nodeCount = 0;
@@ -118,7 +124,7 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
 
     if (nodes.length > 0) {
       for (const node of nodes) {
-        validateNode(node, connectedInputs, errors, warnings, nodeIds);
+        validateNode(node, connectedInputs, errors, warnings, nodeIds, options.sdkProfile);
       }
     } else {
       warnings.push("No nodes found in graph (expected graph.elements or units.$content)");
@@ -132,7 +138,7 @@ export function validateVSGraph(graphJson: string): VSValidationResult {
 
     // Validate variables
     if (graphData.variables && graphData.variables.collection) {
-      validateVariables(graphData.variables, warnings);
+      validateVariables(graphData.variables, errors, warnings, options.sdkProfile);
     }
 
     // Check graph definitions (should be empty for Script Graphs)
@@ -218,7 +224,8 @@ function validateNode(
   connectedInputs: Set<string>,
   errors: string[],
   warnings: string[],
-  nodeIds: Map<string, unknown>
+  nodeIds: Map<string, unknown>,
+  sdkProfile?: SidequestSDKProfile
 ): void {
   const nodeType = node.$type as string;
   const nodeId = node.$id as string;
@@ -249,15 +256,18 @@ function validateNode(
   // Validate node type
   if (!nodeType) {
     errors.push(`Node ${nodeId} missing $type`);
-  } else if (nodeType.startsWith("Banter.VisualScripting.")) {
+  } else if (isSidequestNodeType(nodeType)) {
+    const catalogType = toLegacyCatalogType(nodeType);
+    validateSidequestNamespace(nodeId, nodeType, sdkProfile, errors, warnings);
     // Check for wrong namespace patterns
     if (nodeType.includes(".Events.") || nodeType.includes(".User.") || nodeType.includes(".Player.")) {
       errors.push(
-        `Node ${nodeId} has wrong Banter namespace: ${nodeType}. ` +
-        `Use flat namespace like 'Banter.VisualScripting.OnGrab', not 'Banter.VisualScripting.Events.OnGrab'`
+        `Node ${nodeId} has wrong SideQuest SDK namespace: ${nodeType}. ` +
+        `Use the selected SDK's flat namespace, such as 'BS.VisualScripting.OnGrab' or ` +
+        `'Banter.VisualScripting.OnGrab', rather than a source-folder namespace.`
       );
-    } else if (!BANTER_NODE_TYPES.has(nodeType)) {
-      warnings.push(`Node ${nodeId} has unknown Banter type: ${nodeType}`);
+    } else if (!BANTER_NODE_TYPES.has(catalogType)) {
+      warnings.push(`Node ${nodeId} has unknown SideQuest SDK type: ${nodeType}`);
     }
   } else if (nodeType.startsWith("Unity.VisualScripting.")) {
     // Check for GetComponent node (doesn't exist!)
@@ -270,7 +280,7 @@ function validateNode(
   }
 
   // Event units must serialize the flag, but true is required for coroutine paths.
-  if (EVENT_NODES.has(nodeType)) {
+  if (isEventNodeType(nodeType)) {
     if (typeof node.coroutine !== "boolean") {
       errors.push(`Event node ${nodeId} (${nodeType}) missing boolean 'coroutine' flag`);
     }
@@ -393,7 +403,7 @@ function validateCoroutinePaths(
     if (
       typeof eventId !== "string" ||
       typeof eventType !== "string" ||
-      !EVENT_NODES.has(eventType) ||
+      !isEventNodeType(eventType) ||
       eventNode.coroutine !== false
     ) {
       continue;
@@ -408,7 +418,7 @@ function validateCoroutinePaths(
 
       const node = nodesById.get(nodeId);
       const nodeType = node?.$type;
-      if (typeof nodeType === "string" && COROUTINE_UNIT_TYPES.has(nodeType)) {
+      if (typeof nodeType === "string" && isCoroutineUnitType(nodeType)) {
         errors.push(
           `Event node ${eventId} (${eventType}) has 'coroutine: false' but reaches coroutine unit ` +
           `${nodeId} (${nodeType}); set 'coroutine: true'`
@@ -421,9 +431,64 @@ function validateCoroutinePaths(
   }
 }
 
+function validateSidequestNamespace(
+  nodeId: string,
+  nodeType: string,
+  sdkProfile: SidequestSDKProfile | undefined,
+  errors: string[],
+  warnings: string[]
+): void {
+  if (!sdkProfile) return;
+
+  const isCreatorNode = nodeType.startsWith("BS.VisualScripting.");
+  const isLegacyNode = nodeType.startsWith("Banter.VisualScripting.");
+  if (sdkProfile === "creator" && isLegacyNode) {
+    errors.push(
+      `Node ${nodeId} uses legacy type ${nodeType} in a Creator SDK project. ` +
+      "Use the concrete BS.VisualScripting type for new content."
+    );
+  } else if (sdkProfile === "banter" && isCreatorNode) {
+    errors.push(
+      `Node ${nodeId} uses Creator SDK type ${nodeType} in a legacy Banter project.`
+    );
+  } else if (
+    (sdkProfile === "none" || sdkProfile === "unknown") &&
+    (isCreatorNode || isLegacyNode)
+  ) {
+    errors.push(
+      `Node ${nodeId} uses SideQuest SDK type ${nodeType}, but no supported SDK profile was detected.`
+    );
+  } else if (sdkProfile === "hybrid" && isLegacyNode) {
+    warnings.push(
+      `Node ${nodeId} retains legacy type ${nodeType} in a hybrid project; ` +
+      "preserve it unless an explicit migration is requested."
+    );
+  }
+}
+
+function isSidequestNodeType(type: string): boolean {
+  return type.startsWith("Banter.VisualScripting.") || type.startsWith("BS.VisualScripting.");
+}
+
+function toLegacyCatalogType(type: string): string {
+  return type.startsWith("BS.VisualScripting.")
+    ? `Banter.VisualScripting.${type.slice("BS.VisualScripting.".length)}`
+    : type;
+}
+
+function isEventNodeType(type: string): boolean {
+  return EVENT_NODES.has(toLegacyCatalogType(type));
+}
+
+function isCoroutineUnitType(type: string): boolean {
+  return COROUTINE_UNIT_TYPES.has(toLegacyCatalogType(type));
+}
+
 function validateVariables(
   variables: Record<string, unknown>,
-  warnings: string[]
+  errors: string[],
+  warnings: string[],
+  sdkProfile?: SidequestSDKProfile
 ): void {
   const collection = variables.collection as Record<string, unknown> | undefined;
   if (collection?.$content && Array.isArray(collection.$content)) {
@@ -434,6 +499,35 @@ function validateVariables(
       }
       if (!varData.typeHandle) {
         warnings.push(`Variable '${varData.name}' missing typeHandle`);
+        continue;
+      }
+
+      const typeHandle = varData.typeHandle as Record<string, unknown>;
+      const identification = typeHandle.Identification;
+      if (typeof identification !== "string" || !sdkProfile) continue;
+
+      const isLegacyType = /(?:^|,\s*)Banter(?:\.|$)/.test(identification);
+      const isCreatorType = /(?:^|,\s*)BS(?:\.|$)/.test(identification);
+      if (sdkProfile === "creator" && isLegacyType) {
+        errors.push(
+          `Variable '${varData.name}' uses legacy type handle ${identification} in a Creator SDK project.`
+        );
+      } else if (sdkProfile === "banter" && isCreatorType) {
+        errors.push(
+          `Variable '${varData.name}' uses Creator type handle ${identification} in a legacy Banter project.`
+        );
+      } else if (
+        (sdkProfile === "none" || sdkProfile === "unknown") &&
+        (isLegacyType || isCreatorType)
+      ) {
+        errors.push(
+          `Variable '${varData.name}' uses SideQuest SDK type handle ${identification}, ` +
+          "but no supported SDK profile was detected."
+        );
+      } else if (sdkProfile === "hybrid" && isLegacyType) {
+        warnings.push(
+          `Variable '${varData.name}' retains legacy type handle ${identification} in a hybrid project.`
+        );
       }
     }
   }

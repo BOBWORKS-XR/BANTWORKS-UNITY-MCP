@@ -2,7 +2,7 @@
 /**
  * Creator Works MCP Server
  *
- * Full-featured MCP server for Banter SDK development.
+ * Full-featured MCP server for Unity, Creator SDK, and Banter development.
  * Provides closed-loop integration with Unity Editor.
  *
  * Usage:
@@ -39,7 +39,7 @@ let toolGroupSelection: ToolGroupSelection = "all";
 const server = new Server(
   {
     name: "creator-works-mcp",
-    version: "2.4.0-1",
+    version: "2.4.0-2",
   },
   {
     capabilities: {

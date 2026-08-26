@@ -79,6 +79,7 @@ struct ProjectSetupStatus {
     bridge_installed: bool,
     bridge_current: bool,
     state_status: String,
+    sdk_profile: SdkProfileStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,6 +87,24 @@ struct ProjectSetupStatus {
 struct UnityExtensionStatus {
     installed: bool,
     current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SdkPackageStatus {
+    package_id: String,
+    version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SdkProfileStatus {
+    profile: String,
+    label: String,
+    creator_sdk: bool,
+    legacy_banter: bool,
+    packages: Vec<SdkPackageStatus>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1182,6 +1201,161 @@ fn client_statuses() -> Vec<ClientStatus> {
     ]
 }
 
+fn sdk_version_from_json(
+    manifest: &serde_json::Value,
+    lock: &serde_json::Value,
+    package_id: &str,
+) -> Option<String> {
+    lock.get("dependencies")
+        .and_then(|dependencies| dependencies.get(package_id))
+        .and_then(|entry| entry.get("version"))
+        .and_then(|version| version.as_str())
+        .or_else(|| {
+            manifest
+                .get("dependencies")
+                .and_then(|dependencies| dependencies.get(package_id))
+                .and_then(|version| version.as_str())
+        })
+        .map(str::to_string)
+}
+
+fn sdk_version_label(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    if lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("git+")
+        || value.contains(".git#")
+    {
+        return "Git".to_string();
+    }
+    if lower.starts_with("file:") {
+        return "Local".to_string();
+    }
+    if value.len() > 32 {
+        return "Custom".to_string();
+    }
+    value.to_string()
+}
+
+fn project_sdk_profile(project_path: &Path) -> SdkProfileStatus {
+    const CREATOR_PACKAGE: &str = "com.sidequest.creator-sdk";
+    const BANTER_PACKAGE: &str = "com.sidequest.banter";
+
+    let manifest_path = project_path.join("Packages").join("manifest.json");
+    let manifest_source = match fs::read_to_string(&manifest_path) {
+        Ok(source) => source,
+        Err(error) => {
+            return SdkProfileStatus {
+                profile: "unknown".to_string(),
+                label: "SDK unknown".to_string(),
+                creator_sdk: false,
+                legacy_banter: false,
+                packages: Vec::new(),
+                error: Some(format!(
+                    "Could not read {}: {}",
+                    manifest_path.display(),
+                    error
+                )),
+            }
+        }
+    };
+    let manifest: serde_json::Value = match serde_json::from_str(&manifest_source) {
+        Ok(value) => value,
+        Err(error) => {
+            return SdkProfileStatus {
+                profile: "unknown".to_string(),
+                label: "SDK unknown".to_string(),
+                creator_sdk: false,
+                legacy_banter: false,
+                packages: Vec::new(),
+                error: Some(format!(
+                    "Could not parse {}: {}",
+                    manifest_path.display(),
+                    error
+                )),
+            }
+        }
+    };
+    let lock_path = project_path.join("Packages").join("packages-lock.json");
+    let lock = fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|source| serde_json::from_str(&source).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let direct_dependencies = manifest
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.as_object());
+    let locked_dependencies = lock
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.as_object());
+    let has_package = |package_id: &str| {
+        direct_dependencies
+            .map(|dependencies| dependencies.contains_key(package_id))
+            .unwrap_or(false)
+            || locked_dependencies
+                .map(|dependencies| dependencies.contains_key(package_id))
+                .unwrap_or(false)
+    };
+
+    let creator_sdk = has_package(CREATOR_PACKAGE);
+    let legacy_banter = has_package(BANTER_PACKAGE);
+    let mut packages = Vec::new();
+    if creator_sdk {
+        packages.push(SdkPackageStatus {
+            package_id: CREATOR_PACKAGE.to_string(),
+            version: sdk_version_from_json(&manifest, &lock, CREATOR_PACKAGE),
+        });
+    }
+    if legacy_banter {
+        packages.push(SdkPackageStatus {
+            package_id: BANTER_PACKAGE.to_string(),
+            version: sdk_version_from_json(&manifest, &lock, BANTER_PACKAGE),
+        });
+    }
+
+    let (profile, label) = match (creator_sdk, legacy_banter) {
+        (true, true) => ("hybrid", "Hybrid Banter + Creator SDK".to_string()),
+        (true, false) => {
+            let version = packages
+                .first()
+                .and_then(|package| package.version.as_deref());
+            (
+                "creator",
+                version.map_or_else(
+                    || "Creator SDK".to_string(),
+                    |value| format!("Creator SDK {}", sdk_version_label(value)),
+                ),
+            )
+        }
+        (false, true) => {
+            let version = packages
+                .first()
+                .and_then(|package| package.version.as_deref());
+            (
+                "banter",
+                version.map_or_else(
+                    || "Banter SDK".to_string(),
+                    |value| format!("Banter SDK {}", sdk_version_label(value)),
+                ),
+            )
+        }
+        (false, false) => ("none", "Unity only".to_string()),
+    };
+
+    SdkProfileStatus {
+        profile: profile.to_string(),
+        label,
+        creator_sdk,
+        legacy_banter,
+        packages,
+        error: None,
+    }
+}
+
+#[tauri::command]
+fn get_project_sdk_profile(unity_project_path: String) -> SdkProfileStatus {
+    project_sdk_profile(Path::new(&unity_project_path))
+}
+
 fn project_setup_status(source_bridge: Option<&Path>, project_path: &Path) -> ProjectSetupStatus {
     let valid = is_valid_unity_project(project_path);
     let extension = source_bridge
@@ -1223,6 +1397,7 @@ fn project_setup_status(source_bridge: Option<&Path>, project_path: &Path) -> Pr
         bridge_installed: extension.installed,
         bridge_current: extension.current,
         state_status: state_status.to_string(),
+        sdk_profile: project_sdk_profile(project_path),
     }
 }
 
@@ -1344,6 +1519,7 @@ fn main() {
             remove_codex_mcp_config,
             check_unity_extension,
             get_unity_extension_status,
+            get_project_sdk_profile,
             install_unity_extension,
             update_configured_unity_extensions,
             get_mcp_root,
@@ -1591,6 +1767,79 @@ mod tests {
         let current = unity_extension_status(&source, &project);
         assert!(current.installed);
         assert!(current.current);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sdk_profile_distinguishes_banter_creator_hybrid_and_plain_unity() {
+        let root = temporary_root();
+        let project = root.join("Project");
+        fs::create_dir_all(project.join("Assets")).unwrap();
+        fs::create_dir_all(project.join("ProjectSettings")).unwrap();
+        fs::create_dir_all(project.join("Packages")).unwrap();
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.banter":"3.1.2"}}"#,
+        )
+        .unwrap();
+        let banter = project_sdk_profile(&project);
+        assert_eq!(banter.profile, "banter");
+        assert_eq!(banter.label, "Banter SDK 3.1.2");
+        assert!(banter.legacy_banter);
+        assert!(!banter.creator_sdk);
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.creator-sdk":"3.2.17"}}"#,
+        )
+        .unwrap();
+        let creator = project_sdk_profile(&project);
+        assert_eq!(creator.profile, "creator");
+        assert_eq!(creator.label, "Creator SDK 3.2.17");
+        assert!(creator.creator_sdk);
+        assert!(!creator.legacy_banter);
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.creator-sdk":"4.0.0","com.sidequest.banter":"3.2.2"}}"#,
+        )
+        .unwrap();
+        let hybrid = project_sdk_profile(&project);
+        assert_eq!(hybrid.profile, "hybrid");
+        assert_eq!(hybrid.packages.len(), 2);
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.unity.visualscripting":"1.9.1"}}"#,
+        )
+        .unwrap();
+        let plain = project_sdk_profile(&project);
+        assert_eq!(plain.profile, "none");
+        assert_eq!(plain.label, "Unity only");
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.creator-sdk":"https://github.com/SideQuestVR/BanterSDK.git#feature/greenfield"}}"#,
+        )
+        .unwrap();
+        let git_creator = project_sdk_profile(&project);
+        assert_eq!(git_creator.label, "Creator SDK Git");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_manifest_reports_unknown_sdk_instead_of_guessing() {
+        let root = temporary_root();
+        let project = root.join("Project");
+        fs::create_dir_all(project.join("Packages")).unwrap();
+        fs::write(project.join("Packages").join("manifest.json"), "not-json").unwrap();
+
+        let profile = project_sdk_profile(&project);
+        assert_eq!(profile.profile, "unknown");
+        assert!(profile.error.unwrap().contains("Could not parse"));
 
         fs::remove_dir_all(root).unwrap();
     }

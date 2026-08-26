@@ -9,6 +9,7 @@ import * as path from "path";
 import { randomBytes } from "crypto";
 import type { BanterMCPConfig } from "../lib/config.js";
 import { atomicWriteFileSync, resolvePathWithin } from "../lib/files.js";
+import { detectSidequestSDKProfile } from "./get-banter-sdk-info.js";
 import { validateVSGraph } from "./validate-vs-graph.js";
 
 export interface WriteVSGraphResult {
@@ -45,7 +46,9 @@ export async function writeVSGraph(
   }
 
   try {
-    const validation = validateVSGraph(graphJson);
+    const validation = validateVSGraph(graphJson, {
+      sdkProfile: detectSidequestSDKProfile(config),
+    });
     if (!validation.valid) {
       return {
         success: false,

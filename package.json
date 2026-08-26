@@ -1,7 +1,7 @@
 {
   "name": "creator-works-mcp",
-  "version": "2.4.0-1",
-  "description": "Codex, Claude Code, and MCP-compatible Unity integration with first-class Banter SDK knowledge",
+  "version": "2.4.0-2",
+  "description": "Codex, Claude Code, and MCP-compatible Unity integration with first-class Creator SDK and Banter knowledge",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -20,6 +20,8 @@
   "keywords": [
     "mcp",
     "creator-works",
+    "creator-sdk",
+    "sidequest",
     "banter",
     "unity",
     "visual-scripting",

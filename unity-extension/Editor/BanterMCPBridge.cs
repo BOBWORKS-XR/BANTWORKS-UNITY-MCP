@@ -48,7 +48,7 @@ namespace BantworksMCP
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly string HierarchyQueryResultsFolder = Path.Combine(StateFolder, "hierarchy-query-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
-        private const string BridgeVersion = "2.4.0-1";
+        private const string BridgeVersion = "2.4.0-2";
         private const int BridgeProtocolVersion = 1;
         private const int MinimumBridgeProtocolVersion = 1;
         private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
@@ -925,7 +925,7 @@ namespace BantworksMCP
                 case "validate_banter_visual_scripting":
                     var validateBanterCmd = JsonUtility.FromJson<ValidateBanterVisualScriptingCommand>(json);
                     ValidateBanterVisualScripting(validateBanterCmd);
-                    return "Ran Banter Visual Scripting validation";
+                    return "Ran SideQuest SDK Visual Scripting validation";
 
                 case "run_tests":
                     var runTestsCmd = JsonUtility.FromJson<RunTestsCommand>(json);
@@ -1963,7 +1963,7 @@ namespace BantworksMCP
         private static void ValidateBanterVisualScripting(ValidateBanterVisualScriptingCommand cmd)
         {
             if (cmd == null || !IsSafeCorrelationId(cmd.id))
-                throw new InvalidOperationException("Banter Visual Scripting validation requires a safe correlation ID");
+                throw new InvalidOperationException("SideQuest SDK Visual Scripting validation requires a safe correlation ID");
 
             const int maxDiagnostics = 200;
             const int maxDiagnosticStackTraceLength = 2048;
@@ -1985,15 +1985,26 @@ namespace BantworksMCP
                 if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                     throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle.");
 
-                const string validatorTypeName = "Banter.SDKEditor.ValidateVisualScripting";
-                Type validatorType = Type.GetType(validatorTypeName + ", Banter.SDKEditor", false) ??
-                    AppDomain.CurrentDomain.GetAssemblies()
-                        .Select(assembly => assembly.GetType(validatorTypeName, false))
-                        .FirstOrDefault(candidate => candidate != null);
+                string[] validatorTypeNames =
+                {
+                    "BS.SDKEditor.ValidateVisualScripting",
+                    "Banter.SDKEditor.ValidateVisualScripting"
+                };
+                string[] validatorAssemblyNames = { "BS.SDKEditor", "Banter.SDKEditor" };
+                Type validatorType = null;
+                for (int index = 0; index < validatorTypeNames.Length && validatorType == null; index++)
+                {
+                    string candidateTypeName = validatorTypeNames[index];
+                    string candidateAssemblyName = validatorAssemblyNames[index];
+                    validatorType = Type.GetType(candidateTypeName + ", " + candidateAssemblyName, false) ??
+                        AppDomain.CurrentDomain.GetAssemblies()
+                            .Select(assembly => assembly.GetType(candidateTypeName, false))
+                            .FirstOrDefault(candidate => candidate != null);
+                }
                 if (validatorType == null)
                 {
                     throw new InvalidOperationException(
-                        "Banter's Visual Scripting validator is unavailable. Install a compatible Banter SDK and Unity Visual Scripting package, then wait for compilation to finish.");
+                        "No supported SideQuest Visual Scripting validator is available. Install either the Creator SDK or Banter SDK with Unity Visual Scripting, then wait for compilation to finish.");
                 }
 
                 MethodInfo validatorMethod = validatorType.GetMethod(
@@ -2009,6 +2020,9 @@ namespace BantworksMCP
                 result.validatorType = validatorType.FullName;
                 result.validatorAssembly = validatorType.Assembly.GetName().Name;
                 result.validatorMethod = validatorMethod.Name;
+                result.sdkProfile = validatorType.FullName.StartsWith("BS.", StringComparison.Ordinal)
+                    ? "creator"
+                    : "banter";
 
                 diagnosticCapture = (condition, stackTrace, logType) =>
                 {
@@ -2039,7 +2053,7 @@ namespace BantworksMCP
                 result.validationCompleted = true;
                 result.success = result.validationPassed;
                 if (!result.validationPassed)
-                    result.error = "Banter's Visual Scripting validator reported one or more errors.";
+                    result.error = "The selected SideQuest SDK Visual Scripting validator reported one or more errors.";
             }
             catch (Exception exception)
             {
@@ -3502,6 +3516,7 @@ namespace BantworksMCP
                 "UnityEngine.",
                 "UnityEngine.UI.",
                 "",
+                "BS.",
                 "Banter.",
                 "Banter.SDK."
             };
@@ -3528,21 +3543,18 @@ namespace BantworksMCP
                 {
                     // First try exact match by full name (namespace.classname)
                     var type = assembly.GetType(typeName);
-                    if (type != null && typeof(Component).IsAssignableFrom(type))
+                    if (type != null &&
+                        typeof(Component).IsAssignableFrom(type) &&
+                        (IsAllowedSDKComponentType(type) || EnableCustomScripts))
                         return type;
 
-                    // Then try by simple name only (for Banter SDK types)
-                    type = assembly.GetTypes().FirstOrDefault(t => t.Name == typeName);
-                    if (type != null && typeof(Component).IsAssignableFrom(type))
-                    {
-                        // Check if it's a Banter type or if custom scripts are enabled
-                        string typeNamespace = type.Namespace ?? "";
-                        bool isBanterType = typeNamespace.StartsWith("Banter") ||
-                                           typeNamespace.StartsWith("UnityEngine");
-
-                        if (isBanterType || EnableCustomScripts)
-                            return type;
-                    }
+                    // Then try by simple name, preserving the SDK-only component boundary.
+                    type = assembly.GetTypes().FirstOrDefault(t =>
+                        t.Name == typeName &&
+                        typeof(Component).IsAssignableFrom(t) &&
+                        (IsAllowedSDKComponentType(t) || EnableCustomScripts));
+                    if (type != null)
+                        return type;
 
                     // Only search user namespaces if custom scripts toggle is ON
                     if (EnableCustomScripts)
@@ -3573,6 +3585,17 @@ namespace BantworksMCP
             }
 
             return null;
+        }
+
+        private static bool IsAllowedSDKComponentType(Type type)
+        {
+            string typeNamespace = type.Namespace ?? "";
+            return typeNamespace == "BS" ||
+                   typeNamespace.StartsWith("BS.", StringComparison.Ordinal) ||
+                   typeNamespace == "Banter" ||
+                   typeNamespace.StartsWith("Banter.", StringComparison.Ordinal) ||
+                   typeNamespace == "UnityEngine" ||
+                   typeNamespace.StartsWith("UnityEngine.", StringComparison.Ordinal);
         }
 
         private static GameObject ResolveGameObject(string objectId, string objectPath)
@@ -5923,6 +5946,7 @@ namespace BantworksMCP
                 "main_thread_unity_api",
                 "unity_test_runner",
                 "banter_visual_scripting",
+                "sidequest_sdk_profiles",
                 "shader_graph_commands"
             };
             if (pipeServerAvailable)
@@ -6744,6 +6768,7 @@ namespace BantworksMCP
             public string validatorType;
             public string validatorAssembly;
             public string validatorMethod;
+            public string sdkProfile;
             public int diagnosticCount;
             public bool diagnosticsTruncated;
             public List<ConsoleLogEntry> diagnostics;
@@ -7477,7 +7502,7 @@ namespace BantworksMCP
             {
                 BantworksMCPBridge.EnableCustomScripts = newValue;
             }
-            GUILayout.Label(newValue ? "Enabled (Non-Banter)" : "Disabled (Banter Only)",
+            GUILayout.Label(newValue ? "Enabled (Project Scripts)" : "Disabled (SDK Only)",
                 EditorStyles.miniLabel);
             EditorGUILayout.EndHorizontal();
 
@@ -7486,7 +7511,7 @@ namespace BantworksMCP
             EditorGUILayout.HelpBox(
                 newValue
                     ? "MCP can add custom C# scripts from Assembly-CSharp"
-                    : "MCP only adds Unity built-in and Banter SDK components",
+                    : "MCP only adds Unity built-in, Banter SDK, and Creator SDK components",
                 MessageType.Info);
             EditorGUILayout.EndHorizontal();
 

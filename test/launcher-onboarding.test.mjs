@@ -15,7 +15,10 @@ test("guided setup accepts a Unity project folder and configures selected client
   assert.match(launcherSource, /fn update_configured_unity_extensions\(/);
   assert.match(launcherApp, /invoke\('one_click_setup'/);
   assert.match(launcherApp, /invoke\('update_configured_unity_extensions'/);
+  assert.match(launcherApp, /invoke\('get_project_sdk_profile'/);
+  assert.match(launcherApp, /Run the SDK validator in Unity to prove Editor-domain availability/);
   assert.match(launcherHtml, /Select a Unity project folder/);
+  assert.match(launcherHtml, /SDK profile/);
   assert.match(launcherHtml, /Update Bridges/);
   assert.doesNotMatch(launcherHtml, /Add Scene Channel/);
 });
