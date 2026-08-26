@@ -2,7 +2,9 @@
 
 A Model Context Protocol (MCP) server and Unity Editor bridge for Unity development, with first-class support for both the SideQuest Creator SDK/BS contract and the legacy Banter SDK. It gives Codex, Claude Code, and other compatible MCP clients awareness of a selected Unity project, with tools to create Visual Scripting graphs, WebRoot JavaScript, and more.
 
-> **Shader Graph preview:** Version `2.4.0-2` is an experimental build for Aline. It includes the clean-room Shader Graph authoring branch and the dual SideQuest SDK transition support described below. Use disposable or version-controlled test projects until the remaining compatibility matrix and mutation-safety review are complete.
+> **Current preview:** [Creator Works MCP `2.4.0-2`](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-2) is the public Windows preview. It includes the Creator Works rebrand, migration from BANTWORKS MCP, dual SideQuest Creator/Banter SDK awareness, and the clean-room Shader Graph authoring work described below.
+>
+> Shader Graph mutation remains experimental. Use disposable or version-controlled test projects until the remaining compatibility matrix and mutation-safety review are complete.
 
 ## Client Compatibility
 
@@ -68,13 +70,13 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 - Node.js 20 or later only when using the standalone ZIP, PowerShell setup, or source checkout.
 - A Unity project root containing `Assets`.
 - The SideQuest Creator SDK or legacy Banter SDK for its components, custom Visual Scripting nodes, and WebRoot use. Generic Unity tools remain available without either package.
-- Unity 6000.3.10f1 is the latest editor version verified with the generic bridge. Experimental Shader Graph authoring is acceptance-tested with Unity 2022.3.39f1/Shader Graph 14.0.11, Unity 6000.1.14f1/Shader Graph 17.1.0, and Unity 6000.3.10f1/Shader Graph 17.3.0; other combinations fail closed unless their required internal API signatures are detected. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and Banter SDK version used by the project.
+- The exact `2.4.0-2` bridge compiled with zero new C# errors in isolated Unity 2022.3.39f1 and Unity 6000.3.21f1 projects. The broader generic bridge workflow is verified through Unity 6000.3.10f1. Experimental Shader Graph authoring is acceptance-tested with Unity 2022.3.39f1/Shader Graph 14.0.11, Unity 6000.1.14f1/Shader Graph 17.1.0, and Unity 6000.3.10f1/Shader Graph 17.3.0; other combinations fail closed unless their required internal API signatures are detected. On Unity 6000.3.2f1, the public Banter SDK 3.2.2 release passes generated graph import, `ScriptMachine.nest.macro` persistence, and SDK allow-list checks; public releases 3.0.2 and 3.1.2 have confirmed Unity 6 material-API compilation failures. Banter 3.1.2 separately passes the obstacle harness on Unity 2022.3.39f1. The bundled Visual Scripting manual is based on Unity 6000.3.2f1; validate generated graphs against the exact Unity and SideQuest SDK version used by the project.
 
 ## Quick Start
 
 ### 1. Install Creator Works MCP
 
-Download and run the Windows setup executable from the latest GitHub release. It includes the versioned MCP server, Unity bridge, and a checksum-verified private Node.js runtime; a separate Node.js installation and source checkout are not required.
+Download and run `Creator.Works.MCP_2.4.0-2_x64-setup.exe` from the [Creator Works MCP 2.4.0-2 preview release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-2). It includes the versioned MCP server, Unity bridge, and a checksum-verified private Node.js runtime; a separate Node.js installation and source checkout are not required.
 
 Verify downloaded artifacts against the release's `SHA256SUMS.txt`. Builds that are not Authenticode-signed can show an **Unknown publisher** or Microsoft Defender SmartScreen warning; a matching checksum verifies file integrity but does not replace publisher identity signing.
 
@@ -86,7 +88,7 @@ When upgrading from **BANTWORKS MCP**, install and open Creator Works MCP before
 
 ![Creator Works MCP guided Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
-*The guided launcher manages the private runtime, MCP client configuration, Unity projects, and project-local bridge updates.*
+*A configured launcher showing the private runtime, Codex and Claude Code connections, the active Unity project, detected Creator SDK/Banter SDK/Unity-only profiles, and per-project bridge status. Amber **Update available** labels mean those project-local bridge copies should be refreshed; they are not SDK compile or runtime results.*
 
 Bridge copies are project-local. The launcher compares every configured project against its bundled bridge, labels stale copies as **Update available**, and provides **Update Bridges** to back up and refresh all configured projects in one action.
 
@@ -379,7 +381,7 @@ public release and writes an ignored JSON evidence report under `artifacts/`.
 Expected incompatibilities only satisfy the matrix when their exact compiler
 diagnostics recur.
 
-The GitHub Actions workflow runs the Node test suite and standalone-bundle smoke on Node 20, 22, and 24, plus the dependency audit and Tauri launcher tests. Version tags build draft NSIS/MSI releases and a standalone ZIP. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, [docs/compatibility.md](docs/compatibility.md) for the verified matrix, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
+The GitHub Actions workflow runs the Node test suite and standalone-bundle smoke on Node 20, 22, and 24, plus the dependency audit and Tauri launcher tests. Version tags build draft NSIS/MSI releases and a standalone ZIP. The `2.4.0-2` release gate passed 118 Node tests and 13 native launcher tests; the published assets were downloaded again and matched `SHA256SUMS.txt`. Hosted Creator/Greenfield behavior, headset behavior, and multiplayer behavior remain separate runtime acceptance gates. See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, [SECURITY.md](SECURITY.md) for vulnerability reporting, [docs/compatibility.md](docs/compatibility.md) for the verified matrix, and [docs/bridge-protocol.md](docs/bridge-protocol.md) for the local Unity bridge contract.
 
 The evidence-based capability comparison and ordered roadmap are maintained in [docs/unity-mcp-benchmark.md](docs/unity-mcp-benchmark.md).
 
