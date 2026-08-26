@@ -1,6 +1,29 @@
-# BANTWORKS MCP
+# Creator Works MCP
 
-A Model Context Protocol (MCP) server and Unity Editor bridge for Banter SDK development. It gives Codex, Claude Code, and other compatible MCP clients awareness of a selected Unity project, with tools to create Visual Scripting graphs, WebRoot JavaScript, and more.
+Creator Works MCP, formerly BANTWORKS MCP, connects Codex, Claude Code, and other compatible MCP clients directly to Unity Editor. It provides project awareness and guarded tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
+
+> **Current Windows preview:** [Creator Works MCP `2.4.0-2`](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-2) is the current public pre-release. The complete preview source and technical reference are on [`feature/dual-sidequest-sdk`](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/tree/feature/dual-sidequest-sdk#readme).
+
+## Current Preview
+
+![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
+
+*A configured launcher showing the private Node.js runtime, Codex and Claude Code connections, the active Unity project, detected Creator SDK/Banter SDK/Unity-only profiles, and per-project bridge status. Amber **Update available** labels mean those project-local bridge copies should be refreshed; they are not SDK compile or runtime results.*
+
+Version `2.4.0-2` adds:
+
+- **Creator Works identity and migration:** imports existing BANTWORKS launcher settings, configured projects, active-project selection, and compatibility environment names while removing duplicate legacy AI-client entries during setup
+- **Guided Windows setup:** bundles a private Node.js 24 LTS runtime, configures Codex and Claude Code, discovers Unity Hub projects, identifies stale project-local bridges, and updates them with backups
+- **Dual SideQuest SDK awareness:** distinguishes Creator SDK, legacy Banter SDK, hybrid, Unity-only, and unknown projects, then uses the appropriate `BS.*` or `Banter.*` component, Visual Scripting, and validator contracts
+- **Lower-overhead Unity bridge:** keeps lightweight status and MCP command polling active while automatic full-scene hierarchy export is disabled by default in both Edit and Play mode; explicit refresh and export commands remain available
+- **Experimental Shader Graph authoring:** uses installed Unity package APIs, content-hash concurrency checks, occupied-input protection, validation, and rollback safeguards instead of editing serialized graph JSON by hand
+- **Release verification:** 118 Node tests and 13 native launcher tests passed; the exact bridge compiled with zero C# errors in isolated Unity 2022.3.39f1 and Unity 6000.3.21f1 projects; downloaded release assets matched `SHA256SUMS.txt`
+
+The Windows installers are currently unsigned and can trigger an Unknown publisher or Microsoft Defender SmartScreen warning. Shader Graph mutation, hosted Creator/Greenfield behavior, headset behavior, and multiplayer behavior remain separate preview acceptance gates.
+
+## Stable 2.3 Source Reference
+
+The default `master` branch remains the stable `2.3.0` source line and retains BANTWORKS compatibility identifiers in filenames, resource URIs, configuration keys, and examples. The sections below document that source line; use the preview branch linked above for the complete Creator Works `2.4.0-2` tool and SDK reference.
 
 ## Client Compatibility
 
@@ -66,9 +89,9 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 
 ## Quick Start
 
-### 1. Install BANTWORKS MCP
+### 1. Install the Stable 2.3 Build
 
-Download and run the Windows setup executable from the latest GitHub release. It includes the versioned MCP server, Unity bridge, and a checksum-verified private Node.js runtime; a separate Node.js installation and source checkout are not required.
+For the current Creator Works preview, use the `2.4.0-2` release linked at the top of this README. For the stable source line documented below, download and run the Windows setup executable from the [`v2.3.0` release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.3.0). It includes the versioned MCP server, Unity bridge, and a checksum-verified private Node.js runtime; a separate Node.js installation and source checkout are not required.
 
 Verify downloaded artifacts against the release's `SHA256SUMS.txt`. Builds that are not Authenticode-signed can show an **Unknown publisher** or Microsoft Defender SmartScreen warning; a matching checksum verifies file integrity but does not replace publisher identity signing.
 
