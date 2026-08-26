@@ -29,3 +29,11 @@ test("launcher-managed clients use a pinned private Node runtime", () => {
   assert.match(runtimeStage, /ArchiveSha256/);
   assert.match(runtimeStage, /NodeExeSha256/);
 });
+
+test("launcher presents Creator Works as the AI-facing MCP identity", () => {
+  assert.match(launcherHtml, /Creator Works MCP/);
+  assert.match(launcherSource, /const MCP_CLIENT_ID: &str = "creator-works"/);
+  assert.match(launcherSource, /const TOOL_GROUPS_ENV: &str = "CREATOR_WORKS_TOOL_GROUPS"/);
+  assert.match(launcherSource, /LEGACY_MCP_CLIENT_ID/);
+  assert.doesNotMatch(launcherHtml, /BANTWORKS MCP/);
+});

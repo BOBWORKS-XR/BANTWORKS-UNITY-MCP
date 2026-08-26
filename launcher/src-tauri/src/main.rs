@@ -11,6 +11,13 @@ use tauri::path::BaseDirectory;
 use tauri::Manager;
 
 const LEGACY_SERVER_PATH: &str = "C:/tools/banter-mcp/dist/index.js";
+const MCP_CLIENT_ID: &str = "creator-works";
+const LEGACY_MCP_CLIENT_ID: &str = "banter";
+const APP_CONFIG_DIR: &str = "creator-works-mcp";
+const LEGACY_APP_CONFIG_DIR: &str = "banter-mcp";
+const MCP_ROOT_ENV: &str = "CREATOR_WORKS_MCP_ROOT";
+const LEGACY_MCP_ROOT_ENV: &str = "BANTWORKS_MCP_ROOT";
+const TOOL_GROUPS_ENV: &str = "CREATOR_WORKS_TOOL_GROUPS";
 
 /// A scene channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,7 +135,8 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
 
     if entries.is_empty() {
         return Err(
-            "Tool groups must contain all, none, read, author, test, or banter".to_string(),
+            "Tool groups must contain all, none, read, author, test, banter, or shadergraph"
+                .to_string(),
         );
     }
 
@@ -139,7 +147,7 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
         return Ok(entries[0].to_string());
     }
 
-    const KNOWN_GROUPS: [&str; 4] = ["read", "author", "test", "banter"];
+    const KNOWN_GROUPS: [&str; 5] = ["read", "author", "test", "banter", "shadergraph"];
     let unknown: Vec<&str> = entries
         .iter()
         .copied()
@@ -147,7 +155,7 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
         .collect();
     if !unknown.is_empty() {
         return Err(format!(
-            "Unknown tool groups: {}. Use all, none, read, author, test, or banter",
+            "Unknown tool groups: {}. Use all, none, read, author, test, banter, or shadergraph",
             unknown.join(", ")
         ));
     }
@@ -162,6 +170,8 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
 
 fn find_mcp_server_path(root: &Path) -> Option<PathBuf> {
     [
+        root.join("creator-works-mcp.mjs"),
+        root.join("release").join("creator-works-mcp.mjs"),
         root.join("banter-mcp.mjs"),
         root.join("release").join("banter-mcp.mjs"),
         root.join("dist").join("index.js"),
@@ -193,24 +203,30 @@ fn normalized_existing_path(path: PathBuf) -> PathBuf {
 }
 
 fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    if let Some(configured_root) = std::env::var_os("BANTWORKS_MCP_ROOT") {
+    if let Some((variable, configured_root)) = std::env::var_os(MCP_ROOT_ENV)
+        .map(|value| (MCP_ROOT_ENV, value))
+        .or_else(|| std::env::var_os(LEGACY_MCP_ROOT_ENV).map(|value| (LEGACY_MCP_ROOT_ENV, value)))
+    {
         let root = PathBuf::from(configured_root);
         if !is_valid_mcp_root(&root) {
             return Err(format!(
-                "BANTWORKS_MCP_ROOT does not contain the MCP server and Unity bridge: {}",
+                "{} does not contain the MCP server and Unity bridge: {}",
+                variable,
                 root.display()
             ));
         }
         return Ok(normalized_existing_path(root));
     }
 
-    if let Ok(resource_server) = app
-        .path()
-        .resolve("server/banter-mcp.mjs", BaseDirectory::Resource)
-    {
-        if let Some(root) = resource_server.parent() {
-            if is_valid_mcp_root(root) {
-                return Ok(normalized_existing_path(root.to_path_buf()));
+    for server_name in ["creator-works-mcp.mjs", "banter-mcp.mjs"] {
+        if let Ok(resource_server) = app
+            .path()
+            .resolve(format!("server/{}", server_name), BaseDirectory::Resource)
+        {
+            if let Some(root) = resource_server.parent() {
+                if is_valid_mcp_root(root) {
+                    return Ok(normalized_existing_path(root.to_path_buf()));
+                }
             }
         }
     }
@@ -230,7 +246,10 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         }
     }
 
-    Err("Could not locate the bundled MCP server and Unity bridge. Reinstall BANTWORKS MCP or set BANTWORKS_MCP_ROOT to a valid distribution root.".to_string())
+    Err(format!(
+        "Could not locate the bundled MCP server and Unity bridge. Reinstall Creator Works MCP or set {} to a valid distribution root.",
+        MCP_ROOT_ENV
+    ))
 }
 
 fn default_mcp_server_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -282,7 +301,7 @@ fn resolve_node_command(app: &tauri::AppHandle) -> Result<(PathBuf, bool), Strin
     find_command_on_path("node")
         .map(|path| (normalized_existing_path(path), false))
         .ok_or_else(|| {
-            "The bundled Node runtime is missing and Node.js was not found on PATH. Reinstall BANTWORKS MCP."
+            "The bundled Node runtime is missing and Node.js was not found on PATH. Reinstall Creator Works MCP."
                 .to_string()
         })
 }
@@ -291,6 +310,14 @@ fn is_legacy_server_path(value: &str) -> bool {
     value
         .replace('\\', "/")
         .eq_ignore_ascii_case(LEGACY_SERVER_PATH)
+}
+
+fn is_legacy_server_bundle_path(value: &str) -> bool {
+    Path::new(value)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("banter-mcp.mjs"))
+        .unwrap_or(false)
 }
 
 fn validate_mcp_server_path(value: &str) -> Result<PathBuf, String> {
@@ -320,14 +347,25 @@ fn validate_mcp_server_path(value: &str) -> Result<PathBuf, String> {
     Ok(normalized_existing_path(path))
 }
 
-/// Get the config file path
-fn get_config_path() -> PathBuf {
-    let config_dir = dirs::config_dir()
+fn config_path_for(directory_name: &str) -> PathBuf {
+    dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("banter-mcp");
+        .join(directory_name)
+        .join("launcher-config.json")
+}
 
-    fs::create_dir_all(&config_dir).ok();
-    config_dir.join("launcher-config.json")
+/// Get the current config path, retaining read migration from the former product name.
+fn get_config_path() -> PathBuf {
+    let config_path = config_path_for(APP_CONFIG_DIR);
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    config_path
+}
+
+fn get_legacy_config_path() -> PathBuf {
+    config_path_for(LEGACY_APP_CONFIG_DIR)
 }
 
 /// Write a text file by publishing a complete temporary file in the same directory.
@@ -415,19 +453,32 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 #[tauri::command]
 fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
     let config_path = get_config_path();
+    let legacy_config_path = get_legacy_config_path();
+    let source_path = if config_path.exists() {
+        Some(config_path.clone())
+    } else if legacy_config_path.exists() {
+        Some(legacy_config_path)
+    } else {
+        None
+    };
 
-    if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
+    if let Some(source_path) = source_path {
+        let content = fs::read_to_string(&source_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
         let mut config: LauncherConfig =
             serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
         if config.mcp_server_path.trim().is_empty()
-            || (is_legacy_server_path(&config.mcp_server_path)
-                && !Path::new(&config.mcp_server_path).is_file())
+            || is_legacy_server_path(&config.mcp_server_path)
+            || is_legacy_server_bundle_path(&config.mcp_server_path)
         {
             config.mcp_server_path = default_mcp_server_path(&app)?.to_string_lossy().to_string();
         }
         config.tool_groups = normalize_tool_groups(&config.tool_groups)?;
+        if source_path != config_path {
+            let migrated = serde_json::to_string_pretty(&config)
+                .map_err(|e| format!("Failed to migrate launcher config: {}", e))?;
+            atomic_write(&config_path, &migrated)?;
+        }
         Ok(config)
     } else {
         Ok(LauncherConfig {
@@ -604,7 +655,7 @@ fn discover_unity_projects(app: tauri::AppHandle) -> Result<Vec<DiscoveredProjec
             path: normalized_existing_path(path).to_string_lossy().to_string(),
             unity_version: None,
             last_modified: None,
-            source: "BANTWORKS MCP".to_string(),
+            source: "Creator Works MCP".to_string(),
         });
     }
 
@@ -691,15 +742,20 @@ fn build_claude_mcp_config(
         return Err("Claude config mcpServers must be a JSON object".to_string());
     }
 
+    if let Some(servers) = config["mcpServers"].as_object_mut() {
+        servers.remove(MCP_CLIENT_ID);
+        servers.remove(LEGACY_MCP_CLIENT_ID);
+    }
+
     let mut env = serde_json::json!({
         "UNITY_PROJECT_PATH": channel.unity_project_path,
-        "BANTWORKS_TOOL_GROUPS": normalize_tool_groups(tool_groups)?
+        TOOL_GROUPS_ENV: normalize_tool_groups(tool_groups)?
     });
     if let Some(scene) = &channel.scene_path {
         env["UNITY_SCENE_PATH"] = serde_json::json!(scene);
     }
 
-    config["mcpServers"]["banter"] = serde_json::json!({
+    config["mcpServers"][MCP_CLIENT_ID] = serde_json::json!({
         "command": node_command,
         "args": [mcp_server_path],
         "env": env
@@ -757,14 +813,14 @@ fn build_codex_mcp_config(
     tool_groups: &str,
 ) -> Result<String, String> {
     let tool_groups = normalize_tool_groups(tool_groups)?;
-    let mut content = remove_toml_table_block(existing, "mcp_servers.banter");
-    content = remove_toml_table_block(&content, "mcp_servers.banter.env");
+    let mut content = remove_client_mcp_tables(existing, MCP_CLIENT_ID);
+    content = remove_client_mcp_tables(&content, LEGACY_MCP_CLIENT_ID);
 
     if !content.ends_with('\n') && !content.is_empty() {
         content.push('\n');
     }
 
-    content.push_str("\n[mcp_servers.banter]\n");
+    content.push_str(&format!("\n[mcp_servers.{}]\n", MCP_CLIENT_ID));
     content.push_str(&format!(
         "command = \"{}\"\n",
         escape_toml_string(&node_command.replace("\\", "/"))
@@ -775,13 +831,14 @@ fn build_codex_mcp_config(
     ));
     content.push_str("startup_timeout_sec = 20\n");
     content.push_str("tool_timeout_sec = 600\n");
-    content.push_str("\n[mcp_servers.banter.env]\n");
+    content.push_str(&format!("\n[mcp_servers.{}.env]\n", MCP_CLIENT_ID));
     content.push_str(&format!(
         "UNITY_PROJECT_PATH = \"{}\"\n",
         escape_toml_string(&channel.unity_project_path.replace("\\", "/"))
     ));
     content.push_str(&format!(
-        "BANTWORKS_TOOL_GROUPS = \"{}\"\n",
+        "{} = \"{}\"\n",
+        TOOL_GROUPS_ENV,
         escape_toml_string(&tool_groups)
     ));
     if let Some(scene) = &channel.scene_path {
@@ -793,7 +850,7 @@ fn build_codex_mcp_config(
     Ok(content)
 }
 
-/// Remove Banter MCP from Claude config
+/// Remove Creator Works MCP and its former Banter entry from Claude config.
 #[tauri::command]
 fn remove_claude_mcp_config() -> Result<(), String> {
     let config_path = get_claude_config_path();
@@ -810,7 +867,8 @@ fn remove_claude_mcp_config() -> Result<(), String> {
 
     if let Some(servers) = config.get_mut("mcpServers") {
         if let Some(obj) = servers.as_object_mut() {
-            obj.remove("banter");
+            obj.remove(MCP_CLIENT_ID);
+            obj.remove(LEGACY_MCP_CLIENT_ID);
         }
     }
 
@@ -857,7 +915,7 @@ fn update_codex_mcp_config(
     atomic_write(&config_path, &content)
 }
 
-/// Remove Banter MCP from Codex config
+/// Remove Creator Works MCP and its former Banter entry from Codex config.
 #[tauri::command]
 fn remove_codex_mcp_config() -> Result<(), String> {
     let config_path = get_codex_config_path();
@@ -868,9 +926,9 @@ fn remove_codex_mcp_config() -> Result<(), String> {
 
     let existing = fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read Codex config: {}", e))?;
-    let content = remove_toml_table_block(
-        &remove_toml_table_block(&existing, "mcp_servers.banter"),
-        "mcp_servers.banter.env",
+    let content = remove_client_mcp_tables(
+        &remove_client_mcp_tables(&existing, MCP_CLIENT_ID),
+        LEGACY_MCP_CLIENT_ID,
     );
 
     atomic_write(&config_path, &content)
@@ -902,6 +960,11 @@ fn remove_toml_table_block(content: &str, table_name: &str) -> String {
         result.push('\n');
     }
     result
+}
+
+fn remove_client_mcp_tables(content: &str, client_id: &str) -> String {
+    let without_server = remove_toml_table_block(content, &format!("mcp_servers.{}", client_id));
+    remove_toml_table_block(&without_server, &format!("mcp_servers.{}.env", client_id))
 }
 
 fn escape_toml_string(value: &str) -> String {
@@ -1048,9 +1111,11 @@ fn command_is_available(command: &str) -> bool {
 fn codex_is_configured() -> bool {
     fs::read_to_string(get_codex_config_path())
         .map(|content| {
-            content
-                .lines()
-                .any(|line| line.trim() == "[mcp_servers.banter]")
+            content.lines().any(|line| {
+                let line = line.trim();
+                line == format!("[mcp_servers.{}]", MCP_CLIENT_ID)
+                    || line == format!("[mcp_servers.{}]", LEGACY_MCP_CLIENT_ID)
+            })
         })
         .unwrap_or(false)
 }
@@ -1059,7 +1124,13 @@ fn claude_is_configured() -> bool {
     fs::read_to_string(get_claude_config_path())
         .ok()
         .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .and_then(|config| config.get("mcpServers")?.get("banter").cloned())
+        .and_then(|config| {
+            let servers = config.get("mcpServers")?;
+            servers
+                .get(MCP_CLIENT_ID)
+                .or_else(|| servers.get(LEGACY_MCP_CLIENT_ID))
+                .cloned()
+        })
         .is_some()
 }
 
@@ -1288,13 +1359,16 @@ mod tests {
     use super::*;
 
     fn temporary_root() -> PathBuf {
-        std::env::temp_dir().join(format!("bantworks-launcher-test-{}", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!(
+            "creator-works-launcher-test-{}",
+            uuid::Uuid::new_v4()
+        ))
     }
 
     #[test]
     fn finds_release_bundle_and_bridge_without_a_machine_specific_root() {
         let root = temporary_root();
-        let server = root.join("release").join("banter-mcp.mjs");
+        let server = root.join("release").join("creator-works-mcp.mjs");
         let bridge = unity_bridge_path(&root);
         fs::create_dir_all(server.parent().unwrap()).unwrap();
         fs::create_dir_all(bridge.parent().unwrap()).unwrap();
@@ -1314,6 +1388,15 @@ mod tests {
             "c:\\tools\\banter-mcp\\dist\\index.js"
         ));
         assert!(!is_legacy_server_path("D:/custom/banter-mcp.mjs"));
+        assert!(is_legacy_server_bundle_path(
+            "D:/installed/server/banter-mcp.mjs"
+        ));
+        assert!(is_legacy_server_bundle_path(
+            "D:\\installed\\server\\BANTER-MCP.MJS"
+        ));
+        assert!(!is_legacy_server_bundle_path(
+            "D:/installed/server/creator-works-mcp.mjs"
+        ));
     }
 
     #[test]
@@ -1330,13 +1413,12 @@ mod tests {
 
     #[test]
     fn removes_only_the_target_codex_tables() {
-        let input = "model = \"gpt\"\n\n[mcp_servers.banter]\ncommand = \"node\"\n\n[mcp_servers.banter.env]\nUNITY_PROJECT_PATH = \"X\"\n\n[other]\nkeep = true\n";
-        let without_server = remove_toml_table_block(input, "mcp_servers.banter");
-        let result = remove_toml_table_block(&without_server, "mcp_servers.banter.env");
+        let input = "model = \"gpt\"\n\n[mcp_servers.creator-works]\ncommand = \"node\"\n\n[mcp_servers.creator-works.env]\nUNITY_PROJECT_PATH = \"X\"\n\n[other]\nkeep = true\n";
+        let result = remove_client_mcp_tables(input, MCP_CLIENT_ID);
 
         assert!(result.contains("model = \"gpt\""));
         assert!(result.contains("[other]"));
-        assert!(!result.contains("mcp_servers.banter"));
+        assert!(!result.contains("mcp_servers.creator-works"));
         assert!(!result.contains("UNITY_PROJECT_PATH"));
     }
 
@@ -1362,6 +1444,10 @@ mod tests {
             Ok("read,banter".to_string())
         );
         assert_eq!(normalize_tool_groups("none"), Ok("none".to_string()));
+        assert_eq!(
+            normalize_tool_groups("shadergraph,read,author"),
+            Ok("read,author,shadergraph".to_string())
+        );
         assert!(normalize_tool_groups("all,read").is_err());
         assert!(normalize_tool_groups("admin").is_err());
         assert!(normalize_tool_groups(",,,").is_err());
@@ -1378,33 +1464,43 @@ mod tests {
         };
 
         let claude = build_claude_mcp_config(
-            serde_json::json!({ "keep": true, "mcpServers": { "other": {} } }),
+            serde_json::json!({
+                "keep": true,
+                "mcpServers": {
+                    "other": {},
+                    "banter": { "command": "old" },
+                    "creator-works": { "command": "stale" }
+                }
+            }),
             &channel,
-            "C:\\BANTWORKS\\runtime\\node.exe",
-            "C:\\BANTWORKS\\banter-mcp.mjs",
+            "C:\\CreatorWorks\\runtime\\node.exe",
+            "C:\\CreatorWorks\\creator-works-mcp.mjs",
             "banter,read",
         )
         .unwrap();
         assert_eq!(claude["keep"], true);
         assert!(claude["mcpServers"]["other"].is_object());
+        assert!(claude["mcpServers"]["banter"].is_null());
         assert_eq!(
-            claude["mcpServers"]["banter"]["env"]["BANTWORKS_TOOL_GROUPS"],
+            claude["mcpServers"]["creator-works"]["env"]["CREATOR_WORKS_TOOL_GROUPS"],
             "read,banter"
         );
 
         let codex = build_codex_mcp_config(
-            "model = \"gpt\"\n\n[other]\nkeep = true\n",
+            "model = \"gpt\"\n\n[mcp_servers.banter]\ncommand = \"old\"\n\n[mcp_servers.banter.env]\nOLD = \"true\"\n\n[other]\nkeep = true\n",
             &channel,
-            "C:/BANTWORKS/runtime/node.exe",
-            "C:/BANTWORKS/banter-mcp.mjs",
+            "C:/CreatorWorks/runtime/node.exe",
+            "C:/CreatorWorks/creator-works-mcp.mjs",
             "read,banter",
         )
         .unwrap();
         assert!(codex.contains("model = \"gpt\""));
         assert!(codex.contains("[other]"));
-        assert!(codex.contains("BANTWORKS_TOOL_GROUPS = \"read,banter\""));
+        assert!(codex.contains("[mcp_servers.creator-works]"));
+        assert!(!codex.contains("[mcp_servers.banter]"));
+        assert!(codex.contains("CREATOR_WORKS_TOOL_GROUPS = \"read,banter\""));
         assert!(codex.contains("UNITY_SCENE_PATH = \"E:/unity/Project/Assets/Main.unity\""));
-        assert!(codex.contains("command = \"C:/BANTWORKS/runtime/node.exe\""));
+        assert!(codex.contains("command = \"C:/CreatorWorks/runtime/node.exe\""));
 
         assert!(build_claude_mcp_config(
             serde_json::json!([]),

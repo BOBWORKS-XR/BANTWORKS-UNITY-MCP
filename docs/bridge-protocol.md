@@ -1,6 +1,6 @@
 # Unity Bridge Protocol
 
-BANTWORKS MCP uses a local, project-scoped hybrid bridge. On Windows, protocol-compatible versions prefer a named pipe for small commands and acknowledgements. Atomic project-local files remain the compatibility fallback and the transport for state snapshots and larger correlated results. The bridge does not open a TCP, HTTP, or WebSocket listener.
+Creator Works MCP uses a local, project-scoped hybrid bridge. On Windows, protocol-compatible versions prefer a named pipe for small commands and acknowledgements. Atomic project-local files remain the compatibility fallback and the transport for state snapshots and larger correlated results. The bridge does not open a TCP, HTTP, or WebSocket listener.
 
 ## Handshake and Transport
 

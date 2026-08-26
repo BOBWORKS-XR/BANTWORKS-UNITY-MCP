@@ -414,7 +414,7 @@ export function renderBanterWorkflowPrompt(id: BanterWorkflowId, goal?: string):
     `- ${path.id} (${path.surface}; groups: ${path.requiredToolGroups.join(",")}): ${path.useWhen}`
   ).join("\n");
 
-  return `Execute the BANTWORKS ${workflow.title} workflow in the selected Unity project.
+  return `Execute the Creator Works MCP ${workflow.title} workflow in the selected Unity project.
 ${goalLine}
 Read banter://workflows and use the '${id}' contract. Also read the evidence
 resources named by that contract. Run get_bridge_status, get_banter_sdk_info,

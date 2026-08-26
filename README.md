@@ -1,15 +1,19 @@
-# BANTWORKS MCP
+# Creator Works MCP
 
 A Model Context Protocol (MCP) server and Unity Editor bridge for Banter SDK development. It gives Codex, Claude Code, and other compatible MCP clients awareness of a selected Unity project, with tools to create Visual Scripting graphs, WebRoot JavaScript, and more.
 
+> **Shader Graph preview:** Version `2.4.0-1` is an experimental build for Aline. It includes the clean-room Shader Graph authoring branch and is intended for disposable or version-controlled test projects until the remaining compatibility matrix and mutation-safety review are complete.
+
 ## Client Compatibility
 
-BANTWORKS MCP uses the standard stdio MCP transport. Codex is a first-class supported client:
+Creator Works MCP uses the standard stdio MCP transport. Codex is a first-class supported client:
 
 - The Windows launcher can write the selected Unity channel to Codex at `~/.codex/config.toml`.
 - `setup.ps1` can configure Codex from its `[X] Apply to Codex` menu action.
 - The launcher can keep Claude Code and Codex synchronized when a scene channel changes.
-- Other stdio-compatible MCP clients can launch the standalone `banter-mcp.mjs` bundle or the source build at `dist/index.js` with the `UNITY_PROJECT_PATH` environment variable.
+- Other stdio-compatible MCP clients can launch the standalone `creator-works-mcp.mjs` bundle or the source build at `dist/index.js` with the `UNITY_PROJECT_PATH` environment variable.
+
+The AI-facing server identity and generated client entry are `creator-works-mcp` and `creator-works`. Setup removes the former `banter` client entry to avoid duplicate tool servers. Existing Unity bridge filenames, `.bantworks-mcp` project state, named-pipe identifiers, and old launcher environment variables remain supported as compatibility contracts, so integrated projects do not need to be reinjected solely for the rename.
 
 The repository is intentionally generic. Product-specific gameplay and scene logic belong in the Unity project using the bridge. Its only runtime scene logic is a self-contained compatibility fixture that creates a new marked test project and has no dependency on a user's game project or assets.
 
@@ -29,7 +33,7 @@ The repository is intentionally generic. Product-specific gameplay and scene log
 
 ## Banter Visual Scripting Expertise
 
-BANTWORKS MCP is specifically informed by Banter's Visual Scripting model, not just generic Unity graph syntax:
+Creator Works MCP is specifically informed by Banter's Visual Scripting model, not just generic Unity graph syntax:
 
 - **Node catalogue:** 163 unique Banter node types are represented across the bundled references. This includes 162 exact custom node types extracted from a real Banter `AllCustomNodes.asset`, with categories, serialized defaults, sample GUIDs, event metadata, and source hashes.
 - **SDK-aware coverage:** `get_banter_sdk_info` reads the selected project's manifest, lock file, git revision or package-cache identity, compares its C# source classes with the embedded catalogues, and matches exact public release and Unity evidence when available. It does not generalize evidence across different source revisions or editor versions.
@@ -41,7 +45,7 @@ This knowledge improves graph generation and review, but source-class coverage i
 
 ## AI-Generated Scene Examples
 
-These Banter prototype screenshots show complete scene work generated through an AI client using BANTWORKS MCP, including hierarchy construction, configured Banter components, object references, and native Unity Visual Scripting graphs. They are real project examples rather than assets bundled with the MCP.
+These Banter prototype screenshots show complete scene work generated through an AI client using Creator Works MCP, including hierarchy construction, configured Banter components, object references, and native Unity Visual Scripting graphs. They are real project examples rather than assets bundled with the MCP.
 
 ![AI-generated Banter portal scene and Visual Scripting graph](docs/images/ai-generated-banter-portal-graph.png)
 
@@ -67,15 +71,15 @@ The provisioner generates a plain Unity or Banter event graph through the MCP co
 
 ## Quick Start
 
-### 1. Install BANTWORKS MCP
+### 1. Install Creator Works MCP
 
 Download and run the Windows setup executable from the latest GitHub release. It includes the versioned MCP server, Unity bridge, and a checksum-verified private Node.js runtime; a separate Node.js installation and source checkout are not required.
 
 Verify downloaded artifacts against the release's `SHA256SUMS.txt`. Builds that are not Authenticode-signed can show an **Unknown publisher** or Microsoft Defender SmartScreen warning; a matching checksum verifies file integrity but does not replace publisher identity signing.
 
-Open **BANTWORKS MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up BANTWORKS MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports project, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
+Open **Creator Works MCP**, choose a Unity project folder, select the detected MCP clients, and press **Set Up Creator Works MCP**. The launcher installs or updates the bridge, writes the selected client configurations atomically, and reports project, bridge, runtime, Codex, and Claude status in one view. Unity Hub projects are offered automatically when available.
 
-![BANTWORKS MCP guided Windows launcher](docs/images/bantworks-mcp-guided-launcher.png)
+![Creator Works MCP guided Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
 *The guided launcher manages the private runtime, MCP client configuration, Unity projects, and project-local bridge updates.*
 
@@ -92,7 +96,7 @@ From an extracted standalone ZIP, validate the included server with:
 For development from source:
 
 ```powershell
-Set-Location <path-to-bantworks-mcp>
+Set-Location <path-to-creator-works-mcp>
 npm ci
 npm run release:server
 ```
@@ -101,7 +105,7 @@ npm run release:server
 
 Codex and Claude Code read MCP server configuration at startup. Restart a client that was already open, then ask it to call `get_bridge_status`. A ready bridge reports `ready: true` and `stateStatus: "fresh"`.
 
-The launcher keeps existing multi-project configuration compatible. Selecting an active project can update clients that already have BANTWORKS MCP configured; it does not create configuration for an unselected client.
+The launcher keeps existing multi-project configuration compatible. Selecting an active project can update clients that already have Creator Works MCP configured; it does not create configuration for an unselected client.
 
 ### 3. Manual or Standalone Configuration
 
@@ -112,33 +116,33 @@ Both clients launch the same MCP server. Set `UNITY_PROJECT_PATH` to choose the 
 Add this to `~/.codex/config.toml` (on Windows, normally `C:/Users/<you>/.codex/config.toml`):
 
 ```toml
-[mcp_servers.banter]
+[mcp_servers.creator-works]
 command = "node"
-args = ["C:/path/to/BANTWORKS-MCP/banter-mcp.mjs"]
+args = ["C:/path/to/Creator-Works-MCP/creator-works-mcp.mjs"]
 startup_timeout_sec = 20
 tool_timeout_sec = 600
 
-[mcp_servers.banter.env]
+[mcp_servers.creator-works.env]
 UNITY_PROJECT_PATH = "E:/unity/MCP_base"
-BANTWORKS_TOOL_GROUPS = "all"
+CREATOR_WORKS_TOOL_GROUPS = "all"
 ```
 
 #### Claude Code
 
 ```bash
-claude mcp add banter --scope user -- node C:/path/to/BANTWORKS-MCP/banter-mcp.mjs
+claude mcp add creator-works --scope user -- node C:/path/to/Creator-Works-MCP/creator-works-mcp.mjs
 ```
 
 Or add the server directly to `.claude.json`:
 ```json
 {
   "mcpServers": {
-    "banter": {
+    "creator-works": {
       "command": "node",
-      "args": ["C:/path/to/BANTWORKS-MCP/banter-mcp.mjs"],
+      "args": ["C:/path/to/Creator-Works-MCP/creator-works-mcp.mjs"],
       "env": {
         "UNITY_PROJECT_PATH": "E:/unity/MCP_base",
-        "BANTWORKS_TOOL_GROUPS": "all"
+        "CREATOR_WORKS_TOOL_GROUPS": "all"
       }
     }
   }
@@ -155,7 +159,7 @@ At runtime, call `list_unity_projects` and pass one of its stable IDs to `select
 
 The guided setup installs the bridge automatically. For a manual install, use the PowerShell setup menu or copy the included bridge to your project:
 ```
-<BANTWORKS-MCP>/unity-extension/Editor/BanterMCPBridge.cs
+<Creator-Works-MCP>/unity-extension/Editor/BanterMCPBridge.cs
   → YourProject/Assets/Editor/BanterMCPBridge.cs
 ```
 
@@ -163,13 +167,13 @@ Unity will compile it automatically, advertise its protocol and capabilities in 
 
 On Windows, current server and bridge versions prefer a project-local named pipe for small command and acknowledgement messages. Unity API calls are still executed only from `EditorApplication.update` on Unity's main thread. Large state snapshots and correlated artifacts remain atomic project-local files. Legacy bridges, unsupported platforms, stale endpoints, and connection failures automatically use the existing file command channel.
 
-In Edit mode, the bridge keeps a lightweight editor-status heartbeat and debounces full-state exports after actual hierarchy, project, property, undo, scene-open, and scene-save changes. It does not repeatedly traverse an unchanged scene. Automatic full-state export is disabled during Play mode by default to avoid main-thread hierarchy and `SerializedObject` traversal hitches. Command polling and explicit exports remain active during Play mode. Use **BANTWORKS MCP > Refresh State** or the `export-state` bridge command for an on-demand snapshot, or opt in to periodic Play-mode snapshots with the checkable **BANTWORKS MCP > Background State Export In Play Mode** menu item. The opt-in is persisted in Unity `EditorPrefs`.
+In Edit mode, the bridge keeps a lightweight editor-status heartbeat and debounces full-state exports after actual hierarchy, project, property, undo, scene-open, and scene-save changes. It does not repeatedly traverse an unchanged scene. Automatic full-state export is disabled during Play mode by default to avoid main-thread hierarchy and `SerializedObject` traversal hitches. Command polling and explicit exports remain active during Play mode. Use **Creator Works MCP > Refresh State** or the `export-state` bridge command for an on-demand snapshot, or opt in to periodic Play-mode snapshots with the checkable **Creator Works MCP > Background State Export In Play Mode** menu item. The opt-in is persisted in Unity `EditorPrefs`.
 
 ### 5. Verify the Bridge
 
 Ask the MCP client to call `get_bridge_status`. A ready bridge reports `ready: true` and `stateStatus: "fresh"`. If it is not ready, the result contains a specific next step instead of requiring a guess at which part of setup failed.
 
-The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after the extension compiles.
+The Unity Console should also show `[Creator Works MCP] Bridge initialized` after the extension compiles.
 
 ## Usage
 
@@ -186,7 +190,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 | `banter://custom-vs-node-log` | Markdown log with every captured custom node, category, and serialized default |
 | `banter://js-api` | Complete BS.* JavaScript API |
 | `banter://vs-instructions` | How to create Banter Visual Scripting graph files |
-| `banter://unity-vs-json-manual` | Unity Visual Scripting JSON manual v2.2 with higher-priority BANTWORKS compatibility errata |
+| `banter://unity-vs-json-manual` | Unity Visual Scripting JSON manual v2.2 with higher-priority Creator Works compatibility errata |
 | `unity://types` | Unity fundamentals (Vector3, Quaternion, etc.) |
 | `project://state` | Current scene hierarchy (requires extension) |
 | `project://console` | Unity console logs (requires extension) |
@@ -194,7 +198,7 @@ The Unity Console should also show `[BANTWORKS MCP] Bridge initialized` after th
 
 ### Tools (49 focused actions available to MCP clients)
 
-All 49 tools are exposed by default. Set `BANTWORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated union, or `none` for routing/health only. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
+All 49 tools are exposed by default. Set `CREATOR_WORKS_TOOL_GROUPS` to `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated union, or `none` for routing/health only. `BANTWORKS_TOOL_GROUPS` remains a fallback for older configurations. Hidden tools are removed from `tools/list` and rejected on direct invocation. See [docs/tool-groups.md](docs/tool-groups.md).
 
 | Category | Tools |
 |----------|-------|
@@ -309,7 +313,7 @@ banter-mcp/
 This server currently supports stdio transport only. Run the release bundle:
 
 ```bash
-node banter-mcp.mjs
+node creator-works-mcp.mjs
 ```
 
 From a source checkout, `node dist/index.js` is equivalent after `npm run build`.
@@ -325,7 +329,7 @@ This MCP follows the standard MCP protocol, so it works with any MCP-compatible 
 - Cursor (stdio)
 - Any client with MCP support
 
-No local-model host is bundled. Any local LLM client that supports stdio MCP can use the same `node banter-mcp.mjs` configuration shown above.
+No local-model host is bundled. Any local LLM client that supports stdio MCP can use the same `node creator-works-mcp.mjs` configuration shown above.
 
 ## Troubleshooting
 
@@ -338,7 +342,7 @@ $env:UNITY_PROJECT_PATH = "E:/unity/MyProject"
 ### "Unity extension not detected"
 1. Copy BanterMCPBridge.cs to Assets/Editor/
 2. Open Unity and let it compile
-3. Check Console for "[BANTWORKS MCP] Bridge initialized"
+3. Check Console for "[Creator Works MCP] Bridge initialized"
 
 ### Bridge status is stale
 Call `get_bridge_status`. A `stale` state means the bridge exported state previously, but not in the last 10 seconds. Open the selected project in Unity, resolve any Unity compilation errors, and confirm the bridge initialization log.

@@ -47,7 +47,7 @@ test("tool group parsing is composable and rejects ambiguous configuration", () 
 
   assert.throws(() => parseToolGroupSelection("all,read"), /cannot combine/i);
   assert.throws(() => parseToolGroupSelection("none,test"), /cannot combine/i);
-  assert.throws(() => parseToolGroupSelection("admin"), /Unknown BANTWORKS_TOOL_GROUPS/);
+  assert.throws(() => parseToolGroupSelection("admin"), /Unknown CREATOR_WORKS_TOOL_GROUPS/);
   assert.throws(() => parseToolGroupSelection(",,,"), /must contain/);
 });
 
@@ -76,6 +76,6 @@ test("disabled tools cannot be invoked by name", async () => {
       undefined,
       parseToolGroupSelection("read")
     ),
-    /disabled by BANTWORKS_TOOL_GROUPS/
+    /disabled by CREATOR_WORKS_TOOL_GROUPS/
   );
 });

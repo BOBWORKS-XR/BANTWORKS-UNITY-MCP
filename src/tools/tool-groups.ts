@@ -99,12 +99,12 @@ export function parseToolGroupSelection(value: string | undefined): ToolGroupSel
   const entries = [...new Set(value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean))];
   if (entries.length === 0) {
     throw new Error(
-      `BANTWORKS_TOOL_GROUPS must contain all, none, or one of: ${TOOL_GROUP_NAMES.join(", ")}.`
+      `CREATOR_WORKS_TOOL_GROUPS must contain all, none, or one of: ${TOOL_GROUP_NAMES.join(", ")}.`
     );
   }
   if (entries.includes("all") || entries.includes("none")) {
     if (entries.length !== 1) {
-      throw new Error("BANTWORKS_TOOL_GROUPS cannot combine 'all' or 'none' with other groups.");
+      throw new Error("CREATOR_WORKS_TOOL_GROUPS cannot combine 'all' or 'none' with other groups.");
     }
     return entries[0] === "all" ? "all" : new Set<ToolGroupName>();
   }
@@ -112,7 +112,7 @@ export function parseToolGroupSelection(value: string | undefined): ToolGroupSel
   const unknown = entries.filter((entry) => !TOOL_GROUP_NAMES.includes(entry as ToolGroupName));
   if (unknown.length > 0) {
     throw new Error(
-      `Unknown BANTWORKS_TOOL_GROUPS value(s): ${unknown.join(", ")}. ` +
+      `Unknown CREATOR_WORKS_TOOL_GROUPS value(s): ${unknown.join(", ")}. ` +
       `Use all, none, or a comma-separated selection of: ${TOOL_GROUP_NAMES.join(", ")}.`
     );
   }

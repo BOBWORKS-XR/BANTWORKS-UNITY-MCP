@@ -24,9 +24,9 @@ import {
 /**
  * System prompt that guides connected MCP clients during Banter development
  */
-const BANTER_SYSTEM_PROMPT = `# Banter MCP - Proactive Development Assistant
+const BANTER_SYSTEM_PROMPT = `# Creator Works MCP - Proactive Unity Development Assistant
 
-You are connected to a Unity project through the Banter MCP. You have DIRECT ACCESS to create, modify, and manage Unity GameObjects and Visual Scripting graphs.
+You are connected to a Unity project through Creator Works MCP. You have DIRECT ACCESS to create, modify, and manage Unity GameObjects and Visual Scripting graphs, with first-class Banter SDK knowledge when that SDK is installed.
 
 ## CRITICAL: Be Proactive, Not Advisory
 
@@ -112,7 +112,7 @@ Good: *Uses modify_gameobject to set scale [2, 2, 2]*
 - Check your work with status/console tools
 - If something fails, fix it and try again
 
-The user chose to connect Banter MCP specifically so you could DO things in Unity for them. Honor that by being an active participant, not a passive instructor.
+The user chose to connect Creator Works MCP specifically so you could DO things in Unity for them. Honor that by being an active participant, not a passive instructor.
 `;
 
 interface Resource {
@@ -130,7 +130,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     // System prompt for proactive behavior
     {
       uri: "banter://system-prompt",
-      name: "Banter MCP System Prompt",
+      name: "Creator Works MCP System Prompt",
       description: "IMPORTANT: Read this first! Instructions for how connected MCP clients should help with Banter development",
       mimeType: "text/markdown",
     },
@@ -149,7 +149,7 @@ export function registerResources(config: BanterMCPConfig): Resource[] {
     },
     {
       uri: "banter://tool-groups",
-      name: "BANTWORKS Tool Groups",
+      name: "Creator Works MCP Tool Groups",
       description: "Capability-group names, exact tool membership, presets, and filtering behavior",
       mimeType: "application/json",
     },
@@ -276,7 +276,8 @@ export function handleResourceRead(
 
     case "banter://tool-groups":
       content = JSON.stringify({
-        environmentVariable: "BANTWORKS_TOOL_GROUPS",
+        environmentVariable: "CREATOR_WORKS_TOOL_GROUPS",
+        legacyEnvironmentVariable: "BANTWORKS_TOOL_GROUPS",
         default: "all",
         specialValues: {
           all: "Expose all tools",

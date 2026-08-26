@@ -38,10 +38,10 @@ jobs:
         with:
           projectPath: launcher
           tagName: ${{ github.ref_name }}
-          releaseName: "BANTWORKS MCP __VERSION__"
+          releaseName: "Creator Works MCP __VERSION__"
           releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. The standalone ZIP remains available for manual Node.js 20+ deployments."
           releaseDraft: true
-          prerelease: false
+          prerelease: true
           args: "--bundles nsis,msi"
 
       - name: Attach standalone ZIP and checksums
@@ -50,7 +50,7 @@ jobs:
         shell: powershell
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $standalone = Get-Item "release\BANTWORKS-MCP-$version-standalone.zip"
+          $standalone = Get-Item "release\Creator-Works-MCP-$version-standalone.zip"
           $installers = @(Get-ChildItem "launcher\src-tauri\target\release\bundle" -Recurse -File | Where-Object { $_.Extension -in ".exe", ".msi" })
           $artifacts = @($standalone) + $installers
           $checksums = foreach ($artifact in $artifacts) {

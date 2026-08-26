@@ -14,7 +14,7 @@ Include the affected version, platform, reproduction steps, impact, and any miti
 
 In scope: the Node MCP server, the Tauri launcher, and `BanterMCPBridge.cs`.
 
-Out of scope: vulnerabilities in a user's game content, Unity project assets, Banter SDK releases, or MCP clients themselves, unless BANTWORKS MCP directly causes the issue.
+Out of scope: vulnerabilities in a user's game content, Unity project assets, Banter SDK releases, or MCP clients themselves, unless Creator Works MCP directly causes the issue.
 
 ## Trust Model
 

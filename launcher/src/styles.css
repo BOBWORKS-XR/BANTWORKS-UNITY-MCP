@@ -105,7 +105,15 @@ label[for] {
   white-space: nowrap;
 }
 
-.brand-bant {
+.brand-lockup {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.brand-creator {
   color: var(--cyan);
 }
 
@@ -116,6 +124,14 @@ label[for] {
 .brand-mcp {
   color: var(--text-2);
   font-weight: 500;
+}
+
+.preview-label {
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-transform: uppercase;
 }
 
 .status {

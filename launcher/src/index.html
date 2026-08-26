@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BANTWORKS MCP</title>
+  <title>Creator Works MCP - Shader Graph Preview</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,7 +13,10 @@
         <div class="logo-mark" aria-hidden="true">
           <span></span><span></span><span></span>
         </div>
-        <h1 class="brand-title"><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> <span class="brand-mcp">MCP</span></h1>
+        <div class="brand-lockup">
+          <h1 class="brand-title"><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span> <span class="brand-mcp">MCP</span></h1>
+          <span class="preview-label">Shader Graph Preview</span>
+        </div>
       </div>
       <div class="status" id="status" role="status">
         <span class="status-dot"></span>
@@ -68,7 +71,7 @@
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              Set Up BANTWORKS MCP
+              Set Up Creator Works MCP
             </button>
             <p class="setup-message" id="setupMessage" role="status"></p>
           </div>
@@ -123,6 +126,7 @@
               <option value="all">Full Unity + Banter</option>
               <option value="read">Inspection</option>
               <option value="read,author,banter">Banter workflow</option>
+              <option value="read,author,shadergraph">Shader Graph preview</option>
               <option value="read,author">Unity authoring</option>
               <option value="read,test">Testing</option>
               <option value="none">Minimal routing</option>
@@ -142,8 +146,8 @@
 
           <div class="setting-row">
             <div class="setting-info">
-              <label for="customScripts">Custom C# Scripts</label>
-              <p class="hint">Allow MCP-authored scripts outside Banter Visual Scripting</p>
+              <label for="customScripts">Custom Script Components</label>
+              <p class="hint">Allow MCP to add existing components from compiled project C#</p>
             </div>
             <label class="toggle">
               <input type="checkbox" id="customScripts">
@@ -164,7 +168,7 @@
     </main>
 
     <footer class="footer">
-      <p><span class="brand-bant">BANT</span><span class="brand-works">WORKS</span> MCP <span id="appVersion">v2.3.0</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
+      <p><span class="brand-creator">CREATOR</span> <span class="brand-works">WORKS</span> MCP <span id="appVersion">v2.4.0-1</span> <span class="footer-separator">|</span> <a href="#" id="githubLink">GitHub</a></p>
     </footer>
   </div>
 

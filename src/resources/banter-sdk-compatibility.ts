@@ -99,7 +99,7 @@ export const BANTER_SDK_COMPATIBILITY = {
       visualScriptingVersion: "1.9.9",
       result: "passed",
       evidence: [
-        "A BANTWORKS-generated Banter.VisualScripting.OnGrab graph imported with no missing elements.",
+        "A Creator Works MCP-generated Banter.VisualScripting.OnGrab graph imported with no missing elements.",
         "Banter.SDKEditor.ValidateVisualScripting.CheckVsNodes returned true.",
         "A disposable custom Unit imported successfully and produced Banter's exact forbidden-element diagnostics.",
       ],

@@ -308,7 +308,7 @@ async function runQuickSetup() {
     elements.setupMessage.textContent = connected
       ? 'Setup complete. Restart the configured MCP client if it was already open.'
       : 'Setup complete. Open or return to Unity to finish the bridge connection.';
-    showToast('BANTWORKS MCP setup completed', 'success');
+    showToast('Creator Works MCP setup completed', 'success');
   } catch (error) {
     elements.setupMessage.textContent = String(error);
     showToast('Setup failed', 'error');

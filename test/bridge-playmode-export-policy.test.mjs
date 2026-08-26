@@ -85,7 +85,7 @@ test("Edit mode uses lightweight heartbeats without per-edit full exports", () =
   assert.match(toggle, /automaticStateExportPending = false;/);
   assert.match(
     bridge,
-    /BANTWORKS MCP\/Background State Export In Edit Mode/
+    /Creator Works MCP\/Background State Export In Edit Mode/
   );
 });
 
@@ -99,8 +99,8 @@ test("Play mode keeps command polling and explicit full exports operational", ()
   const refresh = blockStartingAt("private static void RefreshState()");
   assert.match(refresh, /ExportProjectState\(\);/);
   assert.match(bridge, /case "export-state":\s*ExportProjectState\(\);/);
-  assert.match(bridge, /new ProfilerMarker\("BANTWORKS MCP\.AutomaticStateExport"\)/);
-  assert.match(bridge, /new ProfilerMarker\("BANTWORKS MCP\.ExportProjectState"\)/);
+  assert.match(bridge, /new ProfilerMarker\("Creator Works MCP\.AutomaticStateExport"\)/);
+  assert.match(bridge, /new ProfilerMarker\("Creator Works MCP\.ExportProjectState"\)/);
 });
 
 test("launcher and setup package the source-of-truth bridge", () => {

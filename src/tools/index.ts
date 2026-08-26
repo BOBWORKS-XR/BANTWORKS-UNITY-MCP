@@ -258,7 +258,7 @@ Use BS.* API for all Banter functionality.`,
     // Project State Tools
     {
       name: "list_unity_projects",
-      description: `List Unity projects available to this MCP session from UNITY_PROJECT_PATH and BANTWORKS launcher channels.
+      description: `List Unity projects available to this MCP session from UNITY_PROJECT_PATH and Creator Works launcher channels.
 Returns stable path-derived project IDs, bridge installation, live/stale Editor state, and editor process identity. This tool does not change the active project.`,
       inputSchema: {
         type: "object",
@@ -303,7 +303,7 @@ The SDK scans Script Graph and State Graph assets, embedded prefab graphs, and e
 
     {
       name: "get_shader_graph_capabilities",
-      description: `Probe the selected Unity project's installed Shader Graph package and the exact reflected GraphData, MultiJson, target, node, slot, and connection APIs available to BANTWORKS.
+      description: `Probe the selected Unity project's installed Shader Graph package and the exact reflected GraphData, MultiJson, target, node, slot, and connection APIs available to Creator Works MCP.
 Read this before authoring. Missing or shifted internal package APIs are reported explicitly; the bridge remains compilable when Shader Graph is absent.`,
       inputSchema: { type: "object", properties: {} },
     },
@@ -420,7 +420,7 @@ Optional nodes are topology-laid out before creation; connections may address re
     {
       name: "add_shader_graph_node",
       description: `Add one concrete AbstractMaterialNode to an existing Shader Graph through GraphData. Pass contentHash from inspect_shader_graph as expectedContentHash so stale edits fail closed.
-When position is omitted, BANTWORKS places the node on a 24-pixel grid to the right of the current graph without overlap. Open Shader Graph editor assets are rejected, and the original asset is restored if Unity import or shader compilation fails.`,
+When position is omitted, Creator Works MCP places the node on a 24-pixel grid to the right of the current graph without overlap. Open Shader Graph editor assets are rejected, and the original asset is restored if Unity import or shader compilation fails.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -487,7 +487,7 @@ In-flight calls retain their original project snapshot. This does not rewrite la
 
     {
       name: "get_bridge_status",
-      description: `Inspect BANTWORKS MCP bridge health without modifying the project.
+      description: `Inspect Creator Works MCP bridge health without modifying the project.
 Reports the configured project, bridge installation, state and command directories,
 state freshness, and the next setup step when the bridge is not ready.
 
@@ -1604,7 +1604,7 @@ export async function handleToolCall(
 ): Promise<{ content: Array<ToolTextContent | ToolImageContent> }> {
   if (!isToolEnabled(name, selection)) {
     throw new Error(
-      `Tool '${name}' is disabled by BANTWORKS_TOOL_GROUPS ` +
+      `Tool '${name}' is disabled by CREATOR_WORKS_TOOL_GROUPS ` +
       `(enabled selection: ${describeToolGroupSelection(selection)}).`
     );
   }

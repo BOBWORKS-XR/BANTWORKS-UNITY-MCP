@@ -1,7 +1,8 @@
 # Tool Groups
 
-BANTWORKS MCP exposes all tools by default. Set `BANTWORKS_TOOL_GROUPS` in the
-MCP server environment to reduce the tool surface for a session.
+Creator Works MCP exposes all tools by default. Set `CREATOR_WORKS_TOOL_GROUPS` in the
+MCP server environment to reduce the tool surface for a session. The legacy
+`BANTWORKS_TOOL_GROUPS` name remains accepted while existing installations migrate.
 
 Accepted values are `all`, `none`, or a comma-separated combination of:
 

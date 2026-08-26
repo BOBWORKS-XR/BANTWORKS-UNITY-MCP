@@ -1,6 +1,6 @@
 # Shader Graph Experiment
 
-Shader Graph support is isolated on `experiment/shader-graph` until its compatibility matrix is broad enough to merge. It adds focused authoring without making Shader Graph a required Unity package.
+Shader Graph support is available in the `preview/creator-works-shader-aline` preview branch while its compatibility matrix and mutation-safety review continue. It adds focused authoring without making Shader Graph a required Unity package.
 
 ## Safe Workflow
 
@@ -38,7 +38,7 @@ Generic node construction is deliberately narrow. Nodes that require extra bindi
 
 ## Clean-Room Boundary
 
-The AnkleBreaker plugin's public documentation and changelog were used only to identify behavior and failure cases. Its custom license imposes attribution and commercial-distribution conditions that do not match BANTWORKS MCP's MIT distribution goals, so no implementation material was copied.
+The AnkleBreaker plugin's public documentation and changelog were used only to identify behavior and failure cases. Its custom license imposes attribution and commercial-distribution conditions that do not match Creator Works MCP's MIT distribution goals, so no implementation material was copied.
 
 Unity-Open-MCP is MIT-licensed and was reviewed for optional-extension behavior, but no code was transplanted. BANTWORKS independently uses the installed Unity package's real object model, optimistic concurrency, transactional writes, compiler acceptance, and deterministic layout.
 

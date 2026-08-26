@@ -18,7 +18,7 @@ using Unity.Profiling;
 namespace BantworksMCP
 {
     /// <summary>
-    /// Unity Editor extension that bridges the BANTWORKS MCP server with Unity.
+    /// Unity Editor extension that bridges the Creator Works MCP server with Unity.
     /// Exports project state and handles MCP commands.
     /// Full Inspector integration - can see and modify all component properties.
     ///
@@ -48,7 +48,7 @@ namespace BantworksMCP
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly string HierarchyQueryResultsFolder = Path.Combine(StateFolder, "hierarchy-query-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
-        private const string BridgeVersion = "2.3.0";
+        private const string BridgeVersion = "2.4.0-1";
         private const int BridgeProtocolVersion = 1;
         private const int MinimumBridgeProtocolVersion = 1;
         private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
@@ -76,14 +76,14 @@ namespace BantworksMCP
         private static readonly double AutomaticStateExportDebounce = 0.5; // seconds
         private static readonly double ConsoleExportDebounce = 0.25; // seconds
         private static readonly double LauncherSettingsCheckInterval = 1.0; // seconds
-        private const string BackgroundStateExportMenuItem = "BANTWORKS MCP/Background State Export In Play Mode";
+        private const string BackgroundStateExportMenuItem = "Creator Works MCP/Background State Export In Play Mode";
         private const string BackgroundStateExportKey = "BantworksMCP_BackgroundStateExportInPlayMode";
-        private const string BackgroundEditModeStateExportMenuItem = "BANTWORKS MCP/Background State Export In Edit Mode";
+        private const string BackgroundEditModeStateExportMenuItem = "Creator Works MCP/Background State Export In Edit Mode";
         private const string BackgroundEditModeStateExportKey = "BantworksMCP_BackgroundStateExportInEditMode";
         private static readonly ProfilerMarker AutomaticStateExportProfilerMarker =
-            new ProfilerMarker("BANTWORKS MCP.AutomaticStateExport");
+            new ProfilerMarker("Creator Works MCP.AutomaticStateExport");
         private static readonly ProfilerMarker FullStateExportProfilerMarker =
-            new ProfilerMarker("BANTWORKS MCP.ExportProjectState");
+            new ProfilerMarker("Creator Works MCP.ExportProjectState");
         private static DateTime lastLauncherSettingsWriteTime = DateTime.MinValue;
         private static string activeTestRunId;
         private static object activeTestRunnerApi;
@@ -179,7 +179,7 @@ namespace BantworksMCP
             LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Initialized";
             CommandsProcessed = 0;
 
-            Debug.Log("[BANTWORKS MCP] Bridge initialized. State folder: " + StateFolder);
+            Debug.Log("[Creator Works MCP] Bridge initialized. State folder: " + StateFolder);
         }
 
         private static void EnsureDirectories()
@@ -319,14 +319,14 @@ namespace BantworksMCP
                 {
                     EnableCustomScripts = settings.enableCustomScripts;
                     LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Launcher settings applied";
-                    Debug.Log($"[BANTWORKS MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
+                    Debug.Log($"[Creator Works MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
                 }
 
                 lastLauncherSettingsWriteTime = writeTime;
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Could not read launcher settings: {e.Message}");
+                Debug.LogWarning($"[Creator Works MCP] Could not read launcher settings: {e.Message}");
             }
         }
 
@@ -455,18 +455,18 @@ namespace BantworksMCP
 
         #region Menu Items
 
-        [MenuItem("BANTWORKS MCP/Show Status Window")]
+        [MenuItem("Creator Works MCP/Show Status Window")]
         private static void ShowStatusWindow()
         {
             BantworksMCPWindow.ShowWindow();
         }
 
-        [MenuItem("BANTWORKS MCP/Refresh State")]
+        [MenuItem("Creator Works MCP/Refresh State")]
         private static void RefreshState()
         {
             ExportProjectState();
             LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Manual refresh";
-            Debug.Log("[BANTWORKS MCP] State refreshed manually");
+            Debug.Log("[Creator Works MCP] State refreshed manually");
         }
 
         [MenuItem(BackgroundStateExportMenuItem)]
@@ -489,7 +489,7 @@ namespace BantworksMCP
             }
             LastActivity = DateTime.Now.ToString("HH:mm:ss") +
                 (enabled ? " - Play-mode background export enabled" : " - Play-mode background export disabled");
-            Debug.Log($"[BANTWORKS MCP] Play-mode background state export {(enabled ? "enabled" : "disabled")}");
+            Debug.Log($"[Creator Works MCP] Play-mode background state export {(enabled ? "enabled" : "disabled")}");
         }
 
         [MenuItem(BackgroundStateExportMenuItem, true)]
@@ -515,7 +515,7 @@ namespace BantworksMCP
 
             LastActivity = DateTime.Now.ToString("HH:mm:ss") +
                 (enabled ? " - Edit-mode background export enabled" : " - Edit-mode background export disabled");
-            Debug.Log($"[BANTWORKS MCP] Edit-mode background state export {(enabled ? "enabled" : "disabled")}");
+            Debug.Log($"[Creator Works MCP] Edit-mode background state export {(enabled ? "enabled" : "disabled")}");
         }
 
         [MenuItem(BackgroundEditModeStateExportMenuItem, true)]
@@ -525,13 +525,13 @@ namespace BantworksMCP
             return true;
         }
 
-        [MenuItem("BANTWORKS MCP/Open MCP Folder")]
+        [MenuItem("Creator Works MCP/Open MCP Folder")]
         private static void OpenMCPFolder()
         {
             EditorUtility.RevealInFinder(MCPFolder);
         }
 
-        [MenuItem("BANTWORKS MCP/Clear Commands")]
+        [MenuItem("Creator Works MCP/Clear Commands")]
         private static void ClearCommands()
         {
             if (Directory.Exists(CommandsFolder))
@@ -541,15 +541,15 @@ namespace BantworksMCP
                     File.Delete(file);
                 }
             }
-            Debug.Log("[BANTWORKS MCP] Commands folder cleared");
+            Debug.Log("[Creator Works MCP] Commands folder cleared");
         }
 
-        [MenuItem("BANTWORKS MCP/Scan Prefabs")]
+        [MenuItem("Creator Works MCP/Scan Prefabs")]
         private static void ScanPrefabsMenuItem()
         {
             if (IsScanningPrefabs)
             {
-                Debug.LogWarning("[BANTWORKS MCP] Prefab scan already in progress");
+                Debug.LogWarning("[Creator Works MCP] Prefab scan already in progress");
                 return;
             }
             ScanAndExportPrefabCatalog();
@@ -577,7 +577,7 @@ namespace BantworksMCP
             pipeServerThread = new Thread(PipeServerLoop)
             {
                 IsBackground = true,
-                Name = "BANTWORKS MCP Named Pipe"
+                Name = "Creator Works MCP Named Pipe"
             };
             pipeServerThread.Start();
         }
@@ -705,17 +705,17 @@ namespace BantworksMCP
                 catch (ObjectDisposedException)
                 {
                     if (!pipeServerShutdownRequested)
-                        System.Console.WriteLine("[BANTWORKS MCP] Named pipe was disposed unexpectedly.");
+                        System.Console.WriteLine("[Creator Works MCP] Named pipe was disposed unexpectedly.");
                 }
                 catch (PlatformNotSupportedException e)
                 {
-                    System.Console.WriteLine("[BANTWORKS MCP] Named pipe transport is unavailable: " + e.Message);
+                    System.Console.WriteLine("[Creator Works MCP] Named pipe transport is unavailable: " + e.Message);
                     pipeServerShutdownRequested = true;
                 }
                 catch (Exception e)
                 {
                     if (!pipeServerShutdownRequested)
-                        System.Console.WriteLine("[BANTWORKS MCP] Named pipe error: " + e.Message);
+                        System.Console.WriteLine("[Creator Works MCP] Named pipe error: " + e.Message);
                 }
                 finally
                 {
@@ -817,7 +817,7 @@ namespace BantworksMCP
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"[BANTWORKS MCP] Error processing command {file}: {e.Message}");
+                    Debug.LogError($"[Creator Works MCP] Error processing command {file}: {e.Message}");
                     WriteCommandResult(command?.id, false, null, e.Message);
                     ArchiveFailedCommand(file);
                 }
@@ -837,7 +837,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError("[BANTWORKS MCP] Command failed: " + e.Message);
+                Debug.LogError("[Creator Works MCP] Command failed: " + e.Message);
                 return CreateCommandResult(command != null ? command.id : ExtractCommandId(json), false, null, e.Message);
             }
         }
@@ -1046,7 +1046,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Could not archive failed command {sourcePath}: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Could not archive failed command {sourcePath}: {e.Message}");
             }
         }
 
@@ -1080,7 +1080,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                System.Console.WriteLine($"[BANTWORKS MCP] Could not write command result: {e.Message}");
+                System.Console.WriteLine($"[Creator Works MCP] Could not write command result: {e.Message}");
             }
         }
 
@@ -1139,7 +1139,7 @@ namespace BantworksMCP
             // Select the new object
             Selection.activeGameObject = obj;
 
-            Debug.Log($"[BANTWORKS MCP] Created GameObject: {cmd.name}");
+            Debug.Log($"[Creator Works MCP] Created GameObject: {cmd.name}");
             ExportSceneHierarchy();
         }
 
@@ -1148,7 +1148,7 @@ namespace BantworksMCP
             var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
             Undo.DestroyObjectImmediate(obj);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Deleted GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
+            Debug.Log($"[Creator Works MCP] Deleted GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
         }
 
@@ -1240,7 +1240,7 @@ namespace BantworksMCP
 
                 WriteAtomicBytes(outputPath, png);
                 DeleteOldFiles(ScreenshotResultsFolder, "*.png", 20);
-                Debug.Log($"[BANTWORKS MCP] Captured {source} screenshot {width}x{height} using {camera.name}");
+                Debug.Log($"[Creator Works MCP] Captured {source} screenshot {width}x{height} using {camera.name}");
             }
             finally
             {
@@ -2504,7 +2504,7 @@ namespace BantworksMCP
                 }
                 catch (Exception exception)
                 {
-                    Debug.LogWarning("[BANTWORKS MCP] Could not unregister Test Runner callback: " + exception.Message);
+                    Debug.LogWarning("[Creator Works MCP] Could not unregister Test Runner callback: " + exception.Message);
                 }
 
                 if (activeTestRunnerApi is UnityEngine.Object unityObject)
@@ -2535,7 +2535,7 @@ namespace BantworksMCP
             try
             {
                 RegisterTestRunnerCallback(pending.commandId);
-                Debug.Log("[BANTWORKS MCP] Restored Test Runner callback for " + pending.commandId);
+                Debug.Log("[Creator Works MCP] Restored Test Runner callback for " + pending.commandId);
             }
             catch (Exception exception)
             {
@@ -2700,7 +2700,7 @@ namespace BantworksMCP
             }
             catch (Exception exception)
             {
-                Debug.LogError("[BANTWORKS MCP] Test Runner callback failed: " + exception);
+                Debug.LogError("[Creator Works MCP] Test Runner callback failed: " + exception);
                 FailTestRun(run, "Could not serialize Unity Test Runner result: " + exception.Message);
                 UnregisterActiveTestRunnerCallback();
             }
@@ -3058,7 +3058,7 @@ namespace BantworksMCP
             }
 
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Modified GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
+            Debug.Log($"[Creator Works MCP] Modified GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
         }
 
@@ -3075,7 +3075,7 @@ namespace BantworksMCP
 
             Undo.AddComponent(obj, componentType);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Added component {cmd.componentType} to {cmd.objectPath}");
+            Debug.Log($"[Creator Works MCP] Added component {cmd.componentType} to {cmd.objectPath}");
             ExportSceneHierarchy();
         }
 
@@ -3086,7 +3086,7 @@ namespace BantworksMCP
 
             Undo.DestroyObjectImmediate(component);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Removed component {cmd.componentType} from {cmd.objectPath}");
+            Debug.Log($"[Creator Works MCP] Removed component {cmd.componentType} from {cmd.objectPath}");
             ExportSceneHierarchy();
         }
 
@@ -3108,7 +3108,7 @@ namespace BantworksMCP
 
             so.ApplyModifiedProperties();
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Set {cmd.propertyName} on {cmd.componentType}");
+            Debug.Log($"[Creator Works MCP] Set {cmd.propertyName} on {cmd.componentType}");
             ExportSceneHierarchy();
         }
 
@@ -3150,7 +3150,7 @@ namespace BantworksMCP
             so.ApplyModifiedProperties();
 
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Set reference {cmd.propertyName} on {cmd.componentType}");
+            Debug.Log($"[Creator Works MCP] Set reference {cmd.propertyName} on {cmd.componentType}");
             ExportSceneHierarchy();
         }
 
@@ -3224,7 +3224,7 @@ namespace BantworksMCP
 
             EditorUtility.SetDirty(component);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Set asset reference {cmd.propertyName} on {cmd.componentType} -> {(cmd.clear ? "null" : resolvedPath)}");
+            Debug.Log($"[Creator Works MCP] Set asset reference {cmd.propertyName} on {cmd.componentType} -> {(cmd.clear ? "null" : resolvedPath)}");
             ExportSceneHierarchy();
             return cmd.clear ? "null" : resolvedPath;
         }
@@ -3728,7 +3728,7 @@ namespace BantworksMCP
             // Mark scene dirty
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
 
-            Debug.Log($"[BANTWORKS MCP] Instantiated prefab: {cmd.prefabPath}");
+            Debug.Log($"[Creator Works MCP] Instantiated prefab: {cmd.prefabPath}");
             ExportSceneHierarchy();
         }
 
@@ -3766,7 +3766,7 @@ namespace BantworksMCP
 
             Bounds bounds = CalculateGameObjectBounds(obj);
             ExportBoundsResult(cmd.id, GetStableObjectId(obj), GetGameObjectPath(obj), true, bounds);
-            Debug.Log($"[BANTWORKS MCP] Got bounds for {GetGameObjectPath(obj)}: size={bounds.size}, center={bounds.center}");
+            Debug.Log($"[Creator Works MCP] Got bounds for {GetGameObjectPath(obj)}: size={bounds.size}, center={bounds.center}");
         }
 
         private static void ExportBoundsResult(string commandId, string objectId, string objectPath, bool success, Bounds? bounds)
@@ -3805,7 +3805,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting bounds result: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting bounds result: {e.Message}");
             }
         }
 
@@ -3822,7 +3822,7 @@ namespace BantworksMCP
 
             Undo.IncrementCurrentGroup();
             int undoGroup = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("BANTWORKS MCP Batch");
+            Undo.SetCurrentGroupName("Creator Works MCP Batch");
 
             int appliedCount = 0;
             var errors = new List<string>();
@@ -3838,7 +3838,7 @@ namespace BantworksMCP
                 {
                     string error = $"Operation {index + 1} failed: {e.Message}";
                     errors.Add(error);
-                    Debug.LogError($"[BANTWORKS MCP] Batch {error}");
+                    Debug.LogError($"[Creator Works MCP] Batch {error}");
 
                     if (!batchCmd.continueOnError)
                     {
@@ -3859,7 +3859,7 @@ namespace BantworksMCP
                     $"Batch completed with {errors.Count} failed operation(s) and {appliedCount} applied operation(s): {string.Join("; ", errors)}");
             }
 
-            Debug.Log($"[BANTWORKS MCP] Batch completed: {appliedCount} operations");
+            Debug.Log($"[Creator Works MCP] Batch completed: {appliedCount} operations");
         }
 
         private static void ExecuteBatchCommand(string commandJson)
@@ -5647,7 +5647,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Could not prune old result files in {folder}: {e.Message}");
+                Debug.LogWarning($"[Creator Works MCP] Could not prune old result files in {folder}: {e.Message}");
             }
         }
 
@@ -5690,7 +5690,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting hierarchy: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting hierarchy: {e.Message}");
             }
         }
 
@@ -5799,7 +5799,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Could not serialize component {comp.GetType().Name}: {e.Message}");
+                Debug.LogWarning($"[Creator Works MCP] Could not serialize component {comp.GetType().Name}: {e.Message}");
             }
 
             return info;
@@ -5883,7 +5883,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting editor state: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting editor state: {e.Message}");
             }
         }
 
@@ -5973,7 +5973,7 @@ namespace BantworksMCP
             catch (Exception e)
             {
                 // Avoid recursive logging by using Console.WriteLine
-                System.Console.WriteLine($"[BANTWORKS MCP] Error exporting console logs: {e.Message}");
+                System.Console.WriteLine($"[Creator Works MCP] Error exporting console logs: {e.Message}");
             }
         }
 
@@ -5994,7 +5994,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting import status: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting import status: {e.Message}");
             }
         }
 
@@ -6006,7 +6006,7 @@ namespace BantworksMCP
         {
             try
             {
-                Debug.Log("[BANTWORKS MCP] Scanning prefabs...");
+                Debug.Log("[Creator Works MCP] Scanning prefabs...");
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
                 // Find all prefab GUIDs
@@ -6157,14 +6157,14 @@ namespace BantworksMCP
                 IsScanningPrefabs = false;
                 ScanStatus = $"Complete: {totalCount} prefabs in {categories.Count} categories ({stopwatch.ElapsedMilliseconds}ms)";
 
-                Debug.Log($"[BANTWORKS MCP] Prefab catalog exported: {totalCount} prefabs in {categories.Count} categories ({stopwatch.ElapsedMilliseconds}ms)");
+                Debug.Log($"[Creator Works MCP] Prefab catalog exported: {totalCount} prefabs in {categories.Count} categories ({stopwatch.ElapsedMilliseconds}ms)");
                 LastActivity = DateTime.Now.ToString("HH:mm:ss") + $" - Scanned {totalCount} prefabs";
             }
             catch (Exception e)
             {
                 IsScanningPrefabs = false;
                 ScanStatus = $"Error: {e.Message}";
-                Debug.LogError($"[BANTWORKS MCP] Error scanning prefabs: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error scanning prefabs: {e.Message}");
             }
         }
 
@@ -6419,7 +6419,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                System.Console.WriteLine($"[BANTWORKS MCP] Error exporting compilation status: {e.Message}");
+                System.Console.WriteLine($"[Creator Works MCP] Error exporting compilation status: {e.Message}");
             }
         }
 
@@ -7316,7 +7316,7 @@ namespace BantworksMCP
     }
 
     /// <summary>
-    /// Status window for BANTWORKS MCP
+    /// Status window for Creator Works MCP
     /// </summary>
     public class BantworksMCPWindow : EditorWindow
     {
@@ -7326,7 +7326,7 @@ namespace BantworksMCP
 
         public static void ShowWindow()
         {
-            var window = GetWindow<BantworksMCPWindow>("BANTWORKS MCP");
+            var window = GetWindow<BantworksMCPWindow>("Creator Works MCP");
             window.minSize = new Vector2(350, 300);
         }
 
@@ -7501,22 +7501,22 @@ namespace BantworksMCP
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Refresh State", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Refresh State");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Refresh State");
             }
             if (GUILayout.Button("Rescan Prefabs", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Scan Prefabs");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Scan Prefabs");
             }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Open MCP Folder", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Open MCP Folder");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Open MCP Folder");
             }
             if (GUILayout.Button("Clear Commands", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Clear Commands");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Clear Commands");
             }
             EditorGUILayout.EndHorizontal();
 

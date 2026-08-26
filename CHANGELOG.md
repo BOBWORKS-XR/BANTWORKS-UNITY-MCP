@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 2.4.0-1 - 2026-08-26
+
+### Changed
+
+- Renamed the public product, launcher, installer, standalone bundle, and MCP handshake to Creator Works MCP.
+- Codex and Claude Code setup now use the AI-facing `creator-works` entry and `CREATOR_WORKS_TOOL_GROUPS`; setup removes the former `banter` entry to prevent duplicate servers.
+- Existing launcher configuration is migrated from `banter-mcp` to `creator-works-mcp`. Legacy environment variables and the project-local `.bantworks-mcp` bridge protocol remain supported for upgrade compatibility.
+- Added a visible Shader Graph Preview label and a dedicated `read,author,shadergraph` launcher capability profile.
+
+### Preview Status
+
+- This build is for Aline's Shader Graph evaluation branch. Use disposable or version-controlled Unity projects; Shader Graph authoring is not yet promoted as stable release behavior.
 
 ### Added
 

@@ -1,4 +1,4 @@
-# Contributing to BANTWORKS MCP
+# Contributing to Creator Works MCP
 
 ## Local Checks
 

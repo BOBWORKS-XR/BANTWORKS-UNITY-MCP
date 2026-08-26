@@ -2,7 +2,7 @@
 
 ## Code and Dependencies
 
-No Unity-owned MCP code or relay binaries are copied, vendored, or linked into this repository. The hybrid bridge changes were independently authored against BANTWORKS MCP's existing command contracts and public platform APIs.
+No Unity-owned MCP code or relay binaries are copied, vendored, or linked into this repository. The hybrid bridge changes were independently authored against Creator Works MCP's existing command contracts and public platform APIs.
 
 The Node dependency graph is tracked in `package-lock.json`; its direct runtime MCP dependency is `@modelcontextprotocol/sdk`. The release bundle is produced with [esbuild](https://github.com/evanw/esbuild), which is MIT-licensed. Review locked package metadata and licenses when redistributing a bundled build.
 
@@ -20,11 +20,11 @@ The following MIT-licensed projects were reviewed on 2026-07-14 for public docum
 
 The research informed this repository's `get_bridge_status` tool, connection-verification documentation, CI, security policy, and contribution guidance. These are independently authored changes; no third-party source, assets, or generated data were imported.
 
-On 2026-07-29, Unity's official `com.unity.ai.assistant` MCP documentation and package metadata were reviewed for protocol versioning, local relay architecture, explicit Editor targeting, capability discovery, and main-thread Unity API boundaries. The Unity package is distributed under Unity's Terms of Service rather than an open-source licence. BANTWORKS MCP does not redistribute or derive code from that package.
+On 2026-07-29, Unity's official `com.unity.ai.assistant` MCP documentation and package metadata were reviewed for protocol versioning, local relay architecture, explicit Editor targeting, capability discovery, and main-thread Unity API boundaries. The Unity package is distributed under Unity's Terms of Service rather than an open-source licence. Creator Works MCP does not redistribute or derive code from that package.
 
 [yecats/unity-mcp-toolkit](https://github.com/yecats/unity-mcp-toolkit), released under CC0 1.0 Universal, was also evaluated for optional settings, Scene View, Input System, Recorder, and domain-refresh tools. No toolkit code is included in version 2.2.0; those tools will be added only where they justify their maintenance and runtime surface.
 
-On 2026-08-24, [AnkleBreaker-Studio/unity-mcp-plugin](https://github.com/AnkleBreaker-Studio/unity-mcp-plugin) was reviewed as a behavioral research reference for Shader Graph workflows and published failure modes. Its custom AnkleBreaker Open License v1.0 requires visible attribution and restricts commercial distribution of the software and derivatives. No source, assets, schemas, or serialized data from that repository were copied into BANTWORKS MCP. The implementation here was independently authored against the installed Unity package APIs and official Unity documentation.
+On 2026-08-24, [AnkleBreaker-Studio/unity-mcp-plugin](https://github.com/AnkleBreaker-Studio/unity-mcp-plugin) was reviewed as a behavioral research reference for Shader Graph workflows and published failure modes. Its custom AnkleBreaker Open License v1.0 requires visible attribution and restricts commercial distribution of the software and derivatives. No source, assets, schemas, or serialized data from that repository were copied into Creator Works MCP. The implementation here was independently authored against the installed Unity package APIs and official Unity documentation.
 
 [AlexeyPerov/Unity-Open-MCP](https://github.com/AlexeyPerov/Unity-Open-MCP), released under the MIT license, was also reviewed at commit `961fae1c4f1cb51046397a3fb6c06b522f094689` for extension discovery and fail-closed optional-package ideas. No source was imported. Its public Shader Graph behavior helped define independent negative tests around reflection availability, asset detection, and validation.
 
@@ -32,4 +32,4 @@ Unity's public Shader Graph documentation and locally installed package source w
 
 ## Deliberate Non-Adoptions
 
-Remote WebSocket/HTTP listeners and arbitrary C# execution appear in parts of the broader Unity MCP ecosystem. They are not adopted here because BANTWORKS MCP is intentionally local and project-scoped, and those capabilities need a separate authentication and authorization design.
+Remote WebSocket/HTTP listeners and arbitrary C# execution appear in parts of the broader Unity MCP ecosystem. They are not adopted here because Creator Works MCP is intentionally local and project-scoped, and those capabilities need a separate authentication and authorization design.
