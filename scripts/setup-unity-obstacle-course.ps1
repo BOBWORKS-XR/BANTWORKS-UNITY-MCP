@@ -248,7 +248,7 @@ $projectMarker = [ordered]@{
     unityVersion = $unityVersion
     seed = $Seed
     banterRevision = $BanterRevision
-    sourceRepository = "https://github.com/BOBWORKS-XR/BANTWORKS-UNITY-MCP"
+    sourceRepository = "https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP"
 }
 $projectMarker | ConvertTo-Json | Set-Content -LiteralPath $ProjectMarkerPath -Encoding utf8
 

@@ -520,7 +520,7 @@ async function saveLauncherConfig(errorMessage) {
 
 async function openDocumentation() {
   try {
-    await window.__TAURI__.shell.open('https://github.com/BOBWORKS-XR/BANTWORKS-UNITY-MCP');
+    await window.__TAURI__.shell.open('https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP');
   } catch (error) {
     showToast('Could not open documentation', 'error');
   }
