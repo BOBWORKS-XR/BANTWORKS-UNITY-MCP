@@ -9,6 +9,7 @@
   --surface: #181a1c;
   --surface-2: #202326;
   --surface-3: #292d30;
+  --hover: #1b1e20;
   --text: #f4f6f7;
   --text-2: #aeb5ba;
   --text-3: #737b80;
@@ -57,12 +58,11 @@ label[for] {
 
 .header {
   align-items: center;
-  background: #141617;
-  border-bottom: 1px solid var(--border);
+  background: transparent;
   display: flex;
   justify-content: space-between;
-  min-height: 68px;
-  padding: 14px 24px;
+  min-height: 72px;
+  padding: 16px 28px;
 }
 
 .logo {
@@ -73,29 +73,10 @@ label[for] {
 }
 
 .logo-mark {
-  background: #0a0b0c;
-  border: 2px solid var(--cyan);
-  border-radius: 8px;
-  display: grid;
-  gap: 4px;
-  height: 36px;
-  padding: 8px 7px;
-  width: 36px;
-}
-
-.logo-mark span {
-  background: var(--red);
-  border-radius: 1px;
   display: block;
-  height: 2px;
-}
-
-.logo-mark span:nth-child(2) {
-  width: 72%;
-}
-
-.logo-mark span:nth-child(3) {
-  width: 88%;
+  height: 42px;
+  object-fit: contain;
+  width: 42px;
 }
 
 .brand-title {
@@ -136,13 +117,12 @@ label[for] {
 
 .status {
   align-items: center;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: transparent;
+  border: 0;
   display: flex;
   gap: 8px;
-  min-height: 34px;
-  padding: 6px 11px;
+  min-height: 32px;
+  padding: 4px 0;
 }
 
 .status-dot {
@@ -172,18 +152,18 @@ label[for] {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 18px;
+  gap: 34px;
   margin: 0 auto;
   max-width: 1060px;
-  padding: 22px 24px;
+  padding: 24px 28px 36px;
   width: 100%;
 }
 
 .section {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .section-header {
@@ -202,7 +182,7 @@ label[for] {
 }
 
 h2 {
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 650;
   line-height: 1.25;
 }
@@ -214,7 +194,28 @@ h2 {
   margin-bottom: 3px;
 }
 
-.runtime-badge,
+.runtime-badge {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-2);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 7px;
+  min-height: 24px;
+  padding: 3px 0;
+  white-space: nowrap;
+}
+
+.runtime-badge::before {
+  background: var(--text-3);
+  border-radius: 50%;
+  content: "";
+  height: 7px;
+  width: 7px;
+}
+
 .badge {
   align-items: center;
   background: var(--surface-3);
@@ -229,14 +230,32 @@ h2 {
   white-space: nowrap;
 }
 
-.runtime-badge.ready,
+.runtime-badge.ready {
+  background: transparent;
+  border-color: transparent;
+  color: #79df9f;
+}
+
+.runtime-badge.ready::before {
+  background: var(--green);
+}
+
 .badge.success {
   background: rgba(51, 197, 107, 0.1);
   border-color: rgba(51, 197, 107, 0.38);
   color: #79df9f;
 }
 
-.runtime-badge.error,
+.runtime-badge.error {
+  background: transparent;
+  border-color: transparent;
+  color: #efbf6c;
+}
+
+.runtime-badge.error::before {
+  background: var(--amber);
+}
+
 .badge.warning {
   background: rgba(233, 169, 58, 0.1);
   border-color: rgba(233, 169, 58, 0.4);
@@ -245,7 +264,7 @@ h2 {
 
 .setup-grid {
   display: grid;
-  gap: 24px;
+  gap: 38px;
   grid-template-columns: minmax(0, 1.15fr) minmax(250px, 0.85fr);
 }
 
@@ -310,23 +329,24 @@ h2 {
 
 .client-option {
   align-items: center;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
   display: grid;
   gap: 10px;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   min-height: 54px;
-  padding: 8px 11px;
+  padding: 8px;
 }
 
 .client-option + .client-option {
-  margin-top: 8px;
+  margin-top: 2px;
 }
 
 .client-option:hover {
-  border-color: var(--border-strong);
+  background: var(--hover);
+  border-color: transparent;
 }
 
 .client-option input {
@@ -427,14 +447,14 @@ h2 {
 
 .setup-checks {
   align-self: stretch;
-  background: #131516;
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
   min-width: 0;
-  padding: 8px 15px;
+  padding: 8px 0;
 }
 
 .check-row {
@@ -496,23 +516,23 @@ h2 {
 .projects-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 2px;
 }
 
 .empty-state {
   align-items: center;
-  border: 1px dashed var(--border-strong);
-  border-radius: 6px;
+  border: 0;
+  border-radius: 0;
   color: var(--text-3);
   display: flex;
   justify-content: center;
-  min-height: 72px;
+  min-height: 58px;
 }
 
 .project-card {
   align-items: center;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
   display: grid;
@@ -523,11 +543,12 @@ h2 {
 }
 
 .project-card:hover {
-  border-color: var(--border-strong);
+  background: var(--hover);
+  border-color: transparent;
 }
 
 .project-card.active {
-  border-color: rgba(0, 204, 232, 0.7);
+  border-color: transparent;
 }
 
 .project-indicator {
@@ -597,15 +618,15 @@ h2 {
   font-size: 14px;
   font-weight: 650;
   list-style-position: inside;
-  padding: 16px 20px;
+  padding: 12px 0;
 }
 
 .advanced-section[open] summary {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
 }
 
 .advanced-content {
-  padding: 6px 20px 20px;
+  padding: 6px 0 0;
 }
 
 .setting-row {
@@ -680,7 +701,7 @@ h2 {
 }
 
 .footer {
-  border-top: 1px solid var(--border);
+  border-top: 0;
   color: var(--text-3);
   font-size: 11px;
   padding: 13px 24px;
@@ -740,7 +761,8 @@ h2 {
   }
 
   .setup-checks {
-    min-height: 220px;
+    min-height: 0;
+    padding-top: 2px;
   }
 
   .project-card {
@@ -782,5 +804,15 @@ h2 {
   .client-state {
     grid-column: 2;
     text-align: left;
+  }
+
+  .projects-section .section-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .projects-section .section-actions {
+    justify-content: flex-start;
   }
 }
