@@ -18,6 +18,8 @@ const LEGACY_APP_CONFIG_DIR: &str = "banter-mcp";
 const MCP_ROOT_ENV: &str = "CREATOR_WORKS_MCP_ROOT";
 const LEGACY_MCP_ROOT_ENV: &str = "BANTWORKS_MCP_ROOT";
 const TOOL_GROUPS_ENV: &str = "CREATOR_WORKS_TOOL_GROUPS";
+const UNITY_BRIDGE_FILE_NAME: &str = "BanterMCPBridge.cs";
+const UNITY_BRIDGE_LOGO_FILE_NAME: &str = "CreatorWorksMCPLogo.png";
 
 /// A scene channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,11 +204,19 @@ fn find_mcp_server_path(root: &Path) -> Option<PathBuf> {
 fn unity_bridge_path(root: &Path) -> PathBuf {
     root.join("unity-extension")
         .join("Editor")
-        .join("BanterMCPBridge.cs")
+        .join(UNITY_BRIDGE_FILE_NAME)
+}
+
+fn unity_bridge_logo_path(root: &Path) -> PathBuf {
+    root.join("unity-extension")
+        .join("Editor")
+        .join(UNITY_BRIDGE_LOGO_FILE_NAME)
 }
 
 fn is_valid_mcp_root(root: &Path) -> bool {
-    find_mcp_server_path(root).is_some() && unity_bridge_path(root).is_file()
+    find_mcp_server_path(root).is_some()
+        && unity_bridge_path(root).is_file()
+        && unity_bridge_logo_path(root).is_file()
 }
 
 fn normalized_existing_path(path: PathBuf) -> PathBuf {
@@ -1028,17 +1038,36 @@ fn unity_bridge_destination(project_path: &Path) -> PathBuf {
     project_path
         .join("Assets")
         .join("Editor")
-        .join("BanterMCPBridge.cs")
+        .join(UNITY_BRIDGE_FILE_NAME)
+}
+
+fn unity_bridge_logo_destination(project_path: &Path) -> PathBuf {
+    project_path
+        .join("Assets")
+        .join("Editor")
+        .join(UNITY_BRIDGE_LOGO_FILE_NAME)
+}
+
+fn files_match(source: &Path, destination: &Path) -> bool {
+    fs::read(source)
+        .and_then(|source_bytes| {
+            fs::read(destination).map(|destination_bytes| source_bytes == destination_bytes)
+        })
+        .unwrap_or(false)
 }
 
 fn unity_extension_status(source: &Path, project_path: &Path) -> UnityExtensionStatus {
     let destination = unity_bridge_destination(project_path);
+    let logo_source = source
+        .parent()
+        .map(|parent| parent.join(UNITY_BRIDGE_LOGO_FILE_NAME));
+    let logo_destination = unity_bridge_logo_destination(project_path);
     let installed = destination.is_file();
     let current = installed
-        && fs::read(source)
-            .and_then(|source_bytes| {
-                fs::read(&destination).map(|destination_bytes| source_bytes == destination_bytes)
-            })
+        && files_match(source, &destination)
+        && logo_source
+            .as_deref()
+            .map(|logo| files_match(logo, &logo_destination))
             .unwrap_or(false);
     UnityExtensionStatus { installed, current }
 }
@@ -1061,18 +1090,27 @@ fn install_unity_extension(
     app: tauri::AppHandle,
     unity_project_path: String,
 ) -> Result<(), String> {
-    let source = unity_bridge_path(&resolve_mcp_root(&app)?);
+    let root = resolve_mcp_root(&app)?;
+    let source = unity_bridge_path(&root);
+    let logo_source = unity_bridge_logo_path(&root);
 
     let dest_dir = PathBuf::from(&unity_project_path)
         .join("Assets")
         .join("Editor");
 
-    let dest = dest_dir.join("BanterMCPBridge.cs");
+    let dest = dest_dir.join(UNITY_BRIDGE_FILE_NAME);
+    let logo_dest = dest_dir.join(UNITY_BRIDGE_LOGO_FILE_NAME);
 
     if !source.exists() {
         return Err(format!(
             "Unity bridge source was not found: {}",
             source.display()
+        ));
+    }
+    if !logo_source.exists() {
+        return Err(format!(
+            "Unity bridge logo was not found: {}",
+            logo_source.display()
         ));
     }
 
@@ -1098,8 +1136,19 @@ fn install_unity_extension(
     }
 
     let temporary_dest = dest_dir.join(format!(".BanterMCPBridge-{}.tmp", uuid::Uuid::new_v4()));
+    let temporary_logo_dest =
+        dest_dir.join(format!(".CreatorWorksMCPLogo-{}.tmp", uuid::Uuid::new_v4()));
     fs::copy(&source, &temporary_dest)
         .map_err(|e| format!("Failed to stage Unity bridge: {}", e))?;
+    if let Err(error) = fs::copy(&logo_source, &temporary_logo_dest) {
+        let _ = fs::remove_file(&temporary_dest);
+        return Err(format!("Failed to stage Unity bridge logo: {}", error));
+    }
+    publish_temporary_file(&temporary_logo_dest, &logo_dest).map_err(|e| {
+        let _ = fs::remove_file(&temporary_dest);
+        let _ = fs::remove_file(&temporary_logo_dest);
+        format!("Failed to install Unity bridge logo: {}", e)
+    })?;
     publish_temporary_file(&temporary_dest, &dest).map_err(|e| {
         let _ = fs::remove_file(&temporary_dest);
         format!("Failed to install Unity bridge: {}", e)
@@ -1572,10 +1621,12 @@ mod tests {
         let root = temporary_root();
         let server = root.join("release").join("creator-works-mcp.mjs");
         let bridge = unity_bridge_path(&root);
+        let logo = unity_bridge_logo_path(&root);
         fs::create_dir_all(server.parent().unwrap()).unwrap();
         fs::create_dir_all(bridge.parent().unwrap()).unwrap();
         fs::write(&server, "// fixture").unwrap();
         fs::write(&bridge, "// fixture").unwrap();
+        fs::write(&logo, "logo fixture").unwrap();
 
         assert_eq!(find_mcp_server_path(&root), Some(server));
         assert!(is_valid_mcp_root(&root));
@@ -1754,9 +1805,12 @@ mod tests {
         let root = temporary_root();
         let project = root.join("Project");
         let source = root.join("BanterMCPBridge.cs");
+        let logo_source = root.join(UNITY_BRIDGE_LOGO_FILE_NAME);
         let destination = unity_bridge_destination(&project);
+        let logo_destination = unity_bridge_logo_destination(&project);
         fs::create_dir_all(destination.parent().unwrap()).unwrap();
         fs::write(&source, "current bridge").unwrap();
+        fs::write(&logo_source, "current logo").unwrap();
         fs::write(&destination, "old bridge").unwrap();
 
         let stale = unity_extension_status(&source, &project);
@@ -1764,9 +1818,15 @@ mod tests {
         assert!(!stale.current);
 
         fs::copy(&source, &destination).unwrap();
+        fs::copy(&logo_source, &logo_destination).unwrap();
         let current = unity_extension_status(&source, &project);
         assert!(current.installed);
         assert!(current.current);
+
+        fs::write(&logo_destination, "old logo").unwrap();
+        let stale_logo = unity_extension_status(&source, &project);
+        assert!(stale_logo.installed);
+        assert!(!stale_logo.current);
 
         fs::remove_dir_all(root).unwrap();
     }

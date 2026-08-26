@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.4.0-3 - 2026-08-26
+
+### Changed
+
+- Replaced the legacy Unity status-window header with the same Creator Works cube logo, cyan/red `CREATOR WORKS MCP` lockup, and Shader Graph Preview label used by the Windows launcher.
+- The Unity bridge logo is now a required, versioned extension payload. The launcher and PowerShell setup install it atomically beside the bridge, and bridge status reports an update when either file is stale or missing.
+
+### Verified
+
+- All 119 Node tests and all 13 native launcher tests pass, including bridge branding, stale-logo detection, and installer payload coverage.
+- The exact updated bridge compiled with zero C# errors in isolated Unity 2022.3.39f1 and Unity 6000.3.21f1 projects.
+
 ## 2.4.0-2 - 2026-08-26
 
 ### Added

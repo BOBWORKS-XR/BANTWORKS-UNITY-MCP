@@ -48,6 +48,12 @@ try {
         throw "Bridge replacement hash mismatch"
     }
 
+    $installedLogoHash = (Get-FileHash (Join-Path $Editor "CreatorWorksMCPLogo.png")).Hash
+    $sourceLogoHash = (Get-FileHash (Join-Path $RepoRoot "unity-extension\Editor\CreatorWorksMCPLogo.png")).Hash
+    if ($installedLogoHash -ne $sourceLogoHash) {
+        throw "Bridge logo replacement hash mismatch"
+    }
+
     $backups = @(Get-ChildItem (Join-Path $Project ".bantworks-mcp\backups") -Filter "BanterMCPBridge-*.cs")
     if ($backups.Count -ne 1 -or (Get-Content $backups[0].FullName -Raw) -notmatch "old bridge") {
         throw "Bridge backup was not created correctly"

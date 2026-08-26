@@ -106,13 +106,29 @@ test("Play mode keeps command polling and explicit full exports operational", ()
 test("launcher and setup package the source-of-truth bridge", () => {
   const tauri = fs.readFileSync("launcher/src-tauri/tauri.conf.json", "utf8");
   const setup = fs.readFileSync("setup.ps1", "utf8");
+  const bridgeCopyScripts = [
+    "scripts/setup-unity-obstacle-course.ps1",
+    "scripts/smoke-unity-banter-vs.ps1",
+    "scripts/smoke-unity-shader-graph.ps1",
+    "scripts/smoke-unity-asset-reference.ps1",
+  ];
   assert.match(
     tauri,
     /"\.\.\/\.\.\/unity-extension\/Editor\/BanterMCPBridge\.cs"\s*:\s*"server\/unity-extension\/Editor\/BanterMCPBridge\.cs"/
   );
   assert.match(
     tauri,
+    /"\.\.\/\.\.\/unity-extension\/Editor\/CreatorWorksMCPLogo\.png"\s*:\s*"server\/unity-extension\/Editor\/CreatorWorksMCPLogo\.png"/
+  );
+  assert.match(
+    tauri,
     /"\.\.\/\.\.\/release\/runtime\/node\.exe"\s*:\s*"server\/runtime\/node\.exe"/
   );
   assert.match(setup, /unity-extension\\Editor\\BanterMCPBridge\.cs/);
+  assert.match(setup, /unity-extension\\Editor\\CreatorWorksMCPLogo\.png/);
+  for (const scriptPath of bridgeCopyScripts) {
+    const script = fs.readFileSync(scriptPath, "utf8");
+    assert.match(script, /unity-extension\\Editor\\BanterMCPBridge\.cs/);
+    assert.match(script, /unity-extension\\Editor\\CreatorWorksMCPLogo\.png/);
+  }
 });

@@ -39,7 +39,7 @@ let toolGroupSelection: ToolGroupSelection = "all";
 const server = new Server(
   {
     name: "creator-works-mcp",
-    version: "2.4.0-2",
+    version: "2.4.0-3",
   },
   {
     capabilities: {

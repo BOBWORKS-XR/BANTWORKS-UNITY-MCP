@@ -38,10 +38,10 @@ the default remains `all` for backward compatibility.
 | 6000.3.10f1 | 1.9.9 | None | Persistent obstacle fixture: generic course compiled; MCP-generated `Start` graph imported and persisted through the bridge; 4/4 Play Mode tests passed |
 | 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
 | 2022.3.39f1 | 1.9.4 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
-| 2022.3.39f1 | None | None | Isolated local compile smoke: the exact 2.4.0-2 dual-SDK bridge compiled with zero C# errors |
+| 2022.3.39f1 | None | None | Isolated local compile smoke: the exact 2.4.0-3 dual-SDK bridge compiled with zero C# errors |
 | 2022.3.39f1 authoring to 6000.3.2f1 Banter client | 1.9.4 asset bundle loaded by 1.9.9 client | Authoring SDK 3.1.2; client source reports 3.2.1 | Manual real-client negative: authoring SDK validation passed, but the client rejected `UnityEngine.Rigidbody.velocity` and disabled all four gun-recovery graphs. The two installed allowlists had drifted to `velocity` versus `linearVelocity`. |
 | 6000.3.21f1 | 1.9.9 | Creator SDK 3.2.17 (`com.sidequest.creator-sdk`) | Read-only local package/source audit: detected the Creator profile, selected `BS` and `BS.VisualScripting`, matched all 162 captured custom-node class names, and found 16 additional package classes. Source-level bridge and generator fixtures passed; installation of the new bridge and hosted runtime behavior remain separate acceptance gates. |
-| 6000.3.21f1 | None | None | Isolated local compile smoke: the exact 2.4.0-2 dual-SDK bridge compiled with zero C# errors |
+| 6000.3.21f1 | None | None | Isolated local compile smoke: the exact 2.4.0-3 dual-SDK bridge compiled with zero C# errors |
 
 Creator Works detects `com.sidequest.creator-sdk`, `com.sidequest.banter`, both
 packages together, neither package, and malformed or unreadable manifests. New

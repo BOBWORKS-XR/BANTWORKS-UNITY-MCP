@@ -9,6 +9,23 @@ const bridge = fs.readFileSync(
   path.join(root, "unity-extension", "Editor", "BanterMCPBridge.cs"),
   "utf8"
 );
+const bridgeLogo = path.join(
+  root,
+  "unity-extension",
+  "Editor",
+  "CreatorWorksMCPLogo.png"
+);
+
+test("status window uses the Creator Works launcher lockup", () => {
+  assert.ok(fs.existsSync(bridgeLogo));
+  assert.match(bridge, /LogoAssetFileName = "CreatorWorksMCPLogo\.png"/);
+  assert.match(bridge, />CREATOR<\/color>/);
+  assert.match(bridge, />WORKS<\/color>/);
+  assert.match(bridge, />MCP<\/color>/);
+  assert.match(bridge, /SHADER GRAPH PREVIEW/);
+  assert.doesNotMatch(bridge, /GUILayout\.Label\("BANT"/);
+  assert.doesNotMatch(bridge, /MCP Status/);
+});
 
 test("Editor menu commands block unsafe Editor states and built-in roots", () => {
   assert.match(bridge, /EditorApplication\.isCompiling \|\| EditorApplication\.isUpdating/);

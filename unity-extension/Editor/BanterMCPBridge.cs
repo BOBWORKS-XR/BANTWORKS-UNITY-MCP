@@ -48,7 +48,7 @@ namespace BantworksMCP
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly string HierarchyQueryResultsFolder = Path.Combine(StateFolder, "hierarchy-query-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
-        private const string BridgeVersion = "2.4.0-2";
+        private const string BridgeVersion = "2.4.0-3";
         private const int BridgeProtocolVersion = 1;
         private const int MinimumBridgeProtocolVersion = 1;
         private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
@@ -7345,9 +7345,15 @@ namespace BantworksMCP
     /// </summary>
     public class BantworksMCPWindow : EditorWindow
     {
+        private const string LogoAssetFileName = "CreatorWorksMCPLogo.png";
         private Vector2 scrollPosition;
+        private Texture2D logoTexture;
         private static readonly Color CyanColor = new Color(0f, 0.83f, 1f);   // #00d4ff
         private static readonly Color RedColor = new Color(1f, 0.23f, 0.23f); // #ff3b3b
+        private static readonly Color PreviewColor = new Color(1f, 0.67f, 0f); // #ffaa00
+        private static Color MpcTextColor => EditorGUIUtility.isProSkin
+            ? new Color(0.76f, 0.79f, 0.84f)
+            : new Color(0.24f, 0.27f, 0.32f);
 
         public static void ShowWindow()
         {
@@ -7355,20 +7361,17 @@ namespace BantworksMCP
             window.minSize = new Vector2(350, 300);
         }
 
+        private void OnEnable()
+        {
+            logoTexture = LoadLogoTexture();
+            titleContent = new GUIContent("Creator Works MCP", logoTexture);
+        }
+
         private void OnGUI()
         {
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
 
-            // Header with branded colors
-            EditorGUILayout.BeginHorizontal();
-            GUIStyle headerStyle = new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 };
-            GUI.color = CyanColor;
-            GUILayout.Label("BANT", headerStyle, GUILayout.ExpandWidth(false));
-            GUI.color = RedColor;
-            GUILayout.Label("WORKS", headerStyle, GUILayout.ExpandWidth(false));
-            GUI.color = Color.white;
-            GUILayout.Label(" MCP Status", headerStyle);
-            EditorGUILayout.EndHorizontal();
+            DrawBrandHeader();
             EditorGUILayout.Space();
 
             // Connection status
@@ -7546,6 +7549,75 @@ namespace BantworksMCP
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawBrandHeader()
+        {
+            if (logoTexture == null)
+            {
+                logoTexture = LoadLogoTexture();
+                titleContent = new GUIContent("Creator Works MCP", logoTexture);
+            }
+
+            EditorGUILayout.BeginHorizontal(GUILayout.Height(42));
+            if (logoTexture != null)
+            {
+                GUILayout.Label(logoTexture, GUIStyle.none, GUILayout.Width(36), GUILayout.Height(36));
+            }
+            else
+            {
+                GUILayout.Space(36);
+            }
+
+            GUILayout.Space(8);
+            EditorGUILayout.BeginVertical();
+            GUILayout.Space(1);
+
+            var titleStyle = new GUIStyle(EditorStyles.boldLabel)
+            {
+                fontSize = 14,
+                richText = true,
+                alignment = TextAnchor.MiddleLeft
+            };
+            var mcpColor = ColorUtility.ToHtmlStringRGB(MpcTextColor);
+            GUILayout.Label(
+                $"<color=#{ColorUtility.ToHtmlStringRGB(CyanColor)}>CREATOR</color> " +
+                $"<color=#{ColorUtility.ToHtmlStringRGB(RedColor)}>WORKS</color> " +
+                $"<color=#{mcpColor}>MCP</color>",
+                titleStyle,
+                GUILayout.Height(18));
+
+            var previewStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                normal = { textColor = PreviewColor },
+                fontSize = 9,
+                alignment = TextAnchor.MiddleLeft
+            };
+            GUILayout.Label("SHADER GRAPH PREVIEW", previewStyle, GUILayout.Height(14));
+            EditorGUILayout.EndVertical();
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private Texture2D LoadLogoTexture()
+        {
+            var script = MonoScript.FromScriptableObject(this);
+            var scriptPath = AssetDatabase.GetAssetPath(script);
+            if (!string.IsNullOrEmpty(scriptPath))
+            {
+                var scriptDirectory = Path.GetDirectoryName(scriptPath);
+                if (!string.IsNullOrEmpty(scriptDirectory))
+                {
+                    var adjacentLogoPath = Path.Combine(scriptDirectory, LogoAssetFileName).Replace('\\', '/');
+                    var adjacentLogo = AssetDatabase.LoadAssetAtPath<Texture2D>(adjacentLogoPath);
+                    if (adjacentLogo != null)
+                    {
+                        return adjacentLogo;
+                    }
+                }
+            }
+
+            return AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Editor/" + LogoAssetFileName);
         }
 
         private void DrawSeparator()

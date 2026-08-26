@@ -516,11 +516,17 @@ function Install-UnityExtension {
     }
 
     $sourcePath = "$MCPRoot\unity-extension\Editor\BanterMCPBridge.cs"
+    $sourceLogoPath = "$MCPRoot\unity-extension\Editor\CreatorWorksMCPLogo.png"
     $destDir = "$($activeChannel.unity_project_path)\Assets\Editor"
     $destPath = "$destDir\BanterMCPBridge.cs"
+    $destLogoPath = "$destDir\CreatorWorksMCPLogo.png"
 
     if (-not (Test-Path $sourcePath)) {
         Write-Host "Source extension not found at: $sourcePath" -ForegroundColor Red
+        return
+    }
+    if (-not (Test-Path $sourceLogoPath)) {
+        Write-Host "Source extension logo not found at: $sourceLogoPath" -ForegroundColor Red
         return
     }
 
@@ -538,6 +544,7 @@ function Install-UnityExtension {
         Copy-Item -LiteralPath $destPath -Destination $backupPath
     }
 
+    Copy-AtomicFile $sourceLogoPath $destLogoPath
     Copy-AtomicFile $sourcePath $destPath
 
     $stateDir = "$($activeChannel.unity_project_path)\.bantworks-mcp\state"

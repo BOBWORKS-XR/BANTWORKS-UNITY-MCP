@@ -1,6 +1,6 @@
 # Creator Works MCP Shader Graph Preview for Aline
 
-Version: `2.4.0-2`
+Version: `2.4.0-3`
 
 Branch: `preview/creator-works-shader-aline`
 
@@ -8,7 +8,7 @@ This is an unsigned preview build. Windows may show an Unknown publisher or Smar
 
 ## Setup
 
-1. Run `Creator Works MCP_2.4.0-2_x64-setup.exe`.
+1. Run `Creator Works MCP_2.4.0-3_x64-setup.exe`.
 2. Select a Unity project folder in the launcher.
 3. Select Codex and/or Claude Code, then choose **Set Up Creator Works MCP**.
 4. Restart the selected AI client. It should list the MCP as `creator-works`, not `banter`.
