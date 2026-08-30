@@ -194,6 +194,71 @@ fn normalized_existing_path(path: PathBuf) -> PathBuf {
     canonical
 }
 
+fn get_persistent_server_dir() -> Option<PathBuf> {
+    dirs::data_local_dir()
+        .or_else(dirs::data_dir)
+        .map(|dir| dir.join("bantworks-mcp").join("server"))
+}
+
+fn is_ephemeral_path(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    path_str.contains("/tmp/.mount_")
+        || path_str.contains("/.mount_")
+        || path_str.starts_with("/tmp/")
+        || path_str.starts_with("/var/tmp/")
+}
+
+fn sync_ephemeral_bundle(source_root: &Path) -> Option<PathBuf> {
+    let dest_root = get_persistent_server_dir()?;
+    let _ = fs::create_dir_all(&dest_root);
+    let _ = fs::create_dir_all(dest_root.join("runtime"));
+    let _ = fs::create_dir_all(dest_root.join("unity-extension").join("Editor"));
+
+    let files_to_sync = [
+        "banter-mcp.mjs",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "runtime/VERSION",
+        "runtime/LICENSE",
+        "unity-extension/Editor/BanterMCPBridge.cs",
+    ];
+
+    for relative_file in files_to_sync {
+        let src = source_root.join(relative_file);
+        let dst = dest_root.join(relative_file);
+        if src.is_file() {
+            let _ = fs::copy(&src, &dst);
+        }
+    }
+
+    let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
+    let src_node = source_root.join("runtime").join(binary_name);
+    let dst_node = dest_root.join("runtime").join(binary_name);
+    if src_node.is_file() {
+        let should_copy = if dst_node.is_file() {
+            let src_len = fs::metadata(&src_node).map(|m| m.len()).unwrap_or(0);
+            let dst_len = fs::metadata(&dst_node).map(|m| m.len()).unwrap_or(0);
+            src_len != dst_len || src_len == 0
+        } else {
+            true
+        };
+        if should_copy {
+            let _ = fs::copy(&src_node, &dst_node);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&dst_node, fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    if is_valid_mcp_root(&dest_root) {
+        Some(dest_root)
+    } else {
+        None
+    }
+}
+
 fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Some(configured_root) = std::env::var_os("BANTWORKS_MCP_ROOT") {
         let root = PathBuf::from(configured_root);
@@ -212,6 +277,11 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     {
         if let Some(root) = resource_server.parent() {
             if is_valid_mcp_root(root) {
+                if is_ephemeral_path(root) {
+                    if let Some(persistent_root) = sync_ephemeral_bundle(root) {
+                        return Ok(normalized_existing_path(persistent_root));
+                    }
+                }
                 return Ok(normalized_existing_path(root.to_path_buf()));
             }
         }
@@ -226,9 +296,20 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         if let Some(executable_dir) = executable.parent() {
             for candidate in [executable_dir.join("server"), executable_dir.to_path_buf()] {
                 if is_valid_mcp_root(&candidate) {
+                    if is_ephemeral_path(&candidate) {
+                        if let Some(persistent_root) = sync_ephemeral_bundle(&candidate) {
+                            return Ok(normalized_existing_path(persistent_root));
+                        }
+                    }
                     return Ok(normalized_existing_path(candidate));
                 }
             }
+        }
+    }
+
+    if let Some(persistent_dir) = get_persistent_server_dir() {
+        if is_valid_mcp_root(&persistent_dir) {
+            return Ok(normalized_existing_path(persistent_dir));
         }
     }
 
@@ -427,10 +508,13 @@ fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
         let mut config: LauncherConfig =
             serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
         if config.mcp_server_path.trim().is_empty()
-            || (is_legacy_server_path(&config.mcp_server_path)
-                && !Path::new(&config.mcp_server_path).is_file())
+            || is_legacy_server_path(&config.mcp_server_path)
+            || !Path::new(&config.mcp_server_path).is_file()
+            || is_ephemeral_path(Path::new(&config.mcp_server_path))
         {
-            config.mcp_server_path = default_mcp_server_path(&app)?.to_string_lossy().to_string();
+            if let Ok(default_path) = default_mcp_server_path(&app) {
+                config.mcp_server_path = default_path.to_string_lossy().to_string();
+            }
         }
         config.tool_groups = normalize_tool_groups(&config.tool_groups)?;
         Ok(config)
@@ -1907,5 +1991,89 @@ mod tests {
         assert_eq!(projects[0].unity_version.as_deref(), Some("6000.3.10f1"));
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn antigravity_and_opencode_configs_include_tool_groups_and_paths() {
+        let channel = ProjectChannel {
+            id: "channel-1".to_string(),
+            name: "Project".to_string(),
+            unity_project_path: "/home/user/Unity/Project".to_string(),
+            scene_path: Some("/home/user/Unity/Project/Assets/Main.unity".to_string()),
+            enabled: true,
+        };
+
+        let antigravity = build_antigravity_mcp_config(
+            serde_json::json!({ "mcpServers": {} }),
+            &channel,
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node",
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs",
+            "all",
+        )
+        .unwrap();
+
+        assert_eq!(
+            antigravity["mcpServers"]["banter"]["command"],
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node"
+        );
+        assert_eq!(
+            antigravity["mcpServers"]["banter"]["args"][0],
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
+        );
+        assert_eq!(
+            antigravity["mcpServers"]["banter"]["env"]["UNITY_PROJECT_PATH"],
+            "/home/user/Unity/Project"
+        );
+        assert_eq!(
+            antigravity["mcpServers"]["banter"]["env"]["BANTWORKS_TOOL_GROUPS"],
+            "all"
+        );
+        assert_eq!(
+            antigravity["mcpServers"]["banter"]["env"]["UNITY_SCENE_PATH"],
+            "/home/user/Unity/Project/Assets/Main.unity"
+        );
+
+        let opencode = build_opencode_mcp_config(
+            serde_json::json!({ "mcp": {} }),
+            &channel,
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node",
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs",
+            "read,banter",
+        )
+        .unwrap();
+
+        assert_eq!(opencode["mcp"]["banter"]["type"], "local");
+        assert_eq!(opencode["mcp"]["banter"]["enabled"], true);
+        assert_eq!(
+            opencode["mcp"]["banter"]["command"][0],
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node"
+        );
+        assert_eq!(
+            opencode["mcp"]["banter"]["command"][1],
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
+        );
+        assert_eq!(
+            opencode["mcp"]["banter"]["environment"]["BANTWORKS_TOOL_GROUPS"],
+            "read,banter"
+        );
+    }
+
+    #[test]
+    fn ephemeral_path_detection_identifies_appimage_mounts() {
+        assert!(is_ephemeral_path(Path::new(
+            "/tmp/.mount_BANTWOHGiine/usr/lib/BANTWORKS-MCP/server/banter-mcp.mjs"
+        )));
+        assert!(is_ephemeral_path(Path::new(
+            "/tmp/.mount_abc123/server/runtime/node"
+        )));
+        assert!(is_ephemeral_path(Path::new(
+            "/var/tmp/something/banter-mcp.mjs"
+        )));
+        assert!(!is_ephemeral_path(Path::new(
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
+        )));
+        assert!(!is_ephemeral_path(Path::new(
+            "/usr/lib/BANTWORKS-MCP/server/banter-mcp.mjs"
+        )));
     }
 }

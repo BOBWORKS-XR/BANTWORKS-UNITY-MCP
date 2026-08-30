@@ -166,7 +166,10 @@ export function loadConfig({ configRoot, mcpRoot }) {
     let configuredServer = raw.mcp_server_path;
     if (
       !configuredServer ||
-      (isLegacyServerPath(configuredServer) && !existsSync(configuredServer))
+      isLegacyServerPath(configuredServer) ||
+      !existsSync(configuredServer) ||
+      configuredServer.includes("/.mount_") ||
+      configuredServer.includes("/tmp/")
     ) {
       configuredServer = defaultServerPath(mcpRoot);
     }
