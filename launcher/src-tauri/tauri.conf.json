@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "BANTWORKS MCP",
+  "productName": "BANTWORKS-MCP",
   "version": "2.3.0",
   "identifier": "com.bobworks.bantworksmcp",
   "build": {
     "beforeDevCommand": "",
-    "beforeBuildCommand": "npm --prefix .. run release:launcher",
+    "beforeBuildCommand": "",
     "frontendDist": "../src"
   },
   "app": {
@@ -39,6 +39,7 @@
     ],
     "resources": {
       "../../release/banter-mcp.mjs": "server/banter-mcp.mjs",
+      "../../release/runtime/node": "server/runtime/node",
       "../../release/runtime/node.exe": "server/runtime/node.exe",
       "../../release/runtime/LICENSE": "server/runtime/LICENSE",
       "../../release/runtime/VERSION": "server/runtime/VERSION",

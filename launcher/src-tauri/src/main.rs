@@ -244,7 +244,8 @@ fn default_mcp_server_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn bundled_node_path(root: &Path) -> PathBuf {
-    root.join("runtime").join("node.exe")
+    let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
+    root.join("runtime").join(binary_name)
 }
 
 fn find_command_on_path(command: &str) -> Option<PathBuf> {
@@ -271,7 +272,9 @@ fn resolve_node_command(app: &tauri::AppHandle) -> Result<(PathBuf, bool), Strin
     let root = resolve_mcp_root(app)?;
     let bundled = [
         bundled_node_path(&root),
-        root.join("release").join("runtime").join("node.exe"),
+        root.join("release")
+            .join("runtime")
+            .join(if cfg!(windows) { "node.exe" } else { "node" }),
     ]
     .into_iter()
     .find(|candidate| candidate.is_file());
@@ -1229,6 +1232,22 @@ fn one_click_setup(
 }
 
 fn main() {
+    // Linux-only: work around WebKitGTK failures on Wayland sessions and
+    // certain GPU drivers where the DMA-BUF renderer can't allocate a
+    // backing buffer for the WebView ("Failed to create GBM buffer of size
+    // 900x700: Invalid argument"). Falling back to the CPU renderer keeps
+    // the launcher functional on CachyOS / Arch and similar hosts without
+    // hurting visual quality on systems where DMA-BUF works correctly.
+    #[cfg(target_os = "linux")]
+    {
+        if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        // Honour an explicit GDK_BACKEND override (e.g. GDK_BACKEND=x11) but
+        // do not force one — Wayland is the default on modern distros and
+        // works on most systems once DMA-BUF is disabled.
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())

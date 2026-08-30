@@ -9,6 +9,7 @@ artifacts/
 
 # Rust/Tauri build artifacts
 launcher/src-tauri/target/
+launcher/src-tauri/gen/
 launcher/*.exe
 
 # IDE

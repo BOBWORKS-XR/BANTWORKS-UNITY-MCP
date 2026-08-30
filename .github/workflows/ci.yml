@@ -30,8 +30,8 @@ jobs:
       - if: matrix.node == 20
         run: npm audit --audit-level=low
 
-  launcher:
-    name: Tauri launcher
+  launcher-windows:
+    name: Tauri launcher (Windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -48,3 +48,40 @@ jobs:
       - run: cargo test
         working-directory: launcher/src-tauri
       - run: powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Help
+
+  launcher-linux:
+    name: Tauri launcher (Linux)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Rust + Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            file
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/src-tauri -> target
+      - run: npm ci
+      - run: npm run release:launcher
+      - run: NO_STRIP=1 cargo tauri build
+      - run: npm run build:standalone
+      - run: cargo fmt --check
+        working-directory: launcher/src-tauri
+      - run: cargo test
+        working-directory: launcher/src-tauri
+      - name: Smoke-test setup.sh
+        run: ./setup.sh help
+      - name: Smoke-test setup.mjs install
+        run: node scripts/cli/setup.mjs install

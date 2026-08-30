@@ -7,9 +7,10 @@
   "scripts": {
     "build": "tsc",
     "bundle:server": "npm run build && esbuild dist/index.js --bundle --platform=node --format=esm --target=node20 --outfile=release/banter-mcp.mjs",
-    "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-node-runtime.ps1",
+    "stage:runtime": "node scripts/stage-node-runtime.mjs",
     "check:version": "node scripts/check-version-sync.mjs",
     "test:bundle": "node scripts/smoke-release-bundle.mjs",
+    "build:standalone": "node scripts/build-standalone.mjs",
     "release:server": "npm run bundle:server && npm run test:bundle",
     "release:launcher": "npm run release:server && npm run stage:runtime",
     "test": "npm run build && node --test test/*.test.mjs",

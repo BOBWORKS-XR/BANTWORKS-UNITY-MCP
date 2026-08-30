@@ -48,6 +48,8 @@ Without Banter:
   -RunTests
 ```
 
+On Linux/macOS the script still runs under PowerShell (`pwsh`); Unity on Linux is invoked as the bare `Unity` executable (no `.exe`). The `<path-to-Unity>` placeholder should point to the appropriate editor binary for your host.
+
 With Banter, add a pinned 40-character public SDK revision:
 
 ```powershell

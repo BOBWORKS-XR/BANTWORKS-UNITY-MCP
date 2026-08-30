@@ -4,11 +4,19 @@
 
 Node.js 18 or later is required. Run these checks before opening a pull request:
 
+**Windows (PowerShell):**
 ```powershell
 npm ci
 npm test
 cd launcher/src-tauri
 cargo check
+```
+
+**Linux / macOS (bash):**
+```bash
+npm ci
+npm test
+(cd launcher/src-tauri && cargo check)
 ```
 
 Changes to `BanterMCPBridge.cs` should also be compiled by Unity in a representative project before release. Include the Unity version, Banter SDK version, and the observed Console result in the pull request.
@@ -17,8 +25,16 @@ For Banter graph, bridge, or release-compatibility changes, run the focused
 fixture while iterating and the full expectation-based matrix before release:
 
 ```powershell
+# Windows
 ./scripts/smoke-unity-banter-vs.ps1
 ./scripts/smoke-unity-banter-matrix.ps1
+```
+
+```bash
+# Linux / macOS (these scripts still require PowerShell at the moment
+# and currently run only on Windows; a future port will replace them)
+pwsh ./scripts/smoke-unity-banter-vs.ps1
+pwsh ./scripts/smoke-unity-banter-matrix.ps1
 ```
 
 The matrix passes when every pinned release matches its documented outcome;

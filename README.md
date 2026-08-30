@@ -151,6 +151,18 @@ Set-Location launcher/src-tauri
 cargo test
 ```
 
+```bash
+# Linux / macOS
+git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
+cd CREATOR-WORKS-UNITY-MCP
+git switch feature/dual-sidequest-sdk
+npm ci
+npm test
+(cd launcher/src-tauri && cargo test)
+```
+
+The Tauri launcher builds on Windows (NSIS/MSI), Linux (`.deb`/`.rpm`), and macOS (DMG). See [BUILD_TAURI.md](BUILD_TAURI.md) for host-specific toolchain setup. The setup CLI (`./setup.sh` on Linux/macOS, `setup.ps1` on Windows) configures Codex and Claude Code without the GUI.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
