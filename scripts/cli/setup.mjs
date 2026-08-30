@@ -19,8 +19,10 @@ import { fileURLToPath } from "node:url";
 import { existsSync as existsSyncLocal } from "node:fs";
 import {
   addProject,
+  applyToAntigravity,
   applyToClaudeCode,
   applyToCodex,
+  applyToOpenCode,
   buildContext,
   configPathFor,
   installUnityExtension,
@@ -46,6 +48,8 @@ Subcommands:
   set-profile <name>                   Set the capability profile (all|none|read,author,test,banter)
   apply-claude                         Apply to Claude Code
   apply-codex                          Apply to Codex
+  apply-antigravity                    Apply to Antigravity
+  apply-opencode                       Apply to OpenCode
   install-bridge                       Install the Unity editor extension
   config-path                          Print the resolved launcher config path
   help                                 Show this message
@@ -119,6 +123,18 @@ async function run() {
     case "apply-codex": {
       const result = applyToCodex(context);
       console.log(`Applied to Codex: ${result.path}`);
+      console.log(`  Project: ${result.channel.name}`);
+      return;
+    }
+    case "apply-antigravity": {
+      const result = applyToAntigravity(context);
+      console.log(`Applied to Antigravity: ${result.path}`);
+      console.log(`  Project: ${result.channel.name}`);
+      return;
+    }
+    case "apply-opencode": {
+      const result = applyToOpenCode(context);
+      console.log(`Applied to OpenCode: ${result.path}`);
       console.log(`  Project: ${result.channel.name}`);
       return;
     }

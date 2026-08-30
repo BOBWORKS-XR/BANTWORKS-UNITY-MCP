@@ -105,6 +105,8 @@ struct SetupResult {
     bridge_installed: bool,
     codex_configured: bool,
     claude_configured: bool,
+    antigravity_configured: bool,
+    opencode_configured: bool,
     runtime_command: String,
 }
 
@@ -664,6 +666,28 @@ fn get_codex_config_path() -> PathBuf {
         .join("config.toml")
 }
 
+/// Get Antigravity MCP config path (`~/.gemini/config/mcp_config.json`)
+/// Used by Antigravity IDE and Antigravity CLI; the global location lives
+/// under `~/.gemini/config` regardless of the host OS.
+fn get_antigravity_config_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".gemini")
+        .join("config")
+        .join("mcp_config.json")
+}
+
+/// Get OpenCode MCP config path (`~/.config/opencode/opencode.jsonc` on
+/// Linux, `~/Library/Application Support/opencode/opencode.jsonc` on macOS,
+/// `%APPDATA%\opencode\opencode.jsonc` on Windows — `dirs::config_dir()`
+/// resolves those consistently).
+fn get_opencode_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("opencode")
+        .join("opencode.jsonc")
+}
+
 /// Read current Claude Code MCP configuration
 #[tauri::command]
 fn get_claude_mcp_config() -> Result<serde_json::Value, String> {
@@ -879,6 +903,317 @@ fn remove_codex_mcp_config() -> Result<(), String> {
     atomic_write(&config_path, &content)
 }
 
+/// Read the current Antigravity MCP configuration (returns an empty object if
+/// the file is missing or unreadable, matching the Claude Code handler).
+#[tauri::command]
+fn get_antigravity_mcp_config() -> Result<serde_json::Value, String> {
+    let config_path = get_antigravity_config_path();
+
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read Antigravity config: {}", e))?;
+    if content.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse Antigravity config: {}", e))
+}
+
+fn build_antigravity_mcp_config(
+    mut config: serde_json::Value,
+    channel: &ProjectChannel,
+    node_command: &str,
+    mcp_server_path: &str,
+    tool_groups: &str,
+) -> Result<serde_json::Value, String> {
+    if !config.is_object() {
+        return Err("Antigravity config root must be a JSON object".to_string());
+    }
+    if config.get("mcpServers").is_none() {
+        config["mcpServers"] = serde_json::json!({});
+    } else if !config["mcpServers"].is_object() {
+        return Err("Antigravity config mcpServers must be a JSON object".to_string());
+    }
+
+    let mut env = serde_json::json!({
+        "UNITY_PROJECT_PATH": channel.unity_project_path,
+        "BANTWORKS_TOOL_GROUPS": normalize_tool_groups(tool_groups)?
+    });
+    if let Some(scene) = &channel.scene_path {
+        env["UNITY_SCENE_PATH"] = serde_json::json!(scene);
+    }
+
+    config["mcpServers"]["banter"] = serde_json::json!({
+        "command": node_command,
+        "args": [mcp_server_path],
+        "env": env
+    });
+    Ok(config)
+}
+
+#[tauri::command]
+fn update_antigravity_mcp_config(
+    app: tauri::AppHandle,
+    channel: ProjectChannel,
+    mcp_server_path: String,
+    tool_groups: String,
+) -> Result<(), String> {
+    let config_path = get_antigravity_config_path();
+    let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
+    let tool_groups = normalize_tool_groups(&tool_groups)?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create Antigravity config directory: {}", e))?;
+    }
+
+    let config: serde_json::Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read Antigravity config: {}", e))?;
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&content).map_err(|e| {
+                format!(
+                    "Failed to parse Antigravity config; refusing to overwrite it: {}",
+                    e
+                )
+            })?
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let config = build_antigravity_mcp_config(
+        config,
+        &channel,
+        &node_command,
+        &mcp_server_path,
+        &tool_groups,
+    )?;
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize Antigravity config: {}", e))?;
+
+    atomic_write(&config_path, &content)
+}
+
+#[tauri::command]
+fn remove_antigravity_mcp_config() -> Result<(), String> {
+    let config_path = get_antigravity_config_path();
+
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read Antigravity config: {}", e))?;
+    if content.trim().is_empty() {
+        return Ok(());
+    }
+    let mut config: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse Antigravity config: {}", e))?;
+
+    if let Some(servers) = config.get_mut("mcpServers") {
+        if let Some(obj) = servers.as_object_mut() {
+            obj.remove("banter");
+        }
+    }
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize Antigravity config: {}", e))?;
+
+    atomic_write(&config_path, &content)
+}
+
+/// Read the current OpenCode MCP configuration. OpenCode stores its config
+/// as JSONC (JSON with comments) at `~/.config/opencode/opencode.jsonc`, so
+/// we strip line comments before parsing.
+#[tauri::command]
+fn get_opencode_mcp_config() -> Result<serde_json::Value, String> {
+    let config_path = get_opencode_config_path();
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
+    parse_opencode_config(&content)
+}
+
+fn parse_opencode_config(content: &str) -> Result<serde_json::Value, String> {
+    let stripped = strip_jsonc_comments(content);
+    if stripped.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_str(&stripped).map_err(|e| format!("Failed to parse OpenCode config: {}", e))
+}
+
+/// Naive JSONC comment stripper: drops lines that begin (after optional
+/// whitespace) with `//`, plus any inline `// …` to end of line that lives
+/// outside of a string literal. Good enough for the OpenCode config files
+/// we encounter — `json5`/`jsonc` crates aren't worth a new dependency.
+fn strip_jsonc_comments(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut escape = false;
+    let mut iter = input.chars().peekable();
+    while let Some(c) = iter.next() {
+        if escape {
+            output.push(c);
+            escape = false;
+            continue;
+        }
+        if c == '\\' && in_string {
+            output.push(c);
+            escape = true;
+            continue;
+        }
+        if c == '"' {
+            in_string = !in_string;
+            output.push(c);
+            continue;
+        }
+        if !in_string && c == '/' {
+            if let Some(&next) = iter.peek() {
+                if next == '/' {
+                    // Line comment — drop the rest of the line.
+                    iter.next();
+                    for ch in iter.by_ref() {
+                        if ch == '\n' {
+                            output.push('\n');
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                if next == '*' {
+                    // Block comment — drop until matching `*/`.
+                    iter.next();
+                    while let Some(ch) = iter.next() {
+                        if ch == '*' {
+                            if let Some(&'/') = iter.peek() {
+                                iter.next();
+                                break;
+                            }
+                        } else if ch == '\n' {
+                            output.push('\n');
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+        output.push(c);
+    }
+    output
+}
+
+fn build_opencode_mcp_config(
+    mut config: serde_json::Value,
+    channel: &ProjectChannel,
+    node_command: &str,
+    mcp_server_path: &str,
+    tool_groups: &str,
+) -> Result<serde_json::Value, String> {
+    if !config.is_object() {
+        return Err("OpenCode config root must be a JSON object".to_string());
+    }
+    if config.get("mcp").is_none() {
+        config["mcp"] = serde_json::json!({});
+    } else if !config["mcp"].is_object() {
+        return Err("OpenCode config 'mcp' must be a JSON object".to_string());
+    }
+
+    let mut environment = serde_json::json!({
+        "UNITY_PROJECT_PATH": channel.unity_project_path,
+        "BANTWORKS_TOOL_GROUPS": normalize_tool_groups(tool_groups)?
+    });
+    if let Some(scene) = &channel.scene_path {
+        environment["UNITY_SCENE_PATH"] = serde_json::json!(scene);
+    }
+
+    config["mcp"]["banter"] = serde_json::json!({
+        "type": "local",
+        "command": [node_command, mcp_server_path],
+        "enabled": true,
+        "environment": environment,
+    });
+    Ok(config)
+}
+
+#[tauri::command]
+fn update_opencode_mcp_config(
+    app: tauri::AppHandle,
+    channel: ProjectChannel,
+    mcp_server_path: String,
+    tool_groups: String,
+) -> Result<(), String> {
+    let config_path = get_opencode_config_path();
+    let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
+    let tool_groups = normalize_tool_groups(&tool_groups)?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create OpenCode config directory: {}", e))?;
+    }
+
+    let config: serde_json::Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
+        parse_opencode_config(&content)?
+    } else {
+        serde_json::json!({})
+    };
+
+    let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let config = build_opencode_mcp_config(
+        config,
+        &channel,
+        &node_command,
+        &mcp_server_path,
+        &tool_groups,
+    )?;
+
+    // OpenCode preserves human-authored comments in the config file. Emit
+    // the result without stripping comments so any custom notes stay intact.
+    let serialized = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize OpenCode config: {}", e))?;
+    let mut content = String::with_capacity(serialized.len() + 2);
+    content.push_str(&serialized);
+    content.push('\n');
+
+    atomic_write(&config_path, &content)
+}
+
+#[tauri::command]
+fn remove_opencode_mcp_config() -> Result<(), String> {
+    let config_path = get_opencode_config_path();
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
+    let mut config = parse_opencode_config(&content)?;
+    if let Some(mcp) = config.get_mut("mcp") {
+        if let Some(obj) = mcp.as_object_mut() {
+            obj.remove("banter");
+        }
+    }
+    let serialized = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize OpenCode config: {}", e))?;
+    let mut content = String::with_capacity(serialized.len() + 2);
+    content.push_str(&serialized);
+    content.push('\n');
+    atomic_write(&config_path, &content)
+}
+
 fn remove_toml_table_block(content: &str, table_name: &str) -> String {
     let target = format!("[{}]", table_name);
     let mut output = Vec::new();
@@ -1066,6 +1401,27 @@ fn claude_is_configured() -> bool {
         .is_some()
 }
 
+fn antigravity_is_configured() -> bool {
+    fs::read_to_string(get_antigravity_config_path())
+        .ok()
+        .and_then(|content| {
+            if content.trim().is_empty() {
+                return None;
+            }
+            serde_json::from_str::<serde_json::Value>(&content).ok()
+        })
+        .and_then(|config| config.get("mcpServers")?.get("banter").cloned())
+        .is_some()
+}
+
+fn opencode_is_configured() -> bool {
+    fs::read_to_string(get_opencode_config_path())
+        .ok()
+        .and_then(|content| parse_opencode_config(&content).ok())
+        .and_then(|config| config.get("mcp")?.get("banter").cloned())
+        .is_some()
+}
+
 fn client_statuses() -> Vec<ClientStatus> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     vec![
@@ -1084,6 +1440,22 @@ fn client_statuses() -> Vec<ClientStatus> {
                 || command_is_available("claude"),
             configured: claude_is_configured(),
             config_path: get_claude_config_path().to_string_lossy().to_string(),
+        },
+        ClientStatus {
+            id: "antigravity".to_string(),
+            name: "Antigravity".to_string(),
+            detected: home.join(".gemini").is_dir()
+                || get_antigravity_config_path().is_file()
+                || command_is_available("antigravity"),
+            configured: antigravity_is_configured(),
+            config_path: get_antigravity_config_path().to_string_lossy().to_string(),
+        },
+        ClientStatus {
+            id: "opencode".to_string(),
+            name: "OpenCode".to_string(),
+            detected: get_opencode_config_path().is_file() || command_is_available("opencode"),
+            configured: opencode_is_configured(),
+            config_path: get_opencode_config_path().to_string_lossy().to_string(),
         },
     ]
 }
@@ -1174,6 +1546,8 @@ fn one_click_setup(
     unity_project_path: String,
     configure_codex: bool,
     configure_claude: bool,
+    configure_antigravity: bool,
+    configure_opencode: bool,
     tool_groups: String,
     enable_custom_scripts: bool,
 ) -> Result<SetupResult, String> {
@@ -1184,6 +1558,12 @@ fn one_click_setup(
 
     if configure_claude {
         get_claude_mcp_config()?;
+    }
+    if configure_antigravity {
+        get_antigravity_mcp_config()?;
+    }
+    if configure_opencode {
+        get_opencode_mcp_config()?;
     }
 
     let mut config = load_config(app.clone())?;
@@ -1219,7 +1599,23 @@ fn one_click_setup(
         )?;
     }
     if configure_claude {
-        update_claude_mcp_config(app, channel.clone(), mcp_server_path, tool_groups)?;
+        update_claude_mcp_config(
+            app.clone(),
+            channel.clone(),
+            mcp_server_path.clone(),
+            tool_groups.clone(),
+        )?;
+    }
+    if configure_antigravity {
+        update_antigravity_mcp_config(
+            app.clone(),
+            channel.clone(),
+            mcp_server_path.clone(),
+            tool_groups.clone(),
+        )?;
+    }
+    if configure_opencode {
+        update_opencode_mcp_config(app, channel.clone(), mcp_server_path, tool_groups)?;
     }
 
     Ok(SetupResult {
@@ -1227,6 +1623,8 @@ fn one_click_setup(
         bridge_installed: true,
         codex_configured: configure_codex,
         claude_configured: configure_claude,
+        antigravity_configured: configure_antigravity,
+        opencode_configured: configure_opencode,
         runtime_command,
     })
 }
@@ -1264,6 +1662,12 @@ fn main() {
             remove_claude_mcp_config,
             update_codex_mcp_config,
             remove_codex_mcp_config,
+            get_antigravity_mcp_config,
+            update_antigravity_mcp_config,
+            remove_antigravity_mcp_config,
+            get_opencode_mcp_config,
+            update_opencode_mcp_config,
+            remove_opencode_mcp_config,
             check_unity_extension,
             get_unity_extension_status,
             install_unity_extension,

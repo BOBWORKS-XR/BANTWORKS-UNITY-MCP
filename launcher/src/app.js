@@ -18,11 +18,15 @@ const elements = {};
 document.addEventListener('DOMContentLoaded', async function() {
   for (const id of [
     'status', 'runtimeBadge', 'projectPath', 'browseProjectBtn', 'discoveredProjects',
-    'connectCodex', 'connectClaude', 'codexDetection', 'claudeDetection', 'codexState',
-    'claudeState', 'setupBtn', 'setupMessage', 'projectsList', 'emptyState', 'addProjectBtn',
+    'connectCodex', 'connectClaude', 'connectAntigravity', 'connectOpenCode',
+    'codexDetection', 'claudeDetection', 'antigravityDetection', 'opencodeDetection',
+    'codexState', 'claudeState', 'antigravityState', 'opencodeState',
+    'setupBtn', 'setupMessage', 'projectsList', 'emptyState', 'addProjectBtn',
     'updateBridgesBtn',
     'mcpServerPath', 'toolGroups', 'autoConfig', 'customScripts', 'applyConfigBtn',
-    'applyCodexBtn', 'disconnectBtn', 'disconnectCodexBtn', 'installExtensionBtn',
+    'applyCodexBtn', 'applyAntigravityBtn', 'applyOpenCodeBtn',
+    'disconnectBtn', 'disconnectCodexBtn', 'disconnectAntigravityBtn', 'disconnectOpenCodeBtn',
+    'installExtensionBtn',
     'openDocsBtn', 'githubLink'
   ]) {
     elements[id] = document.getElementById(id);
@@ -70,6 +74,8 @@ function setupEventListeners() {
 
   elements.connectCodex.addEventListener('change', updateSetupButton);
   elements.connectClaude.addEventListener('change', updateSetupButton);
+  elements.connectAntigravity.addEventListener('change', updateSetupButton);
+  elements.connectOpenCode.addEventListener('change', updateSetupButton);
   elements.setupBtn.addEventListener('click', runQuickSetup);
 
   elements.mcpServerPath.addEventListener('change', async function() {
@@ -104,8 +110,12 @@ function setupEventListeners() {
 
   elements.applyConfigBtn.addEventListener('click', applyToClaudeCode);
   elements.applyCodexBtn.addEventListener('click', applyToCodex);
+  elements.applyAntigravityBtn.addEventListener('click', applyToAntigravity);
+  elements.applyOpenCodeBtn.addEventListener('click', applyToOpenCode);
   elements.disconnectBtn.addEventListener('click', disconnectFromClaude);
   elements.disconnectCodexBtn.addEventListener('click', disconnectFromCodex);
+  elements.disconnectAntigravityBtn.addEventListener('click', disconnectFromAntigravity);
+  elements.disconnectOpenCodeBtn.addEventListener('click', disconnectFromOpenCode);
   elements.installExtensionBtn.addEventListener('click', installExtension);
 
   elements.openDocsBtn.addEventListener('click', openDocumentation);
@@ -194,8 +204,12 @@ async function refreshOnboardingStatus() {
   if (!clientSelectionInitialized) {
     const codex = getClientStatus('codex');
     const claude = getClientStatus('claude');
+    const antigravity = getClientStatus('antigravity');
+    const opencode = getClientStatus('opencode');
     elements.connectCodex.checked = Boolean(codex && (codex.detected || codex.configured));
     elements.connectClaude.checked = Boolean(claude && (claude.detected || claude.configured));
+    elements.connectAntigravity.checked = Boolean(antigravity && (antigravity.detected || antigravity.configured));
+    elements.connectOpenCode.checked = Boolean(opencode && (opencode.detected || opencode.configured));
     clientSelectionInitialized = true;
   }
 }
@@ -225,6 +239,8 @@ function updateSetupStatus() {
   const project = onboarding.project;
   const codex = getClientStatus('codex');
   const claude = getClientStatus('claude');
+  const antigravity = getClientStatus('antigravity');
+  const opencode = getClientStatus('opencode');
 
   elements.runtimeBadge.textContent = runtime.ready
     ? (runtime.bundled ? 'Private Node 24 LTS' : 'System Node')
@@ -247,9 +263,12 @@ function updateSetupStatus() {
   setCheck('bridge', bridgeState, bridgeText);
   updateClientStatus('codex', codex, elements.codexDetection, elements.codexState);
   updateClientStatus('claude', claude, elements.claudeDetection, elements.claudeState);
+  updateClientStatus('antigravity', antigravity, elements.antigravityDetection, elements.antigravityState);
+  updateClientStatus('opencode', opencode, elements.opencodeDetection, elements.opencodeState);
 
   const connected = project?.bridgeCurrent && project.stateStatus === 'fresh';
-  const configured = project?.bridgeCurrent && (codex?.configured || claude?.configured);
+  const configured = project?.bridgeCurrent &&
+    (codex?.configured || claude?.configured || antigravity?.configured || opencode?.configured);
   if (connected) {
     setHeaderStatus('active', 'Connected');
   } else if (configured) {
@@ -285,7 +304,10 @@ function setHeaderStatus(state, text) {
 function updateSetupButton() {
   const projectValid = Boolean(onboarding?.project?.valid);
   const runtimeReady = Boolean(onboarding?.runtime?.ready);
-  const hasClient = elements.connectCodex.checked || elements.connectClaude.checked;
+  const hasClient = elements.connectCodex.checked
+    || elements.connectClaude.checked
+    || elements.connectAntigravity.checked
+    || elements.connectOpenCode.checked;
   elements.setupBtn.disabled = !projectValid || !runtimeReady || !hasClient;
 }
 
@@ -299,6 +321,8 @@ async function runQuickSetup() {
       unityProjectPath: selectedProjectPath,
       configureCodex: elements.connectCodex.checked,
       configureClaude: elements.connectClaude.checked,
+      configureAntigravity: elements.connectAntigravity.checked,
+      configureOpencode: elements.connectOpenCode.checked,
       toolGroups: config.tool_groups || 'all',
       enableCustomScripts: config.enable_custom_scripts === true
     });
@@ -423,11 +447,19 @@ async function updateConfiguredClients(channel) {
   await refreshOnboardingStatus();
   const codex = getClientStatus('codex');
   const claude = getClientStatus('claude');
+  const antigravity = getClientStatus('antigravity');
+  const opencode = getClientStatus('opencode');
   if (codex?.configured) {
     await updateCodexConfig(channel);
   }
   if (claude?.configured) {
     await updateClaudeConfig(channel);
+  }
+  if (antigravity?.configured) {
+    await updateAntigravityConfig(channel);
+  }
+  if (opencode?.configured) {
+    await updateOpenCodeConfig(channel);
   }
 }
 
@@ -441,6 +473,22 @@ async function updateCodexConfig(channel) {
 
 async function updateClaudeConfig(channel) {
   await window.__TAURI__.core.invoke('update_claude_mcp_config', {
+    channel: channel,
+    mcpServerPath: config.mcp_server_path,
+    toolGroups: config.tool_groups || 'all'
+  });
+}
+
+async function updateAntigravityConfig(channel) {
+  await window.__TAURI__.core.invoke('update_antigravity_mcp_config', {
+    channel: channel,
+    mcpServerPath: config.mcp_server_path,
+    toolGroups: config.tool_groups || 'all'
+  });
+}
+
+async function updateOpenCodeConfig(channel) {
+  await window.__TAURI__.core.invoke('update_opencode_mcp_config', {
     channel: channel,
     mcpServerPath: config.mcp_server_path,
     toolGroups: config.tool_groups || 'all'
@@ -492,6 +540,54 @@ async function disconnectFromClaude() {
     showToast('Claude Code disconnected', 'success');
   } catch (error) {
     showToast('Could not disconnect Claude Code', 'error');
+  }
+}
+
+async function applyToAntigravity() {
+  const channel = getActiveChannel();
+  if (!channel) return showToast('No Unity project selected', 'error');
+  try {
+    await updateAntigravityConfig(channel);
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Applied to Antigravity', 'success');
+  } catch (error) {
+    showToast('Antigravity configuration failed: ' + String(error), 'error');
+  }
+}
+
+async function applyToOpenCode() {
+  const channel = getActiveChannel();
+  if (!channel) return showToast('No Unity project selected', 'error');
+  try {
+    await updateOpenCodeConfig(channel);
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Applied to OpenCode', 'success');
+  } catch (error) {
+    showToast('OpenCode configuration failed: ' + String(error), 'error');
+  }
+}
+
+async function disconnectFromAntigravity() {
+  try {
+    await window.__TAURI__.core.invoke('remove_antigravity_mcp_config');
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('Antigravity disconnected', 'success');
+  } catch (error) {
+    showToast('Could not disconnect Antigravity', 'error');
+  }
+}
+
+async function disconnectFromOpenCode() {
+  try {
+    await window.__TAURI__.core.invoke('remove_opencode_mcp_config');
+    await refreshOnboardingStatus();
+    updateSetupStatus();
+    showToast('OpenCode disconnected', 'success');
+  } catch (error) {
+    showToast('Could not disconnect OpenCode', 'error');
   }
 }
 

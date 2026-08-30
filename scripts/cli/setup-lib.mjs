@@ -33,6 +33,8 @@ export function detectPlatformPaths(env = process.env) {
       configRoot: appData,
       claudeConfigPath: path.join(userProfile, ".claude.json"),
       codexConfigPath: path.join(userProfile, ".codex", "config.toml"),
+      antigravityConfigPath: path.join(userProfile, ".gemini", "config", "mcp_config.json"),
+      opencodeConfigPath: path.join(appData, "opencode", "opencode.jsonc"),
     };
   }
   const xdgConfig = env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
@@ -41,6 +43,8 @@ export function detectPlatformPaths(env = process.env) {
     configRoot: xdgConfig,
     claudeConfigPath: path.join(home, ".claude.json"),
     codexConfigPath: path.join(xdgConfig, "codex", "config.toml"),
+    antigravityConfigPath: path.join(home, ".gemini", "config", "mcp_config.json"),
+    opencodeConfigPath: path.join(xdgConfig, "opencode", "opencode.jsonc"),
   };
 }
 
@@ -392,6 +396,116 @@ export function applyToCodex({ configRoot, mcpRoot, codexConfigPath, claudeConfi
   return { channel, path: codexPath };
 }
 
+function stripJsoncComments(input) {
+  // Strip // line comments and /* block comments */ from a JSONC document
+  // while leaving strings untouched. Sufficient for the OpenCode config
+  // files we generate / consume; no new dependency required.
+  let out = "";
+  let inString = false;
+  let escape = false;
+  const chars = [...input];
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i];
+    if (escape) {
+      out += c;
+      escape = false;
+      continue;
+    }
+    if (c === "\\" && inString) {
+      out += c;
+      escape = true;
+      continue;
+    }
+    if (c === '"') {
+      inString = !inString;
+      out += c;
+      continue;
+    }
+    if (!inString && c === "/") {
+      const next = chars[i + 1];
+      if (next === "/") {
+        i++;
+        while (i + 1 < chars.length && chars[i + 1] !== "\n") i++;
+        continue;
+      }
+      if (next === "*") {
+        i++;
+        while (i + 1 < chars.length && !(chars[i] === "*" && chars[i + 1] === "/")) {
+          if (chars[i] === "\n") out += "\n";
+          i++;
+        }
+        i++;
+        continue;
+      }
+    }
+    out += c;
+  }
+  return out;
+}
+
+function readJsonc(filePath) {
+  const raw = readFileSync(filePath, "utf8");
+  return JSON.parse(stripJsoncComments(raw));
+}
+
+export function applyToAntigravity({ configRoot, mcpRoot, antigravityConfigPath }) {
+  const config = loadConfig({ configRoot, mcpRoot });
+  const channel = activeChannel(config);
+  const targetPath = antigravityConfigPath || detectPlatformPaths().antigravityConfigPath;
+  let existing = {};
+  if (existsSync(targetPath)) {
+    const raw = readFileSync(targetPath, "utf8");
+    if (raw.trim().length > 0) {
+      existing = JSON.parse(raw);
+    }
+  }
+  if (!existing.mcpServers || typeof existing.mcpServers !== "object") {
+    existing.mcpServers = {};
+  }
+  const envVars = {
+    UNITY_PROJECT_PATH: channel.unity_project_path,
+    BANTWORKS_TOOL_GROUPS: normalizeToolGroups(config.tool_groups),
+  };
+  if (channel.scene_path) {
+    envVars.UNITY_SCENE_PATH = channel.scene_path;
+  }
+  existing.mcpServers.banter = {
+    command: "node",
+    args: [config.mcp_server_path],
+    env: envVars,
+  };
+  atomicWriteText(targetPath, `${JSON.stringify(existing, null, 2)}\n`);
+  return { channel, path: targetPath };
+}
+
+export function applyToOpenCode({ configRoot, mcpRoot, opencodeConfigPath }) {
+  const config = loadConfig({ configRoot, mcpRoot });
+  const channel = activeChannel(config);
+  const targetPath = opencodeConfigPath || detectPlatformPaths().opencodeConfigPath;
+  let existing = {};
+  if (existsSync(targetPath)) {
+    existing = readJsonc(targetPath);
+  }
+  if (!existing.mcp || typeof existing.mcp !== "object") {
+    existing.mcp = {};
+  }
+  const environment = {
+    UNITY_PROJECT_PATH: channel.unity_project_path,
+    BANTWORKS_TOOL_GROUPS: normalizeToolGroups(config.tool_groups),
+  };
+  if (channel.scene_path) {
+    environment.UNITY_SCENE_PATH = channel.scene_path;
+  }
+  existing.mcp.banter = {
+    type: "local",
+    command: ["node", config.mcp_server_path],
+    enabled: true,
+    environment,
+  };
+  atomicWriteText(targetPath, `${JSON.stringify(existing, null, 2)}\n`);
+  return { channel, path: targetPath };
+}
+
 export function installUnityExtension({ configRoot, mcpRoot }) {
   const config = loadConfig({ configRoot, mcpRoot });
   const channel = activeChannel(config);
@@ -426,5 +540,7 @@ export function buildContext({ mcpRoot, env = process.env } = {}) {
     configRoot: platform.configRoot,
     codexConfigPath: platform.codexConfigPath,
     claudeConfigPath: platform.claudeConfigPath,
+    antigravityConfigPath: platform.antigravityConfigPath,
+    opencodeConfigPath: platform.opencodeConfigPath,
   };
 }

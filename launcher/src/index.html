@@ -62,6 +62,22 @@
                 </span>
                 <span class="client-state" id="claudeState">Not configured</span>
               </label>
+              <label class="client-option" for="connectAntigravity">
+                <input type="checkbox" id="connectAntigravity">
+                <span class="client-copy">
+                  <strong>Antigravity</strong>
+                  <span id="antigravityDetection">Checking</span>
+                </span>
+                <span class="client-state" id="antigravityState">Not configured</span>
+              </label>
+              <label class="client-option" for="connectOpenCode">
+                <input type="checkbox" id="connectOpenCode">
+                <span class="client-copy">
+                  <strong>OpenCode</strong>
+                  <span id="opencodeDetection">Checking</span>
+                </span>
+                <span class="client-state" id="opencodeState">Not configured</span>
+              </label>
             </fieldset>
 
             <button class="btn btn-primary setup-button" id="setupBtn" type="button">
@@ -79,6 +95,8 @@
             <div class="check-row" data-check="bridge"><span class="check-icon"></span><span>Unity bridge</span><strong>Not installed</strong></div>
             <div class="check-row" data-check="codex"><span class="check-icon"></span><span>Codex</span><strong>Not configured</strong></div>
             <div class="check-row" data-check="claude"><span class="check-icon"></span><span>Claude Code</span><strong>Not configured</strong></div>
+            <div class="check-row" data-check="antigravity"><span class="check-icon"></span><span>Antigravity</span><strong>Not configured</strong></div>
+            <div class="check-row" data-check="opencode"><span class="check-icon"></span><span>OpenCode</span><strong>Not configured</strong></div>
           </div>
         </div>
       </section>
@@ -154,9 +172,13 @@
           <div class="action-buttons">
             <button class="btn btn-secondary" id="applyCodexBtn" type="button">Apply to Codex</button>
             <button class="btn btn-secondary" id="applyConfigBtn" type="button">Apply to Claude Code</button>
+            <button class="btn btn-secondary" id="applyAntigravityBtn" type="button">Apply to Antigravity</button>
+            <button class="btn btn-secondary" id="applyOpenCodeBtn" type="button">Apply to OpenCode</button>
             <button class="btn btn-secondary" id="installExtensionBtn" type="button">Update Unity Bridge</button>
             <button class="btn btn-danger" id="disconnectCodexBtn" type="button">Disconnect Codex</button>
             <button class="btn btn-danger" id="disconnectBtn" type="button">Disconnect Claude</button>
+            <button class="btn btn-danger" id="disconnectAntigravityBtn" type="button">Disconnect Antigravity</button>
+            <button class="btn btn-danger" id="disconnectOpenCodeBtn" type="button">Disconnect OpenCode</button>
             <button class="btn btn-secondary" id="openDocsBtn" type="button">Documentation</button>
           </div>
         </div>

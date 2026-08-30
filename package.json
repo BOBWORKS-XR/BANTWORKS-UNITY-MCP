@@ -1,7 +1,7 @@
 {
   "name": "banter-mcp",
   "version": "2.3.0",
-  "description": "Codex, Claude Code, and MCP-compatible Unity integration for Banter SDK development",
+  "description": "Codex, Claude Code, Antigravity, OpenCode, and MCP-compatible Unity integration for Banter SDK development",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

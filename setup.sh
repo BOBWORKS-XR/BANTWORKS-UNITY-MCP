@@ -5,8 +5,8 @@
 # match across platforms.
 #
 # Usage:
-#   ./setup.sh                         Show help
-#   ./setup.sh install                 Build/validate the MCP server bundle
+#   ./setup.sh                          Show help
+#   ./setup.sh install                  Build/validate the MCP server bundle
 #   ./setup.sh add-project "Name" /path/to/UnityProject
 #   ./setup.sh list-projects
 #   ./setup.sh set-active <index>
@@ -14,6 +14,8 @@
 #   ./setup.sh set-profile <name>
 #   ./setup.sh apply-claude
 #   ./setup.sh apply-codex
+#   ./setup.sh apply-antigravity
+#   ./setup.sh apply-opencode
 #   ./setup.sh install-bridge
 #   ./setup.sh config-path
 

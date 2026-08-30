@@ -119,7 +119,7 @@ cargo tauri dev
 - **Discover Unity Hub projects** and select a project folder directly
 - **Set up a first project and detected clients** in one action
 - **Manage and switch between multiple Unity projects**
-- **Configure Codex** (`~/.codex/config.toml`) and Claude Code (`~/.claude.json`)
+- **Configure Codex** (`~/.codex/config.toml`), Claude Code (`~/.claude.json`), Antigravity (`~/.gemini/config/mcp_config.json`), and OpenCode (`~/.config/opencode/opencode.jsonc`)
 - **Install or update the Unity bridge** and show live readiness status
 - **Use a private packaged Node.js runtime** for launcher-managed clients
 
@@ -146,6 +146,8 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 ./setup.sh set-profile all
 ./setup.sh apply-claude
 ./setup.sh apply-codex
+./setup.sh apply-antigravity
+./setup.sh apply-opencode
 ./setup.sh install-bridge
 ./setup.sh config-path
 ```

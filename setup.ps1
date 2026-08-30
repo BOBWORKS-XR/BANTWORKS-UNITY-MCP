@@ -548,6 +548,13 @@ function Show-Usage {
     Write-Host "  .\setup.ps1 -ListProjects"
     Write-Host "  .\setup.ps1 -SetActive   Prompt for the active project, then exit"
     Write-Host "  .\setup.ps1 -Help"
+    Write-Host ""
+    Write-Host "Cross-platform CLI subcommands are available via scripts/cli/setup.mjs:"
+    Write-Host "  node scripts\cli\setup.mjs install"
+    Write-Host "  node scripts\cli\setup.mjs apply-claude"
+    Write-Host "  node scripts\cli\setup.mjs apply-codex"
+    Write-Host "  node scripts\cli\setup.mjs apply-antigravity"
+    Write-Host "  node scripts\cli\setup.mjs apply-opencode"
 }
 
 function Show-ProjectList {
