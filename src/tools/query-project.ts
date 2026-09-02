@@ -196,11 +196,11 @@ function validateQueryOptions(query: string, options: ProjectStateQueryOptions):
   }
   if (options.maxDepth !== undefined &&
       (!Number.isInteger(options.maxDepth) || options.maxDepth < 0 || options.maxDepth > 100)) {
+    return "maxDepth must be a whole number between 0 and 100.";
+  }
   if (options.maxResponseBytes !== undefined &&
       (!Number.isInteger(options.maxResponseBytes) || options.maxResponseBytes < MIN_RESPONSE_BYTES || options.maxResponseBytes > MAX_RESPONSE_BYTES)) {
     return `maxResponseBytes must be a whole number between ${MIN_RESPONSE_BYTES} and ${MAX_RESPONSE_BYTES}.`;
-  }
-    return "maxDepth must be a whole number between 0 and 100.";
   }
   if (options.timeoutMs !== undefined &&
       (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 120000)) {
@@ -210,13 +210,13 @@ function validateQueryOptions(query: string, options: ProjectStateQueryOptions):
       (!Array.isArray(options.fields) || options.fields.length > 50 || options.fields.some((field) => typeof field !== "string" || !field))) {
     return "fields must contain at most 50 non-empty field names.";
   }
-  if (options.fields?.length) {
-    const allowed = query === "hierarchy"
-      ? HIERARCHY_FIELDS
   if (options.propertyNames !== undefined &&
       (!Array.isArray(options.propertyNames) || options.propertyNames.length > 50 || options.propertyNames.some((name) => typeof name !== "string" || !name.trim()))) {
     return "propertyNames must contain at most 50 non-empty serialized property names.";
   }
+  if (options.fields?.length) {
+    const allowed = query === "hierarchy"
+      ? HIERARCHY_FIELDS
       : query === "components"
         ? COMPONENT_FIELDS
         : undefined;
@@ -238,6 +238,7 @@ function isTargetedHierarchyQuery(
   return Boolean(
     normalizeObjectPath(options.rootPath) ||
     options.componentType ||
+    options.propertyNames?.length ||
     (options.match === "exact" && filter)
   );
 }
@@ -512,8 +513,8 @@ function selectHierarchyObjects(
     return !filter || matchesFilter(object, filter, match);
   });
 
-  if (options.componentType) {
-    matches = matches.map((object) => projectMatchingComponents(object, options.componentType as string));
+  if (options.componentType || options.propertyNames?.length) {
+    matches = matches.map((object) => projectMatchingComponents(object, options.componentType, options.propertyNames));
   }
 
   const totalMatches = matches.length;
@@ -546,12 +547,37 @@ function selectHierarchyObjects(
 
 function projectMatchingComponents(
   object: Record<string, unknown>,
-  componentType: string
+  componentType: string | undefined,
+  propertyNames: string[] | undefined
 ): Record<string, unknown> {
-  const components = Array.isArray(object.components)
-    ? object.components.filter(isRecord).filter((component) => componentMatchesType(component, componentType))
+  let components = Array.isArray(object.components)
+    ? object.components.filter(isRecord)
     : [];
+  if (componentType) {
+    components = components.filter((component) => componentMatchesType(component, componentType));
+  }
+  if (propertyNames?.length) {
+    components = components.map((component) => projectComponentProperties(component, propertyNames));
+  }
   return { ...object, components };
+}
+
+function projectComponentProperties(
+  component: Record<string, unknown>,
+  propertyNames: string[]
+): Record<string, unknown> {
+  if (!Array.isArray(component.properties)) return component;
+  const requested = new Set(propertyNames);
+  return {
+    ...component,
+    properties: component.properties.filter((property) => {
+      if (!isRecord(property)) return false;
+      const name = stringValue(property.name);
+      const propertyPath = stringValue(property.propertyPath);
+      return (name !== undefined && requested.has(name)) ||
+        (propertyPath !== undefined && requested.has(propertyPath));
+    }),
+  };
 }
 
 function objectHasComponent(object: Record<string, unknown>, componentType: string): boolean {

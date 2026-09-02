@@ -100,7 +100,7 @@ test("legacy BANTWORKS_TOOL_GROUPS remains an upgrade fallback", async () => {
     const response = await server.request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     assert.deepEqual(
       response.result.tools.map((tool) => tool.name).sort(),
-      ["get_bridge_status", "list_unity_projects", "select_unity_project"].sort()
+      ["get_bridge_status", "get_unity_command_status", "list_unity_projects", "select_unity_project"].sort()
     );
   } finally {
     await server.stop();

@@ -510,6 +510,7 @@ Use this first after configuring a new Unity project or when Unity tools appear 
         properties: {
           commandId: {
             type: "string",
+            format: "uuid",
             minLength: 36,
             maxLength: 36,
             description: "Command UUID returned by a pending Unity operation",
@@ -2391,10 +2392,10 @@ async function captureUnityScreenshot(
   }
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 64 || width > 2048 || height < 64 || height > 2048) {
+    return { success: false, error: "Screenshot width and height must be whole numbers between 64 and 2048." };
+  }
   if (!Number.isInteger(maxImageBytes) || maxImageBytes < 64 * 1024 || maxImageBytes > 16 * 1024 * 1024) {
     return { success: false, error: "maxImageBytes must be a whole number between 65536 and 16777216." };
-  }
-    return { success: false, error: "Screenshot width and height must be whole numbers between 64 and 2048." };
   }
 
   const result = await sendUnityCommand({
@@ -3247,9 +3248,9 @@ async function sendUnityCommand(
         completed: false,
         status: "pending",
         message: dispatch.fallbackReason ||
+          `Command accepted over ${dispatch.transport}, but Unity did not acknowledge completion within 3 seconds.`,
         projectId: config.projectId,
         projectPath: config.unityProjectPath,
-          `Command accepted over ${dispatch.transport}, but Unity did not acknowledge completion within 3 seconds.`,
       };
     }
 
@@ -3262,14 +3263,16 @@ async function sendUnityCommand(
       status: "completed",
       message: dispatch.acknowledgement.message,
       error: dispatch.acknowledgement.error,
-    };
-  } catch (error) {
       projectId: config.projectId,
       projectPath: dispatch.acknowledgement.projectPath || config.unityProjectPath,
       editorInstanceId: dispatch.acknowledgement.editorInstanceId,
+    };
+  } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
+      projectId: config.projectId,
+      projectPath: config.unityProjectPath,
     };
   }
 }

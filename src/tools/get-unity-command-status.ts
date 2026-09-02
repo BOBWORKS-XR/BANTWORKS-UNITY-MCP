@@ -36,6 +36,7 @@ export function getUnityCommandStatus(
     );
   }
 
+  const descriptor = readBridgeInstanceDescriptor(config);
   const resultPath = path.join(config.mcpStatePath, "command-results", `${commandId}.json`);
   if (fs.existsSync(resultPath)) {
     try {
@@ -48,6 +49,14 @@ export function getUnityCommandStatus(
           commandId,
           config,
           `Unity command result came from '${result.projectPath}', not selected project '${config.unityProjectPath}'.`
+        );
+      }
+      if (descriptor?.editorInstanceId && result.editorInstanceId &&
+          descriptor.editorInstanceId !== result.editorInstanceId) {
+        return failure(
+          commandId,
+          config,
+          `Unity command result came from Editor '${result.editorInstanceId}', not active Editor '${descriptor.editorInstanceId}'.`
         );
       }
       fs.unlinkSync(resultPath);
@@ -73,7 +82,6 @@ export function getUnityCommandStatus(
   }
 
   const commandPath = path.join(config.mcpCommandsPath, `${commandId}.json`);
-  const descriptor = readBridgeInstanceDescriptor(config);
   if (fs.existsSync(commandPath)) {
     return {
       success: false,

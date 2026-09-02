@@ -365,6 +365,27 @@ function validateConnection(
 
   // Check for common wrong port names
   const sourceKey = conn.sourceKey as string;
+  const sourceNode = typeof sourceRef === "string"
+    ? nodeIds.get(sourceRef) as Record<string, unknown> | undefined
+    : undefined;
+  const destinationNode = typeof destinationRef === "string"
+    ? nodeIds.get(destinationRef) as Record<string, unknown> | undefined
+    : undefined;
+  const localUserStateType = "Banter.VisualScripting.GetLocalUserState";
+
+  if (
+    type === "control" &&
+    (sourceNode?.$type === localUserStateType || destinationNode?.$type === localUserStateType)
+  ) {
+    errors.push(`GetLocalUserState has no control-flow ports; use only its 'Position' or 'Rotation' value outputs`);
+  }
+  if (type === "value" && sourceNode?.$type === localUserStateType && !["Position", "Rotation"].includes(sourceKey)) {
+    errors.push(`GetLocalUserState output '${sourceKey}' is invalid; use capitalized 'Position' or 'Rotation'`);
+  }
+  if (type === "value" && destinationNode?.$type === localUserStateType) {
+    errors.push(`GetLocalUserState has no value inputs; it only outputs 'Position' and 'Rotation'`);
+  }
+
   if (sourceKey === "collision") {
     warnings.push(`Port name 'collision' is wrong - OnCollisionEnter outputs 'data', not 'collision'`);
   }

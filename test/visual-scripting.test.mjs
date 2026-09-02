@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { createConfigForProject } from "../dist/lib/config.js";
+import { BANTER_VS_NODES } from "../dist/resources/banter-vs-nodes.js";
 import { generateVSGraph } from "../dist/tools/generate-vs-graph.js";
 import { handleToolCall } from "../dist/tools/index.js";
 import { validateVSGraph } from "../dist/tools/validate-vs-graph.js";
@@ -219,6 +220,35 @@ test("MCP graph tool detects the selected project profile automatically", async 
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }
+});
+
+test("local user state contract exposes only the SDK head-pose value ports", () => {
+  const localUserState = BANTER_VS_NODES.GetLocalUserState;
+  assert.deepEqual(localUserState.inputs, []);
+  assert.deepEqual(localUserState.outputs.map((port) => [port.name, port.type]), [
+    ["Position", "value"],
+    ["Rotation", "value"],
+  ]);
+  assert.match(localUserState.description, /tracked head/i);
+});
+
+test("validator rejects invented GetLocalUserState flow ports", () => {
+  const graphJson = graphWith([
+    node("1", UUIDS.one, "Banter.VisualScripting.GetLocalUserState"),
+    node("2", UUIDS.two),
+    {
+      sourceUnit: { $ref: "1" },
+      sourceKey: "exit",
+      destinationUnit: { $ref: "2" },
+      destinationKey: "enter",
+      guid: UUIDS.three,
+      $type: "Unity.VisualScripting.ControlConnection",
+    },
+  ]);
+
+  const validation = validateVSGraph(graphJson);
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => error.includes("no control-flow ports")));
 });
 
 test("generator enables coroutine events when their flow reaches a coroutine unit", () => {

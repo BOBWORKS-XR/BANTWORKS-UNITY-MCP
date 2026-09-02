@@ -154,14 +154,22 @@ export async function checkImportStatus(
         const editorStateAgeMs = editorState?.timestamp === undefined
           ? undefined
           : Math.max(0, Date.now() - editorState.timestamp);
+        const compilationStatusAgeMs = compilationStatus?.timestamp === undefined
+          ? undefined
+          : Math.max(0, Date.now() - compilationStatus.timestamp);
+        const heartbeatStale = editorStateAgeMs === undefined || editorStateAgeMs > 5000;
+        const compilationStale = compilationStatusAgeMs === undefined || compilationStatusAgeMs > 5000;
 
-        if (editorStateAgeMs === undefined || editorStateAgeMs > 5000) {
+        if (heartbeatStale && compilationStale) {
           return {
             success: false,
             imported: false,
             assetPath,
             editorStateTimestamp: editorState?.timestamp,
             editorStateAgeMs,
+            heartbeatStale,
+            compilationStatusAgeMs,
+            compilationStale,
             stale: true,
             message: "Unity editor state is stale; import and compilation status cannot be verified.",
           };
@@ -179,7 +187,8 @@ export async function checkImportStatus(
             return attachEditorAndCompilationStatus(
               createResult(status, assetPath, fullAssetPath),
               editorState,
-              compilationStatus
+              compilationStatus,
+              fullAssetPath
             );
           }
         }
@@ -228,7 +237,8 @@ export async function checkImportStatus(
       return attachEditorAndCompilationStatus(
         createResult(readStatus(statusPath), assetPath, fullAssetPath),
         readOptionalJson<BridgeEditorState>(path.join(config.mcpStatePath, "editor-state.json")),
-        readOptionalJson<BridgeCompilationStatus>(path.join(config.mcpStatePath, "compilation-status.json"))
+        readOptionalJson<BridgeCompilationStatus>(path.join(config.mcpStatePath, "compilation-status.json")),
+        fullAssetPath
       );
     }
   } catch (error) {
@@ -285,6 +295,8 @@ export async function waitForUnityCompile(
         ...current,
         message: hasErrors
           ? `Unity compilation settled with ${current.compilerErrors?.length ?? 0} reported errors.`
+          : current.heartbeatStale
+          ? "Unity compilation is current and successful; the Editor heartbeat is stale, so asset-update state was not independently verified."
           : "Unity compilation and asset updates are settled.",
       };
     }
@@ -338,24 +350,33 @@ function readCurrentEditorAndCompilationState(config: BanterMCPConfig): Omit<Uni
 function attachEditorAndCompilationStatus(
   result: ImportStatusResult,
   editorState: BridgeEditorState | undefined,
-  compilationStatus: BridgeCompilationStatus | undefined
+  compilationStatus: BridgeCompilationStatus | undefined,
+  fullAssetPath?: string
 ): ImportStatusResult {
   const editorStateAgeMs = editorState?.timestamp === undefined
     ? undefined
     : Math.max(0, Date.now() - editorState.timestamp);
+  const compilationStatusAgeMs = compilationStatus?.timestamp === undefined
+    ? undefined
+    : Math.max(0, Date.now() - compilationStatus.timestamp);
   const compilerErrors = compilationStatus?.errors || [];
   const compilerWarnings = compilationStatus?.warnings || [];
   const compilationHasErrors = compilationStatus?.hasErrors === true || compilerErrors.length > 0;
-  const stale = editorStateAgeMs === undefined || editorStateAgeMs > 5000;
+  const heartbeatStale = editorStateAgeMs === undefined || editorStateAgeMs > 5000;
+  const compilationStale = compilationStatusAgeMs === undefined || compilationStatusAgeMs > 5000;
+  const staleAssembly = isCompilationStaleForAsset(compilationStatus, fullAssetPath);
+  const stale = heartbeatStale && compilationStale;
 
   return {
     ...result,
-    success: result.success && !compilationHasErrors && !stale,
+    success: result.success && !compilationHasErrors && !stale && !staleAssembly,
     errors: compilationHasErrors
       ? [...(result.errors || []), ...compilerErrors.map(formatCompilerMessage)]
       : result.errors,
-    message: stale
-      ? "Unity editor state is stale; import and compilation status cannot be verified."
+    message: staleAssembly
+      ? "The C# asset is newer than Unity's last completed compilation; assembly state is stale. Refresh assets and wait for a newer compilation result."
+      : stale
+      ? "Unity editor and compiler status are both stale; import and compilation status cannot be verified."
       : compilationHasErrors
       ? `Unity asset import completed, but script compilation has ${compilerErrors.length} errors.`
       : result.message,
@@ -366,12 +387,24 @@ function attachEditorAndCompilationStatus(
     compilationCompleted: compilationStatus?.completed,
     compilationHasErrors,
     compilationTimestamp: compilationStatus?.timestamp,
+    compilationStatusAgeMs,
     compilerErrors,
     compilerWarnings,
+    heartbeatStale,
+    compilationStale,
+    staleAssembly,
     stale,
   };
 }
 
+function isCompilationStaleForAsset(
+  compilationStatus: BridgeCompilationStatus | undefined,
+  fullAssetPath: string | undefined
+): boolean {
+  if (!fullAssetPath || path.extname(fullAssetPath).toLowerCase() !== ".cs") return false;
+  if (compilationStatus?.completed !== true || compilationStatus.timestamp === undefined) return true;
+  return compilationStatus.timestamp + 1000 < fs.statSync(fullAssetPath).mtimeMs;
+}
 function formatCompilerMessage(message: BridgeCompilerMessage): string {
   const location = message.file
     ? `${message.file}${message.line ? `:${message.line}${message.column ? `:${message.column}` : ""}` : ""}`

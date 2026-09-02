@@ -85,6 +85,11 @@ When the user asks for something in their scene:
 - Use real random GUIDs and canonical \`graph.elements\`. Referenced nodes need string \`$id\` values; connection \`$version\` may be omitted by Visual Scripting 1.9.x.
 - Run \`get_banter_sdk_info\` before relying on the full node catalogue because package families, git revisions, and registry packages with nearby versions can contain different node sets and namespaces.
 
+### C# Authoring Boundary
+- BANTWORKS does not provide a tool that creates C# source files. The Custom Script Components setting only permits adding components from C# assemblies that the project has already compiled.
+- When the requested runtime behavior belongs in Visual Scripting, use \`generate_vs_graph\`, \`validate_vs_graph\`, and \`write_vs_graph\`; do not create a project \`.cs\` file as a fallback.
+- An external coding workflow may temporarily need an \`Assets/Editor\` generator for Unity API work that the available tools cannot express. Treat that generator as project source while it is active. Never delete or archive it automatically, and do not leave one-shot revision or compatibility helpers compiling indefinitely after the user has approved their retirement and their generated assets have passed import, serialized read-back, SDK, and runtime checks.
+
 ### Project Info
 - \`query_project_state\` - See scene hierarchy
 - \`get_console_logs\` - Check for errors

@@ -53,3 +53,12 @@ test("targeted hierarchy queries are correlated and avoid full-state export", ()
   assert.match(bridge, /CreateGameObjectInfo/);
   assert.doesNotMatch(bridge, /case "query_hierarchy":[\s\S]{0,300}ExportProjectState/);
 });
+
+test("targeted hierarchy property reads expose bounded renderer material identity", () => {
+  assert.match(bridge, /includedPropertyNames/);
+  assert.match(bridge, /CreateRendererMaterialProperty/);
+  assert.match(bridge, /renderer\.sharedMaterials/);
+  assert.match(bridge, /sharedMaterials\.Take\(64\)/);
+  assert.match(bridge, /string assetPath = material != null \? AssetDatabase\.GetAssetPath\(material\) : null/);
+  assert.match(bridge, /shader = material != null && material\.shader != null \? material\.shader\.name : null/);
+});

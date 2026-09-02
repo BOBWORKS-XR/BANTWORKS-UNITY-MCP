@@ -170,6 +170,10 @@ Must have \`"coroutine": false\`:
 
 **GetLocalUserState:**
 - Output ports are \`"Position"\` and \`"Rotation"\` (capitalized!)
+- It is a pure value unit with no \`enter\` or \`exit\` control ports.
+- The outputs are the local user's tracked head pose, not a body/root transform.
+- For a pet or NavMesh follower, connect \`Position\` directly to the target-position or destination input. Do not use a Scene variable named \`player\` unless the selected project explicitly creates that variable.
+- Until Banter registers the local user, the node returns \`Vector3.zero\` and \`Quaternion.identity\`.
 
 ### 9. Script Graph vs Subgraph
 For **Script Graphs** (run on GameObjects):

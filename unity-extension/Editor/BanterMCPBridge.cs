@@ -7666,7 +7666,7 @@ namespace BantworksMCP
             EditorGUILayout.Space();
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Custom Scripts:", GUILayout.Width(100));
+            GUILayout.Label("C# Components:", GUILayout.Width(100));
             bool customScriptsEnabled = BantworksMCPBridge.EnableCustomScripts;
             bool newValue = EditorGUILayout.Toggle(customScriptsEnabled, GUILayout.Width(20));
             if (newValue != customScriptsEnabled)
@@ -7681,7 +7681,7 @@ namespace BantworksMCP
             GUILayout.Label("", GUILayout.Width(100));
             EditorGUILayout.HelpBox(
                 newValue
-                    ? "MCP can add custom C# scripts from Assembly-CSharp"
+                    ? "MCP can add existing components from compiled project C# assemblies"
                     : "MCP only adds Unity built-in, Banter SDK, and Creator SDK components",
                 MessageType.Info);
             EditorGUILayout.EndHorizontal();

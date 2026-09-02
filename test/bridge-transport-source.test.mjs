@@ -37,3 +37,31 @@ test("the background pipe loop does not call Unity serialization APIs", () => {
   assert.doesNotMatch(loop, /JsonUtility|AssetDatabase|EditorApplication|GameObject|SceneManager/);
   assert.match(loop, /PendingPipeCommands\.Enqueue\(pending\)/);
 });
+
+test("every command is target-bound before Unity mutation", () => {
+  const dispatchStart = source.indexOf("private static string ProcessCommandJson");
+  const switchStart = source.indexOf("switch (baseCommand.type)", dispatchStart);
+  const dispatchPrefix = source.slice(dispatchStart, switchStart);
+  assert.match(dispatchPrefix, /ValidateCommandTarget\(baseCommand\)/);
+  assert.match(source, /expectedProjectPath/);
+  assert.match(source, /expectedEditorInstanceId/);
+  assert.match(source, /StringComparison\.OrdinalIgnoreCase/);
+});
+
+test("pipe command completion is persisted for correlated status polling", () => {
+  const drainStart = source.indexOf("private static void ProcessPendingPipeCommands()");
+  const drainEnd = source.indexOf("private static void ProcessCommands()", drainStart);
+  const drain = source.slice(drainStart, drainEnd);
+  assert.match(drain, /WriteCommandResult\(result\)/);
+  assert.match(source, /DeleteOldFiles\(CommandResultsFolder, "\*\.json", 200\)/);
+  assert.match(source, /projectPath = ProjectRoot/);
+  assert.match(source, /editorInstanceId = GetEditorInstanceId\(\)/);
+});
+
+test("screenshot results identify the actual camera and remain bounded", () => {
+  assert.match(source, /cameraSelectionAmbiguous/);
+  assert.match(source, /cameraCandidateCount/);
+  assert.match(source, /Path\.Combine\(ScreenshotResultsFolder, cmd\.id \+ "\.json"\)/);
+  assert.match(source, /DeleteOldFiles\(ScreenshotResultsFolder, "\*\.png", 20\)/);
+  assert.match(source, /DeleteOldFiles\(ScreenshotResultsFolder, "\*\.json", 20\)/);
+});
