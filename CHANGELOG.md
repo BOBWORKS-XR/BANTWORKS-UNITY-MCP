@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.5.0 - 2026-09-03
+
+### Added
+
+- Added project-bound command envelopes and acknowledgement validation so stale project paths or Editor instance IDs fail before a Unity mutation.
+- Added `get_unity_command_status` for project-scoped polling of commands that were accepted but did not finish within the initial wait.
+- Added bounded `propertyNames` and `maxResponseBytes` hierarchy queries, including explicit Renderer material identity summaries.
+- Added screenshot camera-selection metadata plus `includeImage` and `maxImageBytes` controls.
+- Added the public structured feedback and contribution workflow from pull request 23.
+
+### Changed
+
+- Promoted Creator/Banter dual-SDK awareness, topology-aware Visual Scripting node placement, and clean-room experimental Shader Graph authoring from the preview branch to the stable release line.
+- Pending Unity mutations now report accepted/pending state instead of user-facing success, and named-pipe completions remain available for correlated status polling.
+- Import checks distinguish stale Editor heartbeat, stale compiler status, and C# assets newer than the last completed compilation.
+- Corrected the Banter `GetLocalUserState` contract to its real Position and Rotation value outputs without invented flow ports.
+- Clarified that custom-script mode exposes existing compiled components and does not generate arbitrary C# source.
+- The Unity status window uses the packaged Creator Works application logo in its header and supported Editor window title content; the launcher propagates both bridge and logo payloads.
+- The asset-reference Unity smoke now waits for the launched Editor process rather than an unrelated descendant process tree.
+
+### Verified
+
+- All 135 Node tests and all 13 native launcher tests pass; version synchronization, the 50-tool standalone bundle smoke, standalone ZIP install smoke, PowerShell setup smoke, and a low-severity npm audit also pass.
+- Local unsigned NSIS and MSI installers build successfully with the private Node.js 24.17.0 runtime and source-of-truth Unity bridge/logo payload.
+- The exact bridge compiles in disposable Unity 2022.3.39f1 and Unity 6000.3.21f1 projects; the Unity 6000.3.21f1 asset-reference command smoke passes.
+- Unity 2022.3.39f1/Visual Scripting 1.9.4 and Unity 6000.3.10f1/Visual Scripting 1.9.9 both import the layout fixture with persisted, topology-ordered, non-overlapping nodes.
+- Unity 2022.3.39f1/Shader Graph 14.0.11, Unity 6000.1.14f1/Shader Graph 17.1.0, and Unity 6000.3.10f1/Shader Graph 17.3.0 pass create, inspect, mutate, connect, compile-validation, stale-hash, occupied-input, and rollback checks.
+- The pinned Banter SDK matrix reports 3 matched and 0 mismatched outcomes, including a successful Banter 3.2.2 Visual Scripting smoke on Unity 6000.3.2f1.
+
+### Runtime Acceptance
+
+- Shader Graph mutation remains experimental. Hosted Creator/Greenfield behavior, headset behavior, multiplayer behavior, and project-specific gameplay were not exercised by these automated release checks.
+
+
 ## 2.4.0-3 - 2026-08-26
 
 ### Changed

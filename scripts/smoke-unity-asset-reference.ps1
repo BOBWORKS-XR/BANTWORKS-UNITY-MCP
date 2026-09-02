@@ -19,7 +19,8 @@ $SmokeLog = Join-Path $TempRoot ("bantworks-unity-asset-reference-" + $FixtureId
 
 function Invoke-Unity([string[]]$Arguments, [string]$LogPath) {
     $process = Start-Process -FilePath $UnityEditorPath -ArgumentList $Arguments `
-        -Wait -PassThru -NoNewWindow
+        -PassThru -NoNewWindow
+    $process.WaitForExit()
     if ($process.ExitCode -ne 0) {
         $tail = if (Test-Path -LiteralPath $LogPath) {
             (Get-Content -LiteralPath $LogPath -Tail 120) -join [Environment]::NewLine

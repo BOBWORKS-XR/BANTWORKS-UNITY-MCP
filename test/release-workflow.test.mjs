@@ -22,3 +22,8 @@ test("release metadata states the enforced standalone Node requirement", () => {
   assert.match(releaseWorkflow, /standalone ZIP remains available for manual Node\.js 20\+ deployments/);
   assert.doesNotMatch(releaseWorkflow, /Node\.js 18\+/);
 });
+
+test("tag builds create a stable draft for final asset inspection", () => {
+  assert.match(releaseWorkflow, /releaseDraft: true/);
+  assert.match(releaseWorkflow, /prerelease: false/);
+});

@@ -2,7 +2,7 @@
 
 Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Download Creator Works MCP 2.4.0-3](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-3) | [Preview source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/tree/feature/dual-sidequest-sdk) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Download Creator Works MCP 2.5.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.0) | [Source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
 ![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
@@ -21,7 +21,7 @@ Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients 
 
 ## Quick Start
 
-1. Download `Creator.Works.MCP_2.4.0-3_x64-setup.exe` from the [2.4.0-3 preview release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-3).
+1. Download `Creator.Works.MCP_2.5.0_x64-setup.exe` from the [2.5.0 release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.0).
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -99,11 +99,11 @@ unity-extension/Editor/CreatorWorksMCPLogo.png
 
 After Unity compiles, call `get_bridge_status`. Scene-changing tools require an explicit acknowledgement from the selected Unity Editor and fail closed on stale or ambiguous object selectors.
 
-## Preview Status
+## Release Status
 
-The `2.4.0-3` release gate passed:
+The `2.5.0` release is published only after these gates pass for the tagged revision:
 
-- 119 Node tests
+- 135 Node tests
 - 13 native launcher tests
 - Node 20, 22, and 24 CI
 - Windows launcher packaging and standalone installation smoke tests
@@ -133,8 +133,8 @@ These project screenshots show scene hierarchy construction, configured Banter c
 - [Banter custom Visual Scripting nodes](docs/banter-custom-visual-scripting-nodes.md)
 - [SideQuest workflows](docs/banter-workflows.md)
 - [Unity MCP benchmark](docs/unity-mcp-benchmark.md)
-- [Creator/Banter SDK transition](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/feature/dual-sidequest-sdk/docs/sidequest-sdk-transition.md)
-- [Shader Graph experiment](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/feature/dual-sidequest-sdk/docs/shader-graph-experiment.md)
+- [Creator/Banter SDK transition](docs/sidequest-sdk-transition.md)
+- [Shader Graph experiment](docs/shader-graph-experiment.md)
 
 ## Legacy Release
 
@@ -145,7 +145,6 @@ Looking for the former **BANTWORKS MCP** name or old launcher layout? [Open the 
 ```powershell
 git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
 Set-Location CREATOR-WORKS-UNITY-MCP
-git switch feature/dual-sidequest-sdk
 npm ci
 npm test
 Set-Location launcher/src-tauri

@@ -24,6 +24,7 @@ With a Unity project selected from `UNITY_PROJECT_PATH` or session routing, the 
 | `.bantworks-mcp/state/command-results/*.json` | Unity to MCP | Per-command acknowledgement or failure |
 | `.bantworks-mcp/state/bounds-results/*.json` | Unity to MCP | Per-bounds-query result |
 | `.bantworks-mcp/state/screenshot-results/*.png` | Unity to MCP | Correlated Game or Scene View captures |
+| `.bantworks-mcp/state/screenshot-results/*.json` | Unity to MCP | Capture dimensions, actual camera identity, selection method, and ambiguity metadata |
 | `.bantworks-mcp/state/asset-search-results/*.json` | Unity to MCP | Correlated AssetDatabase query results |
 | `.bantworks-mcp/state/vs-validation-results/*.json` | Unity to MCP | Correlated Visual Scripting import and deserialization results |
 | `.bantworks-mcp/state/banter-validation-results/*.json` | Unity to MCP | Correlated Banter SDK allow-list validation results |
@@ -39,23 +40,34 @@ The bridge directory is project-local and ignored by Git through its own `.gitig
 
 The MCP server and Unity bridge publish JSON by writing a temporary file in the same directory and renaming it into place. Unity therefore sees a complete command, and the MCP server sees complete exported state.
 
-Each mutating command receives a UUID. Unity writes an acknowledgement under that UUID, and bounds queries use the same UUID for their result file. This prevents one request from consuming a concurrent request's result.
+Each mutating command receives a UUID. The command envelope also carries the selected route ID, canonical project path, and current Editor instance ID. Unity validates the expected project path and Editor instance before dispatching the command, then includes its actual project path and Editor instance ID in the acknowledgement. The route ID remains a server-side correlation value because Unity does not derive the server's path hash. The server rejects acknowledgements from another project or Editor process.
+
+Unity writes an acknowledgement under the command UUID, and bounds queries use the same UUID for their result file. A command that was delivered but did not finish within the initial wait is returned as accepted and pending, not successful. Call `get_unity_command_status` with both the UUID and the original `projectId`; the status read fails closed if another project is selected, validates the persisted result against the current project and Editor, and consumes only that correlated result.
 
 State-export requests also receive unique filenames, so simultaneous `query_project_state` calls do not overwrite each other before Unity reads them.
 
-Hierarchy and component queries with a `rootPath`, `componentType`, or exact
-filter use a correlated live query when the selected Editor heartbeat is live.
-Unity traverses only the requested subtree or scans lightweight object/component
-identities before serializing matches. Results are bounded and do not rewrite
-`scene-hierarchy.json`. Broad reads retain the explicit full-snapshot export
-path. The response reports refresh state, snapshot/editor ages, dirty-scene
-state, and bounded query metadata. Unsupported field names fail explicitly;
-world and local transform projections are available. `refresh: false`
-explicitly accepts the latest saved snapshot.
+Hierarchy and component queries with a `rootPath`, `componentType`, requested
+`propertyNames`, or exact filter use a correlated live query when the selected
+Editor heartbeat is live. Unity traverses only the requested subtree or scans
+lightweight object/component identities before serializing matches. Results are
+bounded and do not rewrite `scene-hierarchy.json`. Broad reads retain the
+explicit full-snapshot export path. The response reports refresh state,
+snapshot/editor ages, dirty-scene state, returned byte count, and bounded query
+metadata. `maxResponseBytes` limits the serialized item payload to 16 KiB through
+4 MiB. Exact `propertyNames` reduce component serialization further; requesting
+`materials`, `sharedMaterials`, or `m_Materials` on a Renderer returns a
+JSON-encoded summary of at most 64 shared materials with name, asset path, asset
+GUID, and shader. Unsupported field names fail explicitly; world and local
+transform projections are available. `refresh: false` explicitly accepts the
+latest saved snapshot.
 
 `compilation-status.json` is independent of asset import status. The bridge
 records compilation start/completion plus bounded compiler errors and warnings,
-and preserves late errors even when the warning limit is reached.
+and preserves late errors even when the warning limit is reached. Import checks
+report Editor heartbeat staleness and compiler-status staleness separately; the
+overall status is stale only when both are stale. A C# asset newer than the last
+completed compilation is reported separately as `staleAssembly` and cannot be
+treated as successfully imported until Unity compiles it.
 
 ## Project Routing
 
@@ -154,9 +166,13 @@ finished, including after a Play Mode domain reload.
 
 `capture_unity_screenshot` renders either an active game Camera or the current
 Scene View camera into a bounded RenderTexture. The PNG is published under the
-command UUID and returned to the client as an MCP image block. Callers cannot
-choose an arbitrary filesystem destination. The bridge retains only the 20 most
-recent screenshot files.
+command UUID. Its adjacent JSON result records the actual camera ID, hierarchy
+path and name for Game capture, the camera selection method, candidate count,
+selection ambiguity, and Scene View name where applicable. `includeImage=false`
+returns metadata and the local path without an inline image; `maxImageBytes`
+prevents unexpectedly large PNGs from being embedded while retaining the file
+and metadata. Callers cannot choose an arbitrary filesystem destination. The
+bridge retains only the 20 most recent PNG and JSON results.
 
 `search_unity_assets` uses `AssetDatabase.FindAssets` and publishes a correlated
 JSON result containing GUIDs, paths, names, and main asset types. Searches are

@@ -16,6 +16,10 @@ test("Unity bridge advertises a versioned hybrid command protocol", () => {
   assert.match(source, /BridgeProtocolVersion = 1/);
   assert.match(source, /"named_pipe_commands"/);
   assert.match(source, /"file_commands"/);
+  assert.match(source, /"project_bound_commands"/);
+  assert.match(source, /"command_status_polling"/);
+  assert.match(source, /"selective_component_properties"/);
+  assert.match(source, /"screenshot_metadata"/);
   assert.match(source, /preferredTransport = pipeServerAvailable \? "named_pipe" : "file"/);
 });
 

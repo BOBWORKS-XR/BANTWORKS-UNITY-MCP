@@ -10,19 +10,9 @@ maintainer enough context to classify the evidence and check feasibility.
 When proposing code, open a draft pull request and link its feedback or bug
 issue. Keep it in Draft until focused verification is complete.
 
-## Feedback Before Code
-
-You do not need to write code to contribute. Use the public process in
-[FEEDBACK.md](FEEDBACK.md) to report friction, misleading behavior, missing
-capabilities, and improvement ideas. A structured feedback issue gives the
-maintainer enough context to classify the evidence and check feasibility.
-
-When proposing code, open a draft pull request and link its feedback or bug
-issue. Keep it in Draft until focused verification is complete.
-
 ## Local Checks
 
-Node.js 18 or later is required. Run these checks before opening a pull request:
+Node.js 20 or later is required. Run these checks before opening a pull request:
 
 ```powershell
 npm ci

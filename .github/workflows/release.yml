@@ -41,7 +41,7 @@ jobs:
           releaseName: "Creator Works MCP __VERSION__"
           releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. The standalone ZIP remains available for manual Node.js 20+ deployments."
           releaseDraft: true
-          prerelease: true
+          prerelease: false
           args: "--bundles nsis,msi"
 
       - name: Attach standalone ZIP and checksums

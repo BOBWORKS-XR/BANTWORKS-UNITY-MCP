@@ -19,6 +19,7 @@ const bridgeLogo = path.join(
 test("status window uses the Creator Works launcher lockup", () => {
   assert.ok(fs.existsSync(bridgeLogo));
   assert.match(bridge, /LogoAssetFileName = "CreatorWorksMCPLogo\.png"/);
+  assert.match(bridge, /titleContent = new GUIContent\("Creator Works MCP", logoTexture\)/);
   assert.match(bridge, />CREATOR<\/color>/);
   assert.match(bridge, />WORKS<\/color>/);
   assert.match(bridge, />MCP<\/color>/);

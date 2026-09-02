@@ -90,9 +90,10 @@ try {
     method: "notifications/initialized",
   })}\n`);
   const tools = await request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(tools.result?.tools?.length, 49);
+  assert.equal(tools.result?.tools?.length, 50);
   assert.ok(tools.result.tools.some((tool) => tool.name === "validate_vs_graph_in_unity"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "validate_banter_visual_scripting"));
+  assert.ok(tools.result.tools.some((tool) => tool.name === "get_unity_command_status"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "wait_for_unity_compile"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "execute_editor_menu_item"));
 
