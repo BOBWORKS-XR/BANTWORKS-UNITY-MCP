@@ -37,6 +37,7 @@ import {
   type BridgeCommandResult,
 } from "../lib/unity-bridge-transport.js";
 import type { UnityProjectRouter } from "../lib/project-router.js";
+import { getUnityCommandStatus } from "./get-unity-command-status.js";
 import {
   describeToolGroupSelection,
   isToolEnabled,
@@ -502,6 +503,28 @@ Use this first after configuring a new Unity project or when Unity tools appear 
     },
 
     {
+      name: "get_unity_command_status",
+      description: `Read one pending Unity command result from the currently selected project. The projectId returned with the original pending response is required, preventing a status poll from silently resolving against another Unity project.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          commandId: {
+            type: "string",
+            minLength: 36,
+            maxLength: 36,
+            description: "Command UUID returned by a pending Unity operation",
+          },
+          projectId: {
+            type: "string",
+            pattern: "^unity-[a-f0-9]{20}$",
+            description: "Project ID returned by the pending Unity operation",
+          },
+        },
+        required: ["commandId", "projectId"],
+      },
+    },
+
+    {
       name: "get_unity_packages",
       description: `Read the Unity project's direct and resolved package inventory.
 Returns requested and resolved versions, package source, revision hash, dependency depth, and the project Unity version. This tool is read-only and does not require the Editor to be running.`,
@@ -880,6 +903,19 @@ Requires the BanterMCPBridge Unity extension to be installed and Unity Editor ru
             type: "string",
             description: "Exact short or full component type; hierarchy results retain only matching components",
           },
+          propertyNames: {
+            type: "array",
+            maxItems: 50,
+            items: { type: "string" },
+            description: "Exact serialized property names to return for matching components, such as m_Materials or m_Mass",
+          },
+          maxResponseBytes: {
+            type: "integer",
+            minimum: 16384,
+            maximum: 4194304,
+            default: 524288,
+            description: "Final UTF-8 JSON byte budget for returned hierarchy objects or components",
+          },
           refresh: {
             type: "boolean",
             default: true,
@@ -1060,6 +1096,18 @@ Requires BanterMCPBridge extension to be installed and Unity Editor running.`,
           cameraPath: {
             type: "string",
             description: "Legacy path to a GameObject containing the Camera component",
+          },
+          includeImage: {
+            type: "boolean",
+            default: true,
+            description: "Include the PNG as an MCP image block; false returns metadata and the local image path only",
+          },
+          maxImageBytes: {
+            type: "integer",
+            minimum: 65536,
+            maximum: 16777216,
+            default: 2097152,
+            description: "Maximum PNG bytes allowed in the inline MCP image payload",
           },
         },
       },
@@ -1663,6 +1711,8 @@ export async function handleToolCall(
           maxResults: args.maxResults as number | undefined,
           fields: args.fields as string[] | undefined,
           componentType: args.componentType as string | undefined,
+          propertyNames: args.propertyNames as string[] | undefined,
+          maxResponseBytes: args.maxResponseBytes as number | undefined,
           refresh: args.refresh as boolean | undefined,
           timeoutMs: args.timeoutMs as number | undefined,
         }
@@ -1754,6 +1804,14 @@ export async function handleToolCall(
 
     case "get_bridge_status":
       result = getBridgeStatus(config);
+      break;
+
+    case "get_unity_command_status":
+      result = getUnityCommandStatus(
+        args.commandId as string,
+        args.projectId as string,
+        config
+      );
       break;
 
     case "get_unity_packages":
@@ -1897,6 +1955,8 @@ export async function handleToolCall(
         args.height as number | undefined,
         args.cameraId as string | undefined,
         args.cameraPath as string | undefined,
+        args.includeImage as boolean | undefined,
+        args.maxImageBytes as number | undefined,
         config
       );
       break;
@@ -2316,17 +2376,24 @@ async function captureUnityScreenshot(
   requestedHeight: number | undefined,
   cameraId: string | undefined,
   cameraPath: string | undefined,
+  requestedIncludeImage: boolean | undefined,
+  requestedMaxImageBytes: number | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const source = requestedSource ?? "game";
   const width = requestedWidth ?? 1280;
   const height = requestedHeight ?? 720;
+  const includeImage = requestedIncludeImage !== false;
+  const maxImageBytes = requestedMaxImageBytes ?? 2 * 1024 * 1024;
 
   if (!["game", "scene"].includes(source)) {
     return { success: false, error: `Unknown screenshot source: ${source}` };
   }
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 64 || width > 2048 || height < 64 || height > 2048) {
+  if (!Number.isInteger(maxImageBytes) || maxImageBytes < 64 * 1024 || maxImageBytes > 16 * 1024 * 1024) {
+    return { success: false, error: "maxImageBytes must be a whole number between 65536 and 16777216." };
+  }
     return { success: false, error: "Screenshot width and height must be whole numbers between 64 and 2048." };
   }
 
@@ -2348,22 +2415,50 @@ async function captureUnityScreenshot(
 
   while (Date.now() - startedAt < 15000) {
     if (fs.existsSync(screenshotPath)) {
+      const metadataPath = path.join(config.mcpStatePath, "screenshot-results", `${result.commandId}.json`);
+      let metadata: Record<string, unknown> = {};
+      if (fs.existsSync(metadataPath)) {
+        try {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as Record<string, unknown>;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
+      } else if (Date.now() - startedAt < 500) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        continue;
+      }
+
       const image = fs.readFileSync(screenshotPath);
-      return {
+      const response = {
         success: true,
         commandId: result.commandId,
         source,
         width,
         height,
-        cameraId,
-        cameraPath,
+        requestedCameraId: cameraId,
+        requestedCameraPath: cameraPath,
+        ...metadata,
         imagePath: screenshotPath,
         byteLength: image.length,
         mimeType: "image/png",
+      };
+      if (!includeImage) {
+        return { ...response, imageIncluded: false };
+      }
+      if (image.length > maxImageBytes) {
+        return {
+          ...response,
+          imageIncluded: false,
+          warning: `PNG is ${image.length} bytes, above maxImageBytes=${maxImageBytes}; returning metadata and path only.`,
+        };
+      }
+      return {
+        ...response,
+        imageIncluded: true,
         imageData: image.toString("base64"),
       } satisfies ImageToolResult;
     }
-
     if (!result.completed && fs.existsSync(lateResultPath)) {
       try {
         const lateResult = JSON.parse(fs.readFileSync(lateResultPath, "utf-8")) as BridgeCommandResult;
@@ -3125,11 +3220,16 @@ export function normalizeCustomEditorMenuPath(value: unknown): string | undefine
 
 interface UnityCommandResult {
   success: boolean;
+  accepted?: boolean;
+  pending?: boolean;
   commandId?: string;
   completed?: boolean;
-  status?: "completed" | "queued";
+  status?: "completed" | "pending";
   message?: string;
   error?: string;
+  projectId?: string;
+  projectPath?: string;
+  editorInstanceId?: string;
 }
 
 async function sendUnityCommand(
@@ -3141,11 +3241,15 @@ async function sendUnityCommand(
     if (!dispatch.acknowledgement) {
       return {
         success: true,
+        accepted: true,
+        pending: true,
         commandId: dispatch.commandId,
         completed: false,
-        status: "queued",
+        status: "pending",
         message: dispatch.fallbackReason ||
-          `Command queued over ${dispatch.transport}. Unity did not acknowledge it within 3 seconds.`,
+        projectId: config.projectId,
+        projectPath: config.unityProjectPath,
+          `Command accepted over ${dispatch.transport}, but Unity did not acknowledge completion within 3 seconds.`,
       };
     }
 
@@ -3153,11 +3257,16 @@ async function sendUnityCommand(
       success: dispatch.acknowledgement.success === true,
       commandId: dispatch.commandId,
       completed: true,
+      accepted: true,
+      pending: false,
       status: "completed",
       message: dispatch.acknowledgement.message,
       error: dispatch.acknowledgement.error,
     };
   } catch (error) {
+      projectId: config.projectId,
+      projectPath: dispatch.acknowledgement.projectPath || config.unityProjectPath,
+      editorInstanceId: dispatch.acknowledgement.editorInstanceId,
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
@@ -3167,12 +3276,17 @@ async function sendUnityCommand(
 
 function commandResponse(result: UnityCommandResult, completedMessage: string): Record<string, unknown> {
   return {
-    success: true,
+    success: result.completed === true && result.success,
+    accepted: result.accepted === true,
+    pending: result.pending === true,
     commandId: result.commandId,
     status: result.status,
     message: result.completed
       ? completedMessage
-      : `${completedMessage} It is still queued in Unity.`,
+      : "Unity accepted the command, but completion is still pending. Use get_unity_command_status with this commandId and projectId before treating the operation as successful.",
+    projectId: result.projectId,
+    projectPath: result.projectPath,
+    editorInstanceId: result.editorInstanceId,
     unityMessage: result.message,
   };
 }

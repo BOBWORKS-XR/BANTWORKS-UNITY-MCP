@@ -790,6 +790,7 @@ namespace BantworksMCP
             {
                 CommandResult result = ExecuteCommandJson(pending.requestJson);
                 pending.responseJson = JsonUtility.ToJson(result);
+                WriteCommandResult(result);
                 pending.completed.Set();
             }
         }
@@ -850,6 +851,7 @@ namespace BantworksMCP
                 throw new InvalidOperationException(
                     "Unsupported bridge protocol version " + baseCommand.protocolVersion +
                     "; expected " + BridgeProtocolVersion + ".");
+            ValidateCommandTarget(baseCommand);
 
             switch (baseCommand.type)
             {
@@ -1063,8 +1065,33 @@ namespace BantworksMCP
                 success = success,
                 message = message,
                 error = error,
+                projectPath = ProjectRoot,
+                editorInstanceId = GetEditorInstanceId(),
                 timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
+        }
+
+
+        private static void ValidateCommandTarget(MCPCommand command)
+        {
+            if (!string.IsNullOrWhiteSpace(command.expectedProjectPath))
+            {
+                string expected = Path.GetFullPath(command.expectedProjectPath)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string actual = Path.GetFullPath(ProjectRoot)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"Command target mismatch: expected project '{expected}', bridge project is '{actual}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.expectedEditorInstanceId))
+            {
+                string actualInstanceId = GetEditorInstanceId();
+                if (!string.Equals(command.expectedEditorInstanceId, actualInstanceId, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"Command target mismatch: expected editor instance '{command.expectedEditorInstanceId}', current instance is '{actualInstanceId}'.");
+            }
         }
 
         private static void WriteCommandResult(CommandResult result)
@@ -1077,6 +1104,7 @@ namespace BantworksMCP
                 WriteAtomicText(
                     Path.Combine(CommandResultsFolder, $"{result.commandId}.json"),
                     JsonUtility.ToJson(result, true));
+                DeleteOldFiles(CommandResultsFolder, "*.json", 200);
             }
             catch (Exception e)
             {
@@ -1202,21 +1230,45 @@ namespace BantworksMCP
                 throw new InvalidOperationException("Screenshot width and height must be between 64 and 4096 pixels");
 
             Camera camera;
+            string cameraSelection;
+            int cameraCandidateCount;
+            bool cameraSelectionAmbiguous;
+            string sceneViewName = null;
             switch (source)
             {
                 case "game":
+                {
                     camera = ResolveScreenshotCamera(cmd.cameraId, cmd.cameraPath);
+                    var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                    Camera[] candidates = Resources.FindObjectsOfTypeAll<Camera>()
+                        .Where(candidate => candidate.gameObject.scene == activeScene && candidate.enabled)
+                        .ToArray();
+                    cameraCandidateCount = candidates.Length;
+                    cameraSelection = !string.IsNullOrWhiteSpace(cmd.cameraId)
+                        ? "explicit-id"
+                        : !string.IsNullOrWhiteSpace(cmd.cameraPath)
+                            ? "explicit-path"
+                            : Camera.main == camera ? "main-camera" : "first-enabled-camera";
+                    cameraSelectionAmbiguous = string.IsNullOrWhiteSpace(cmd.cameraId) &&
+                        string.IsNullOrWhiteSpace(cmd.cameraPath) && candidates.Length > 1;
                     break;
+                }
                 case "scene":
-                    var sceneView = SceneView.lastActiveSceneView ?? SceneView.sceneViews.OfType<SceneView>().FirstOrDefault();
+                {
+                    SceneView[] sceneViews = SceneView.sceneViews.OfType<SceneView>().ToArray();
+                    var sceneView = SceneView.lastActiveSceneView ?? sceneViews.FirstOrDefault();
                     camera = sceneView?.camera;
                     if (camera == null)
                         throw new InvalidOperationException("No Scene View camera is available. Open a Scene View and try again.");
+                    cameraCandidateCount = sceneViews.Length;
+                    cameraSelection = SceneView.lastActiveSceneView != null ? "last-active-scene-view" : "first-scene-view";
+                    cameraSelectionAmbiguous = sceneViews.Length > 1 && SceneView.lastActiveSceneView == null;
+                    sceneViewName = sceneView.titleContent != null ? sceneView.titleContent.text : null;
                     break;
+                }
                 default:
                     throw new InvalidOperationException($"Unknown screenshot source: {cmd.source}");
             }
-
             string outputPath = Path.Combine(ScreenshotResultsFolder, cmd.id + ".png");
             RenderTexture renderTexture = null;
             Texture2D texture = null;
@@ -1239,7 +1291,29 @@ namespace BantworksMCP
                     throw new InvalidOperationException("Unity returned an empty screenshot");
 
                 WriteAtomicBytes(outputPath, png);
+                var screenshotResult = new ScreenshotResult
+                {
+                    commandId = cmd.id,
+                    success = true,
+                    source = source,
+                    width = width,
+                    height = height,
+                    byteLength = png.Length,
+                    cameraId = source == "game" ? GetStableObjectId(camera) : null,
+                    cameraPath = source == "game" ? GetGameObjectPath(camera.gameObject) : null,
+                    cameraName = camera.name,
+                    cameraSelection = cameraSelection,
+                    cameraCandidateCount = cameraCandidateCount,
+                    cameraSelectionAmbiguous = cameraSelectionAmbiguous,
+                    sceneViewName = sceneViewName,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                WriteAtomicText(
+                    Path.Combine(ScreenshotResultsFolder, cmd.id + ".json"),
+                    JsonUtility.ToJson(screenshotResult, true));
                 DeleteOldFiles(ScreenshotResultsFolder, "*.png", 20);
+                DeleteOldFiles(ScreenshotResultsFolder, "*.json", 20);
+
                 Debug.Log($"[Creator Works MCP] Captured {source} screenshot {width}x{height} using {camera.name}");
             }
             finally
@@ -1652,7 +1726,8 @@ namespace BantworksMCP
                             info = CreateGameObjectInfo(
                                 candidate.gameObject,
                                 candidate.depth,
-                                string.IsNullOrWhiteSpace(cmd.componentType) ? null : matchingComponents);
+                                string.IsNullOrWhiteSpace(cmd.componentType) ? null : matchingComponents,
+                                cmd.propertyNames);
                         }
                         if (containsFilter && !MatchesHierarchyQueryFilter(info, cmd.filter))
                             continue;
@@ -1684,7 +1759,7 @@ namespace BantworksMCP
                             type = component.GetType().Name,
                             fullType = component.GetType().FullName,
                             globalObjectId = GetStableObjectId(component),
-                            properties = SerializeComponent(component).properties
+                            properties = SerializeComponent(component, cmd.propertyNames).properties
                         };
                         if (containsFilter && !MatchesComponentQueryFilter(info, cmd.filter))
                         {
@@ -5731,7 +5806,7 @@ namespace BantworksMCP
             }
         }
 
-        private static GameObjectInfo CreateGameObjectInfo(GameObject obj, int depth, Component[] includedComponents = null)
+        private static GameObjectInfo CreateGameObjectInfo(GameObject obj, int depth, Component[] includedComponents = null, string[] includedPropertyNames = null)
         {
             var info = new GameObjectInfo
             {
@@ -5782,13 +5857,13 @@ namespace BantworksMCP
             {
                 if (comp != null)
                 {
-                    info.components.Add(SerializeComponent(comp));
+                    info.components.Add(SerializeComponent(comp, includedPropertyNames));
                 }
             }
             return info;
         }
 
-        private static ComponentInfo SerializeComponent(Component comp)
+        private static ComponentInfo SerializeComponent(Component comp, string[] includedPropertyNames = null)
         {
             var info = new ComponentInfo
             {
@@ -5811,6 +5886,10 @@ namespace BantworksMCP
                     // Skip some internal properties
                     if (prop.name == "m_Script" || prop.name == "m_ObjectHideFlags")
                         continue;
+                    if (includedPropertyNames != null && includedPropertyNames.Length > 0 &&
+                        !includedPropertyNames.Any(name => string.Equals(name, prop.name, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, prop.propertyPath, StringComparison.OrdinalIgnoreCase)))
+                        continue;
 
                     info.properties.Add(new PropertyInfo
                     {
@@ -5819,6 +5898,15 @@ namespace BantworksMCP
                         value = GetSerializedPropertyValue(prop)
                     });
                 }
+
+                if (comp is Renderer renderer && includedPropertyNames != null &&
+                    includedPropertyNames.Any(name =>
+                        string.Equals(name, "materials", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "sharedMaterials", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "m_Materials", StringComparison.OrdinalIgnoreCase)))
+                {
+                    info.properties.Add(CreateRendererMaterialProperty(renderer));
+                }
             }
             catch (Exception e)
             {
@@ -5826,6 +5914,36 @@ namespace BantworksMCP
             }
 
             return info;
+        }
+
+        private static PropertyInfo CreateRendererMaterialProperty(Renderer renderer)
+        {
+            Material[] sharedMaterials = renderer.sharedMaterials ?? new Material[0];
+            var summary = new RendererMaterialSummary
+            {
+                totalCount = sharedMaterials.Length,
+                truncated = sharedMaterials.Length > 64,
+                materials = new List<MaterialReferenceInfo>()
+            };
+
+            foreach (Material material in sharedMaterials.Take(64))
+            {
+                string assetPath = material != null ? AssetDatabase.GetAssetPath(material) : null;
+                summary.materials.Add(new MaterialReferenceInfo
+                {
+                    name = material != null ? material.name : null,
+                    assetPath = string.IsNullOrWhiteSpace(assetPath) ? null : assetPath,
+                    assetGuid = string.IsNullOrWhiteSpace(assetPath) ? null : AssetDatabase.AssetPathToGUID(assetPath),
+                    shader = material != null && material.shader != null ? material.shader.name : null
+                });
+            }
+
+            return new PropertyInfo
+            {
+                name = "materials",
+                type = "Material[]",
+                value = JsonUtility.ToJson(summary)
+            };
         }
 
         private static string GetSerializedPropertyValue(SerializedProperty prop)
@@ -5917,7 +6035,7 @@ namespace BantworksMCP
                 DateTime processStart = process.StartTime.ToUniversalTime();
                 var instance = new ProjectInstanceState
                 {
-                    editorInstanceId = process.Id + "-" + processStart.Ticks.ToString("x16", CultureInfo.InvariantCulture),
+                    editorInstanceId = GetEditorInstanceId(),
                     bridgeVersion = BridgeVersion,
                     protocolVersion = BridgeProtocolVersion,
                     minimumProtocolVersion = MinimumBridgeProtocolVersion,
@@ -5932,6 +6050,15 @@ namespace BantworksMCP
                     updatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
                 };
                 WriteAtomicText(Path.Combine(StateFolder, "project-instance.json"), JsonUtility.ToJson(instance, true));
+            }
+        }
+
+        private static string GetEditorInstanceId()
+        {
+            using (var process = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                DateTime processStart = process.StartTime.ToUniversalTime();
+                return process.Id + "-" + processStart.Ticks.ToString("x16", CultureInfo.InvariantCulture);
             }
         }
 
@@ -6348,6 +6475,9 @@ namespace BantworksMCP
             public string path;
             public string stateType;
             public int protocolVersion;
+            public string expectedProjectId;
+            public string expectedProjectPath;
+            public string expectedEditorInstanceId;
             public long timestamp;
         }
 
@@ -6466,6 +6596,24 @@ namespace BantworksMCP
             public string cameraPath;
         }
 
+        [Serializable]
+        private class ScreenshotResult
+        {
+            public string commandId;
+            public bool success;
+            public string source;
+            public int width;
+            public int height;
+            public int byteLength;
+            public string cameraId;
+            public string cameraPath;
+            public string cameraName;
+            public string cameraSelection;
+            public int cameraCandidateCount;
+            public bool cameraSelectionAmbiguous;
+            public string sceneViewName;
+            public long timestamp;
+        }
         [Serializable]
         private class AssetSearchCommand
         {
@@ -6835,6 +6983,7 @@ namespace BantworksMCP
             public int maxDepth;
             public int maxResults;
             public string componentType;
+            public string[] propertyNames;
         }
 
         [Serializable]
@@ -7231,6 +7380,23 @@ namespace BantworksMCP
         }
 
         [Serializable]
+        private class RendererMaterialSummary
+        {
+            public int totalCount;
+            public bool truncated;
+            public List<MaterialReferenceInfo> materials;
+        }
+
+        [Serializable]
+        private class MaterialReferenceInfo
+        {
+            public string name;
+            public string assetPath;
+            public string assetGuid;
+            public string shader;
+        }
+
+        [Serializable]
         private class EditorState
         {
             public bool isPlaying;
@@ -7320,6 +7486,8 @@ namespace BantworksMCP
             public string message;
             public string error;
             public long timestamp;
+            public string projectPath;
+            public string editorInstanceId;
         }
 
         private class PendingPipeCommand

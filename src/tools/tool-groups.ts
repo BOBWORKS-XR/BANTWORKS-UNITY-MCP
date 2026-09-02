@@ -7,6 +7,7 @@ export const ALWAYS_AVAILABLE_TOOLS = new Set([
   "list_unity_projects",
   "select_unity_project",
   "get_bridge_status",
+  "get_unity_command_status",
 ]);
 
 export const TOOL_GROUP_MEMBERSHIP: Readonly<Record<ToolGroupName, ReadonlySet<string>>> = {

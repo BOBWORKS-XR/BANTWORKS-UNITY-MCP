@@ -25,6 +25,10 @@ export interface ImportStatusResult {
   compilerErrors?: BridgeCompilerMessage[];
   compilerWarnings?: BridgeCompilerMessage[];
   stale?: boolean;
+  heartbeatStale?: boolean;
+  compilationStatusAgeMs?: number;
+  compilationStale?: boolean;
+  staleAssembly?: boolean;
 }
 
 interface BridgeAssetStatus {
@@ -84,6 +88,9 @@ export interface UnityCompileStatusResult {
   compilerErrors?: BridgeCompilerMessage[];
   compilerWarnings?: BridgeCompilerMessage[];
   stale?: boolean;
+  heartbeatStale?: boolean;
+  compilationStatusAgeMs?: number;
+  compilationStale?: boolean;
   message: string;
 }
 
@@ -305,6 +312,11 @@ function readCurrentEditorAndCompilationState(config: BanterMCPConfig): Omit<Uni
   const editorStateAgeMs = editorState?.timestamp === undefined
     ? undefined
     : Math.max(0, Date.now() - editorState.timestamp);
+  const compilationStatusAgeMs = compilationStatus?.timestamp === undefined
+    ? undefined
+    : Math.max(0, Date.now() - compilationStatus.timestamp);
+  const heartbeatStale = editorStateAgeMs === undefined || editorStateAgeMs > 5000;
+  const compilationStale = compilationStatusAgeMs === undefined || compilationStatusAgeMs > 5000;
 
   return {
     isCompiling: editorState?.isCompiling,
@@ -316,7 +328,10 @@ function readCurrentEditorAndCompilationState(config: BanterMCPConfig): Omit<Uni
     compilationTimestamp: compilationStatus?.timestamp,
     compilerErrors: compilationStatus?.errors || [],
     compilerWarnings: compilationStatus?.warnings || [],
-    stale: editorStateAgeMs === undefined || editorStateAgeMs > 5000,
+    heartbeatStale,
+    compilationStatusAgeMs,
+    compilationStale,
+    stale: heartbeatStale && compilationStale,
   };
 }
 

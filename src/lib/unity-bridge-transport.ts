@@ -16,6 +16,9 @@ export interface BridgeCommandResult {
   message?: string;
   error?: string;
   timestamp?: number;
+  projectId?: string;
+  projectPath?: string;
+  editorInstanceId?: string;
 }
 
 export interface BridgeTransportDispatch {
@@ -27,6 +30,9 @@ export interface BridgeTransportDispatch {
 }
 
 export interface BridgeInstanceDescriptor {
+  editorInstanceId?: string;
+  projectPath?: string;
+  projectName?: string;
   bridgeVersion?: string;
   protocolVersion?: number;
   minimumProtocolVersion?: number;
@@ -49,14 +55,22 @@ export async function dispatchUnityBridgeCommand(
   timeoutMs = 3000
 ): Promise<BridgeTransportDispatch> {
   const commandId = randomUUID();
+  const descriptor = readBridgeInstanceDescriptor(config);
+  if (descriptor?.projectPath && !pathsReferToSameProject(descriptor.projectPath, config.unityProjectPath)) {
+    throw new Error(
+      `Unity bridge project mismatch: selected '${config.unityProjectPath}', descriptor reports '${descriptor.projectPath}'.`
+    );
+  }
   const payload = {
     ...command,
     id: commandId,
     timestamp: Date.now(),
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    expectedProjectId: config.projectId,
+    expectedProjectPath: config.unityProjectPath,
+    expectedEditorInstanceId: descriptor?.editorInstanceId,
   };
 
-  const descriptor = readBridgeInstanceDescriptor(config);
   const pipeEligibility = namedPipeEligibility(descriptor);
   if (pipeEligibility.eligible && descriptor?.pipeName) {
     const pipeAttempt = await sendOverNamedPipe(payload, descriptor.pipeName, timeoutMs);
@@ -275,3 +289,11 @@ function sendOverNamedPipe(
     });
   });
 }
+
+function pathsReferToSameProject(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const resolved = path.resolve(value.trim()).replace(/[\\/]+$/, "");
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+
+  return Boolean(left?.trim() && right?.trim()) && normalize(left) === normalize(right);
