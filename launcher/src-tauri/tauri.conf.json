@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "BANTWORKS MCP",
-  "version": "2.3.0",
-  "identifier": "com.bobworks.bantworksmcp",
+  "productName": "Creator Works MCP",
+  "version": "2.5.0",
+  "identifier": "com.creatorworks.unitymcp.preview",
   "build": {
     "beforeDevCommand": "",
     "beforeBuildCommand": "npm --prefix .. run release:launcher",
@@ -17,7 +17,7 @@
         "minHeight": 600,
         "minWidth": 560,
         "resizable": true,
-        "title": "BANTWORKS MCP",
+        "title": "Creator Works MCP",
         "width": 900,
         "center": true
       }
@@ -29,8 +29,8 @@
   "bundle": {
     "active": true,
     "category": "DeveloperTool",
-    "copyright": "BOBWORKS",
-    "publisher": "BOBWORKS",
+    "copyright": "Creator Works",
+    "publisher": "Creator Works",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,16 +38,17 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../release/banter-mcp.mjs": "server/banter-mcp.mjs",
+      "../../release/creator-works-mcp.mjs": "server/creator-works-mcp.mjs",
       "../../release/runtime/node.exe": "server/runtime/node.exe",
       "../../release/runtime/LICENSE": "server/runtime/LICENSE",
       "../../release/runtime/VERSION": "server/runtime/VERSION",
       "../../unity-extension/Editor/BanterMCPBridge.cs": "server/unity-extension/Editor/BanterMCPBridge.cs",
+      "../../unity-extension/Editor/CreatorWorksMCPLogo.png": "server/unity-extension/Editor/CreatorWorksMCPLogo.png",
       "../../LICENSE": "server/LICENSE",
       "../../THIRD_PARTY_NOTICES.md": "server/THIRD_PARTY_NOTICES.md"
     },
-    "longDescription": "Configure and manage BANTWORKS MCP for Codex, Claude Code, and Unity integration",
-    "shortDescription": "BANTWORKS MCP Launcher",
+    "longDescription": "Configure and manage Creator Works MCP for Codex, Claude Code, and Unity integration",
+    "shortDescription": "Creator Works MCP Launcher",
     "targets": "all",
     "windows": {
       "certificateThumbprint": null,

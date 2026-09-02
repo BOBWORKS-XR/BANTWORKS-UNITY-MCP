@@ -13,6 +13,7 @@ import {
   layoutDirectedGraph,
 } from "../lib/graph-layout.js";
 import { BANTER_CUSTOM_VS_NODES } from "../resources/banter-custom-vs-nodes.js";
+import type { SidequestSDKProfile } from "./get-banter-sdk-info.js";
 
 export interface NodeSpec {
   type: string;
@@ -44,6 +45,7 @@ export interface GenerateVSGraphParams {
   connections?: Array<unknown>;
   variables?: Array<unknown>;
   layout?: GraphLayoutOptions;
+  sdkProfile?: SidequestSDKProfile;
 }
 
 export interface GenerateVSGraphResult {
@@ -54,6 +56,8 @@ export interface GenerateVSGraphResult {
   nodeCount: number;
   connectionCount: number;
   layout?: Omit<GraphLayoutResult, "positions">;
+  sdkProfile?: SidequestSDKProfile;
+  customNodeNamespace?: "BS.VisualScripting" | "Banter.VisualScripting";
 }
 
 // Type mappings for variables
@@ -73,9 +77,20 @@ const TYPE_HANDLES: Record<string, string> = {
   Color: "UnityEngine.Color, UnityEngine.CoreModule",
   GameObject: "UnityEngine.GameObject, UnityEngine.CoreModule",
   Transform: "UnityEngine.Transform, UnityEngine.CoreModule",
-  BanterSyncedObject: "Banter.SDK.BanterSyncedObject, Banter.SDK",
-  BanterRigidbody: "Banter.SDK.BanterRigidbody, Banter.SDK",
 };
+
+const PROFILE_TYPE_HANDLES = {
+  creator: {
+    BanterSyncedObject: "BS.BSSyncedObject, BS.SDK",
+    BSSyncedObject: "BS.BSSyncedObject, BS.SDK",
+    BanterRigidbody: "BS.BSRigidbody, BS.SDK",
+    BSRigidbody: "BS.BSRigidbody, BS.SDK",
+  },
+  banter: {
+    BanterSyncedObject: "Banter.SDK.BanterSyncedObject, Banter.SDK",
+    BanterRigidbody: "Banter.SDK.BanterRigidbody, Banter.SDK",
+  },
+} as const;
 
 // Shorthand type names to full node types
 const BANTER_CUSTOM_NODE_TYPE_MAP: Record<string, string> = Object.fromEntries(
@@ -201,16 +216,17 @@ const COROUTINE_UNIT_TYPES = new Set([
  * Generate a Visual Scripting graph from specifications
  */
 export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphResult {
+  const sdkProfile = params.sdkProfile ?? "banter";
   try {
     const nodes = (params.nodes || []) as NodeSpec[];
     const connections = (params.connections || []) as ConnectionSpec[];
     const variables = (params.variables || []) as VariableSpec[];
-    const coroutineEventIds = inferCoroutineEventIds(nodes, connections);
+    const coroutineEventIds = inferCoroutineEventIds(nodes, connections, sdkProfile);
     const layout = layoutDirectedGraph(
       nodes.map((node) => ({
         id: node.id,
         position: node.position,
-        size: node.size || estimateVisualScriptingNodeSize(node),
+        size: node.size || estimateVisualScriptingNodeSize(node, sdkProfile),
       })),
       connections.map((connection) => ({ from: connection.from, to: connection.to })),
       params.layout
@@ -225,7 +241,7 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
       const $id = String(nodeIndex++);
       nodeIdMap.set(node.id, $id);
 
-      const fullType = NODE_TYPE_MAP[node.type] || node.type;
+      const fullType = resolveNodeType(node.type, sdkProfile);
       const nodeObj = createNodeObject(
         fullType,
         $id,
@@ -262,7 +278,7 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
     }
 
     // Generate variables
-    const variableObjects = variables.map((v) => createVariableObject(v));
+    const variableObjects = variables.map((v) => createVariableObject(v, sdkProfile));
 
     // Build the graph object
     const graph = {
@@ -295,6 +311,12 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
       assetContent,
       nodeCount: nodes.length,
       connectionCount: connections.length,
+      sdkProfile,
+      ...(sdkProfile === "creator" || sdkProfile === "hybrid"
+        ? { customNodeNamespace: "BS.VisualScripting" as const }
+        : sdkProfile === "banter"
+          ? { customNodeNamespace: "Banter.VisualScripting" as const }
+          : {}),
       layout: {
         bounds: layout.bounds,
         explicitNodeCount: layout.explicitNodeCount,
@@ -308,14 +330,18 @@ export function generateVSGraph(params: GenerateVSGraphParams): GenerateVSGraphR
       error: error instanceof Error ? error.message : "Unknown error",
       nodeCount: 0,
       connectionCount: 0,
+      sdkProfile,
     };
   }
 }
 
-function estimateVisualScriptingNodeSize(node: NodeSpec): GraphSize {
-  const fullType = NODE_TYPE_MAP[node.type] || node.type;
+function estimateVisualScriptingNodeSize(
+  node: NodeSpec,
+  sdkProfile: SidequestSDKProfile
+): GraphSize {
+  const fullType = resolveNodeType(node.type, sdkProfile);
   const displayName = fullType.split(".").pop() || fullType;
-  const customNode = BANTER_CUSTOM_NODES_BY_FULL_TYPE.get(fullType);
+  const customNode = BANTER_CUSTOM_NODES_BY_FULL_TYPE.get(toLegacyCatalogType(fullType));
   const defaults = node.properties?.defaultValues;
   const defaultRows = defaults && typeof defaults === "object" && !Array.isArray(defaults)
     ? Object.keys(defaults).length
@@ -333,7 +359,7 @@ function createNodeObject(
   properties?: Record<string, unknown>,
   inferredCoroutine = false
 ): Record<string, unknown> {
-  const customNode = BANTER_CUSTOM_NODES_BY_FULL_TYPE.get(type);
+  const customNode = BANTER_CUSTOM_NODES_BY_FULL_TYPE.get(toLegacyCatalogType(type));
   const node: Record<string, unknown> = {
     position: position || { x: 0, y: 0 },
     guid: randomUUID(),
@@ -343,7 +369,7 @@ function createNodeObject(
   };
 
   // Coroutine events are required when any reachable control path enters a wait/loader.
-  if (EVENT_NODES.has(type)) {
+  if (isEventNodeType(type)) {
     node.coroutine = typeof properties?.coroutine === "boolean"
       ? properties.coroutine
       : inferredCoroutine;
@@ -394,7 +420,10 @@ function createNodeObject(
     node.defaultValues = {};
   } else if (customNode) {
     node.defaultValues = {
-      ...customDefaultValuesToSerializedDefaults(customNode.defaultValues),
+      ...customDefaultValuesToSerializedDefaults(
+        customNode.defaultValues,
+        type.startsWith("BS.VisualScripting.")
+      ),
       ...(properties?.defaultValues as Record<string, unknown> | undefined),
     };
 
@@ -421,9 +450,13 @@ function createNodeObject(
   return node;
 }
 
-function inferCoroutineEventIds(nodes: NodeSpec[], connections: ConnectionSpec[]): Set<string> {
+function inferCoroutineEventIds(
+  nodes: NodeSpec[],
+  connections: ConnectionSpec[],
+  sdkProfile: SidequestSDKProfile = "banter"
+): Set<string> {
   const typeById = new Map(
-    nodes.map((node) => [node.id, NODE_TYPE_MAP[node.type] || node.type])
+    nodes.map((node) => [node.id, resolveNodeType(node.type, sdkProfile)])
   );
   const outgoing = new Map<string, string[]>();
 
@@ -437,7 +470,7 @@ function inferCoroutineEventIds(nodes: NodeSpec[], connections: ConnectionSpec[]
   const coroutineEvents = new Set<string>();
   for (const node of nodes) {
     const nodeType = typeById.get(node.id);
-    if (!nodeType || !EVENT_NODES.has(nodeType)) continue;
+    if (!nodeType || !isEventNodeType(nodeType)) continue;
 
     const visited = new Set<string>([node.id]);
     const pending = [...(outgoing.get(node.id) || [])];
@@ -447,7 +480,7 @@ function inferCoroutineEventIds(nodes: NodeSpec[], connections: ConnectionSpec[]
       visited.add(nodeId);
 
       const reachableType = typeById.get(nodeId);
-      if (reachableType && COROUTINE_UNIT_TYPES.has(reachableType)) {
+      if (reachableType && isCoroutineUnitType(reachableType)) {
         coroutineEvents.add(node.id);
         break;
       }
@@ -459,12 +492,16 @@ function inferCoroutineEventIds(nodes: NodeSpec[], connections: ConnectionSpec[]
 }
 
 function customDefaultValuesToSerializedDefaults(
-  defaults: Array<{ name: string; type: string | null; defaultValue: unknown }>
+  defaults: Array<{ name: string; type: string | null; defaultValue: unknown }>,
+  useCreatorTypes: boolean
 ): Record<string, unknown> {
   const serialized: Record<string, unknown> = {};
 
   for (const item of defaults) {
-    serialized[item.name] = customDefaultValueToSerializedValue(item.type, item.defaultValue);
+    serialized[item.name] = customDefaultValueToSerializedValue(
+      useCreatorTypes ? toCreatorSerializedType(item.type) : item.type,
+      item.defaultValue
+    );
   }
 
   return serialized;
@@ -488,8 +525,11 @@ function customDefaultValueToSerializedValue(type: string | null, value: unknown
   };
 }
 
-function createVariableObject(v: VariableSpec): Record<string, unknown> {
-  const typeHandle = TYPE_HANDLES[v.type] || v.type;
+function createVariableObject(
+  v: VariableSpec,
+  sdkProfile: SidequestSDKProfile
+): Record<string, unknown> {
+  const typeHandle = resolveVariableTypeHandle(v.type, sdkProfile);
 
   const variable: Record<string, unknown> = {
     name: v.name,
@@ -504,6 +544,99 @@ function createVariableObject(v: VariableSpec): Record<string, unknown> {
   };
 
   return variable;
+}
+
+function resolveVariableTypeHandle(type: string, sdkProfile: SidequestSDKProfile): string {
+  const commonType = TYPE_HANDLES[type];
+  if (commonType) return commonType;
+
+  const knownSidequestAlias = type in PROFILE_TYPE_HANDLES.creator ||
+    type in PROFILE_TYPE_HANDLES.banter;
+  if (knownSidequestAlias && (sdkProfile === "none" || sdkProfile === "unknown")) {
+    throw new Error(
+      `Cannot use SideQuest variable type '${type}' because no supported SDK profile was detected.`
+    );
+  }
+
+  const isCreatorProfile = sdkProfile === "creator" || sdkProfile === "hybrid";
+  const profile = isCreatorProfile ? "creator" : "banter";
+  const profileHandles = PROFILE_TYPE_HANDLES[profile] as Record<string, string>;
+  const mappedType = profileHandles[type];
+  if (mappedType) return mappedType;
+
+  const isSidequestType = /^(?:BS\.|Banter\.)/.test(type) ||
+    /,\s*(?:BS\.SDK|Banter\.SDK)\s*$/.test(type);
+  if (isSidequestType && (sdkProfile === "none" || sdkProfile === "unknown")) {
+    throw new Error(
+      `Cannot use SideQuest variable type '${type}' because no supported SDK profile was detected.`
+    );
+  }
+  if (isCreatorProfile && type.startsWith("Banter.")) {
+    throw new Error(
+      `Legacy variable type '${type}' is not mapped for Creator SDK authoring; use a concrete BS type.`
+    );
+  }
+  if (sdkProfile === "banter" && type.startsWith("BS.")) {
+    throw new Error(
+      `Creator variable type '${type}' cannot be generated for a legacy Banter SDK project.`
+    );
+  }
+
+  return type;
+}
+
+function toCreatorSerializedType(type: string | null): string | null {
+  if (type?.startsWith("Banter.VisualScripting.")) {
+    return `BS.VisualScripting.${type.slice("Banter.VisualScripting.".length)}`;
+  }
+  if (type?.startsWith("Banter.SDK.")) {
+    return `BS.${type.slice("Banter.SDK.".length)}`;
+  }
+  if (type?.startsWith("Banter.UI.")) {
+    return `BS.UI.${type.slice("Banter.UI.".length)}`;
+  }
+  return type;
+}
+
+function resolveNodeType(type: string, sdkProfile: SidequestSDKProfile): string {
+  const mappedType = NODE_TYPE_MAP[type] || type;
+  const isLegacyCustom = mappedType.startsWith("Banter.VisualScripting.");
+  const isCreatorCustom = mappedType.startsWith("BS.VisualScripting.");
+  const isSidequestCustom = isLegacyCustom || isCreatorCustom;
+
+  if (isSidequestCustom && (sdkProfile === "none" || sdkProfile === "unknown")) {
+    throw new Error(
+      `Cannot generate SideQuest custom node '${type}' because no supported SDK profile was detected.`
+    );
+  }
+
+  if (sdkProfile === "creator" || sdkProfile === "hybrid") {
+    return isLegacyCustom
+      ? `BS.VisualScripting.${mappedType.slice("Banter.VisualScripting.".length)}`
+      : mappedType;
+  }
+
+  if (sdkProfile === "banter" && isCreatorCustom) {
+    throw new Error(
+      `Creator SDK node '${mappedType}' cannot be generated for a legacy Banter SDK project.`
+    );
+  }
+
+  return mappedType;
+}
+
+function toLegacyCatalogType(type: string): string {
+  return type.startsWith("BS.VisualScripting.")
+    ? `Banter.VisualScripting.${type.slice("BS.VisualScripting.".length)}`
+    : type;
+}
+
+function isEventNodeType(type: string): boolean {
+  return EVENT_NODES.has(toLegacyCatalogType(type));
+}
+
+function isCoroutineUnitType(type: string): boolean {
+  return COROUTINE_UNIT_TYPES.has(toLegacyCatalogType(type));
 }
 
 function generateAssetFile(graphName: string, graphJson: string): string {

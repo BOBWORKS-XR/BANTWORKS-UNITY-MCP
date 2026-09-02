@@ -4,6 +4,25 @@ import { BANTER_COMPONENT_CATALOG_METADATA } from "./banter-components.js";
 const customNodes = Object.values(BANTER_CUSTOM_VS_NODES);
 
 export const BANTER_SDK_COMPATIBILITY = {
+  packageIds: {
+    creator: "com.sidequest.creator-sdk",
+    banter: "com.sidequest.banter",
+  },
+  sdkProfiles: {
+    creator: {
+      componentNamespace: "BS",
+      visualScriptingNamespace: "BS.VisualScripting",
+      validatorType: "BS.SDKEditor.ValidateVisualScripting",
+      authoringPolicy: "Use concrete BS types for new content.",
+    },
+    banter: {
+      componentNamespace: "Banter.SDK",
+      visualScriptingNamespace: "Banter.VisualScripting",
+      validatorType: "Banter.SDKEditor.ValidateVisualScripting",
+      authoringPolicy: "Use legacy Banter types for this package family.",
+    },
+  },
+  // Retained for clients that consumed the original single-package field.
   packageId: "com.sidequest.banter",
   catalog: {
     sourceAsset: {
@@ -99,7 +118,7 @@ export const BANTER_SDK_COMPATIBILITY = {
       visualScriptingVersion: "1.9.9",
       result: "passed",
       evidence: [
-        "A BANTWORKS-generated Banter.VisualScripting.OnGrab graph imported with no missing elements.",
+        "A Creator Works MCP-generated Banter.VisualScripting.OnGrab graph imported with no missing elements.",
         "Banter.SDKEditor.ValidateVisualScripting.CheckVsNodes returned true.",
         "A disposable custom Unit imported successfully and produced Banter's exact forbidden-element diagnostics.",
       ],
@@ -108,8 +127,9 @@ export const BANTER_SDK_COMPATIBILITY = {
   interpretation: [
     "Counts describe C# class presence in observed package source trees, not proof that every node imports or executes in a specific Unity project.",
     "Semantic version alone is not sufficient: observed git and registry builds with nearby versions contain different node sets.",
-    "Use get_banter_sdk_info for the selected project's requested source, resolved package metadata, revision, and live source coverage.",
+    "Use get_banter_sdk_info for the selected project's SDK profile, namespaces, requested source, resolved package metadata, revision, and live source coverage.",
+    "Legacy Banter aliases in Creator SDK source are migration inputs only. Their presence does not prove acceptance by the hosted target client.",
     "The public release matrix succeeds when every pinned release matches its observed outcome; a known package-compilation incompatibility is not a full integration pass.",
-    "Use validate_vs_graph_in_unity after writing a graph, then validate_banter_visual_scripting for the SDK's project-wide allow-list decision.",
+    "Use validate_vs_graph_in_unity after writing a graph, then validate_banter_visual_scripting for the selected SDK's project-wide allow-list decision.",
   ],
 } as const;

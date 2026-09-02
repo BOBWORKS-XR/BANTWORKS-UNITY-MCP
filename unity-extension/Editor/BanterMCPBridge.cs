@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -17,7 +18,7 @@ using Unity.Profiling;
 namespace BantworksMCP
 {
     /// <summary>
-    /// Unity Editor extension that bridges the BANTWORKS MCP server with Unity.
+    /// Unity Editor extension that bridges the Creator Works MCP server with Unity.
     /// Exports project state and handles MCP commands.
     /// Full Inspector integration - can see and modify all component properties.
     ///
@@ -38,6 +39,7 @@ namespace BantworksMCP
         private static readonly string BoundsResultsFolder = Path.Combine(StateFolder, "bounds-results");
         private static readonly string ScreenshotResultsFolder = Path.Combine(StateFolder, "screenshot-results");
         private static readonly string AssetSearchResultsFolder = Path.Combine(StateFolder, "asset-search-results");
+        private static readonly string ShaderGraphResultsFolder = Path.Combine(StateFolder, "shader-graph-results");
         private static readonly string VisualScriptingValidationResultsFolder = Path.Combine(StateFolder, "vs-validation-results");
         private static readonly string BanterValidationResultsFolder = Path.Combine(StateFolder, "banter-validation-results");
         private static readonly string TestRunResultsFolder = Path.Combine(StateFolder, "test-runs");
@@ -46,7 +48,7 @@ namespace BantworksMCP
         private static readonly string EditorMenuResultsFolder = Path.Combine(StateFolder, "editor-menu-results");
         private static readonly string HierarchyQueryResultsFolder = Path.Combine(StateFolder, "hierarchy-query-results");
         private static readonly Dictionary<string, UnityEngine.Object> ActiveTestDiscoveryApis = new Dictionary<string, UnityEngine.Object>();
-        private const string BridgeVersion = "2.3.0";
+        private const string BridgeVersion = "2.5.0";
         private const int BridgeProtocolVersion = 1;
         private const int MinimumBridgeProtocolVersion = 1;
         private const int MaximumPipeCommandCharacters = 4 * 1024 * 1024;
@@ -74,14 +76,14 @@ namespace BantworksMCP
         private static readonly double AutomaticStateExportDebounce = 0.5; // seconds
         private static readonly double ConsoleExportDebounce = 0.25; // seconds
         private static readonly double LauncherSettingsCheckInterval = 1.0; // seconds
-        private const string BackgroundStateExportMenuItem = "BANTWORKS MCP/Background State Export In Play Mode";
+        private const string BackgroundStateExportMenuItem = "Creator Works MCP/Background State Export In Play Mode";
         private const string BackgroundStateExportKey = "BantworksMCP_BackgroundStateExportInPlayMode";
-        private const string BackgroundEditModeStateExportMenuItem = "BANTWORKS MCP/Background State Export In Edit Mode";
+        private const string BackgroundEditModeStateExportMenuItem = "Creator Works MCP/Background State Export In Edit Mode";
         private const string BackgroundEditModeStateExportKey = "BantworksMCP_BackgroundStateExportInEditMode";
         private static readonly ProfilerMarker AutomaticStateExportProfilerMarker =
-            new ProfilerMarker("BANTWORKS MCP.AutomaticStateExport");
+            new ProfilerMarker("Creator Works MCP.AutomaticStateExport");
         private static readonly ProfilerMarker FullStateExportProfilerMarker =
-            new ProfilerMarker("BANTWORKS MCP.ExportProjectState");
+            new ProfilerMarker("Creator Works MCP.ExportProjectState");
         private static DateTime lastLauncherSettingsWriteTime = DateTime.MinValue;
         private static string activeTestRunId;
         private static object activeTestRunnerApi;
@@ -177,7 +179,7 @@ namespace BantworksMCP
             LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Initialized";
             CommandsProcessed = 0;
 
-            Debug.Log("[BANTWORKS MCP] Bridge initialized. State folder: " + StateFolder);
+            Debug.Log("[Creator Works MCP] Bridge initialized. State folder: " + StateFolder);
         }
 
         private static void EnsureDirectories()
@@ -198,6 +200,8 @@ namespace BantworksMCP
                 Directory.CreateDirectory(ScreenshotResultsFolder);
             if (!Directory.Exists(AssetSearchResultsFolder))
                 Directory.CreateDirectory(AssetSearchResultsFolder);
+            if (!Directory.Exists(ShaderGraphResultsFolder))
+                Directory.CreateDirectory(ShaderGraphResultsFolder);
             if (!Directory.Exists(VisualScriptingValidationResultsFolder))
                 Directory.CreateDirectory(VisualScriptingValidationResultsFolder);
             if (!Directory.Exists(BanterValidationResultsFolder))
@@ -315,14 +319,14 @@ namespace BantworksMCP
                 {
                     EnableCustomScripts = settings.enableCustomScripts;
                     LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Launcher settings applied";
-                    Debug.Log($"[BANTWORKS MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
+                    Debug.Log($"[Creator Works MCP] Custom scripts {(settings.enableCustomScripts ? "enabled" : "disabled")} from launcher settings");
                 }
 
                 lastLauncherSettingsWriteTime = writeTime;
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Could not read launcher settings: {e.Message}");
+                Debug.LogWarning($"[Creator Works MCP] Could not read launcher settings: {e.Message}");
             }
         }
 
@@ -451,18 +455,18 @@ namespace BantworksMCP
 
         #region Menu Items
 
-        [MenuItem("BANTWORKS MCP/Show Status Window")]
+        [MenuItem("Creator Works MCP/Show Status Window")]
         private static void ShowStatusWindow()
         {
             BantworksMCPWindow.ShowWindow();
         }
 
-        [MenuItem("BANTWORKS MCP/Refresh State")]
+        [MenuItem("Creator Works MCP/Refresh State")]
         private static void RefreshState()
         {
             ExportProjectState();
             LastActivity = DateTime.Now.ToString("HH:mm:ss") + " - Manual refresh";
-            Debug.Log("[BANTWORKS MCP] State refreshed manually");
+            Debug.Log("[Creator Works MCP] State refreshed manually");
         }
 
         [MenuItem(BackgroundStateExportMenuItem)]
@@ -485,7 +489,7 @@ namespace BantworksMCP
             }
             LastActivity = DateTime.Now.ToString("HH:mm:ss") +
                 (enabled ? " - Play-mode background export enabled" : " - Play-mode background export disabled");
-            Debug.Log($"[BANTWORKS MCP] Play-mode background state export {(enabled ? "enabled" : "disabled")}");
+            Debug.Log($"[Creator Works MCP] Play-mode background state export {(enabled ? "enabled" : "disabled")}");
         }
 
         [MenuItem(BackgroundStateExportMenuItem, true)]
@@ -511,7 +515,7 @@ namespace BantworksMCP
 
             LastActivity = DateTime.Now.ToString("HH:mm:ss") +
                 (enabled ? " - Edit-mode background export enabled" : " - Edit-mode background export disabled");
-            Debug.Log($"[BANTWORKS MCP] Edit-mode background state export {(enabled ? "enabled" : "disabled")}");
+            Debug.Log($"[Creator Works MCP] Edit-mode background state export {(enabled ? "enabled" : "disabled")}");
         }
 
         [MenuItem(BackgroundEditModeStateExportMenuItem, true)]
@@ -521,13 +525,13 @@ namespace BantworksMCP
             return true;
         }
 
-        [MenuItem("BANTWORKS MCP/Open MCP Folder")]
+        [MenuItem("Creator Works MCP/Open MCP Folder")]
         private static void OpenMCPFolder()
         {
             EditorUtility.RevealInFinder(MCPFolder);
         }
 
-        [MenuItem("BANTWORKS MCP/Clear Commands")]
+        [MenuItem("Creator Works MCP/Clear Commands")]
         private static void ClearCommands()
         {
             if (Directory.Exists(CommandsFolder))
@@ -537,15 +541,15 @@ namespace BantworksMCP
                     File.Delete(file);
                 }
             }
-            Debug.Log("[BANTWORKS MCP] Commands folder cleared");
+            Debug.Log("[Creator Works MCP] Commands folder cleared");
         }
 
-        [MenuItem("BANTWORKS MCP/Scan Prefabs")]
+        [MenuItem("Creator Works MCP/Scan Prefabs")]
         private static void ScanPrefabsMenuItem()
         {
             if (IsScanningPrefabs)
             {
-                Debug.LogWarning("[BANTWORKS MCP] Prefab scan already in progress");
+                Debug.LogWarning("[Creator Works MCP] Prefab scan already in progress");
                 return;
             }
             ScanAndExportPrefabCatalog();
@@ -573,7 +577,7 @@ namespace BantworksMCP
             pipeServerThread = new Thread(PipeServerLoop)
             {
                 IsBackground = true,
-                Name = "BANTWORKS MCP Named Pipe"
+                Name = "Creator Works MCP Named Pipe"
             };
             pipeServerThread.Start();
         }
@@ -701,17 +705,17 @@ namespace BantworksMCP
                 catch (ObjectDisposedException)
                 {
                     if (!pipeServerShutdownRequested)
-                        System.Console.WriteLine("[BANTWORKS MCP] Named pipe was disposed unexpectedly.");
+                        System.Console.WriteLine("[Creator Works MCP] Named pipe was disposed unexpectedly.");
                 }
                 catch (PlatformNotSupportedException e)
                 {
-                    System.Console.WriteLine("[BANTWORKS MCP] Named pipe transport is unavailable: " + e.Message);
+                    System.Console.WriteLine("[Creator Works MCP] Named pipe transport is unavailable: " + e.Message);
                     pipeServerShutdownRequested = true;
                 }
                 catch (Exception e)
                 {
                     if (!pipeServerShutdownRequested)
-                        System.Console.WriteLine("[BANTWORKS MCP] Named pipe error: " + e.Message);
+                        System.Console.WriteLine("[Creator Works MCP] Named pipe error: " + e.Message);
                 }
                 finally
                 {
@@ -786,6 +790,7 @@ namespace BantworksMCP
             {
                 CommandResult result = ExecuteCommandJson(pending.requestJson);
                 pending.responseJson = JsonUtility.ToJson(result);
+                WriteCommandResult(result);
                 pending.completed.Set();
             }
         }
@@ -813,7 +818,7 @@ namespace BantworksMCP
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"[BANTWORKS MCP] Error processing command {file}: {e.Message}");
+                    Debug.LogError($"[Creator Works MCP] Error processing command {file}: {e.Message}");
                     WriteCommandResult(command?.id, false, null, e.Message);
                     ArchiveFailedCommand(file);
                 }
@@ -833,7 +838,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError("[BANTWORKS MCP] Command failed: " + e.Message);
+                Debug.LogError("[Creator Works MCP] Command failed: " + e.Message);
                 return CreateCommandResult(command != null ? command.id : ExtractCommandId(json), false, null, e.Message);
             }
         }
@@ -846,6 +851,7 @@ namespace BantworksMCP
                 throw new InvalidOperationException(
                     "Unsupported bridge protocol version " + baseCommand.protocolVersion +
                     "; expected " + BridgeProtocolVersion + ".");
+            ValidateCommandTarget(baseCommand);
 
             switch (baseCommand.type)
             {
@@ -878,6 +884,41 @@ namespace BantworksMCP
                     SearchAssets(assetSearchCmd);
                     return $"Searched Unity assets: {assetSearchCmd.query}";
 
+                case "shader_graph_capabilities":
+                    var shaderCapabilitiesCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(shaderCapabilitiesCmd, ShaderGraphOperation.Capabilities);
+                    return "Read Shader Graph capabilities";
+
+                case "list_shader_graphs":
+                    var listShaderGraphsCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(listShaderGraphsCmd, ShaderGraphOperation.List);
+                    return "Listed Shader Graph assets";
+
+                case "inspect_shader_graph":
+                    var inspectShaderGraphCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(inspectShaderGraphCmd, ShaderGraphOperation.Inspect);
+                    return $"Inspected Shader Graph: {inspectShaderGraphCmd.assetPath}";
+
+                case "create_shader_graph":
+                    var createShaderGraphCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(createShaderGraphCmd, ShaderGraphOperation.Create);
+                    return $"Created Shader Graph: {createShaderGraphCmd.assetPath}";
+
+                case "add_shader_graph_node":
+                    var addShaderGraphNodeCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(addShaderGraphNodeCmd, ShaderGraphOperation.AddNode);
+                    return $"Added Shader Graph node: {addShaderGraphNodeCmd.nodeType}";
+
+                case "connect_shader_graph_nodes":
+                    var connectShaderGraphNodesCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(connectShaderGraphNodesCmd, ShaderGraphOperation.Connect);
+                    return $"Connected Shader Graph nodes in: {connectShaderGraphNodesCmd.assetPath}";
+
+                case "validate_shader_graph":
+                    var validateShaderGraphCmd = JsonUtility.FromJson<ShaderGraphCommand>(json);
+                    ExecuteShaderGraphCommand(validateShaderGraphCmd, ShaderGraphOperation.Validate);
+                    return $"Validated Shader Graph: {validateShaderGraphCmd.assetPath}";
+
                 case "validate_vs_graph_asset":
                     var validateGraphCmd = JsonUtility.FromJson<ValidateVSGraphAssetCommand>(json);
                     ValidateVisualScriptingGraphAsset(validateGraphCmd);
@@ -886,7 +927,7 @@ namespace BantworksMCP
                 case "validate_banter_visual_scripting":
                     var validateBanterCmd = JsonUtility.FromJson<ValidateBanterVisualScriptingCommand>(json);
                     ValidateBanterVisualScripting(validateBanterCmd);
-                    return "Ran Banter Visual Scripting validation";
+                    return "Ran SideQuest SDK Visual Scripting validation";
 
                 case "run_tests":
                     var runTestsCmd = JsonUtility.FromJson<RunTestsCommand>(json);
@@ -1007,7 +1048,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Could not archive failed command {sourcePath}: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Could not archive failed command {sourcePath}: {e.Message}");
             }
         }
 
@@ -1024,8 +1065,33 @@ namespace BantworksMCP
                 success = success,
                 message = message,
                 error = error,
+                projectPath = ProjectRoot,
+                editorInstanceId = GetEditorInstanceId(),
                 timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
+        }
+
+
+        private static void ValidateCommandTarget(MCPCommand command)
+        {
+            if (!string.IsNullOrWhiteSpace(command.expectedProjectPath))
+            {
+                string expected = Path.GetFullPath(command.expectedProjectPath)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string actual = Path.GetFullPath(ProjectRoot)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"Command target mismatch: expected project '{expected}', bridge project is '{actual}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(command.expectedEditorInstanceId))
+            {
+                string actualInstanceId = GetEditorInstanceId();
+                if (!string.Equals(command.expectedEditorInstanceId, actualInstanceId, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"Command target mismatch: expected editor instance '{command.expectedEditorInstanceId}', current instance is '{actualInstanceId}'.");
+            }
         }
 
         private static void WriteCommandResult(CommandResult result)
@@ -1038,10 +1104,11 @@ namespace BantworksMCP
                 WriteAtomicText(
                     Path.Combine(CommandResultsFolder, $"{result.commandId}.json"),
                     JsonUtility.ToJson(result, true));
+                DeleteOldFiles(CommandResultsFolder, "*.json", 200);
             }
             catch (Exception e)
             {
-                System.Console.WriteLine($"[BANTWORKS MCP] Could not write command result: {e.Message}");
+                System.Console.WriteLine($"[Creator Works MCP] Could not write command result: {e.Message}");
             }
         }
 
@@ -1100,7 +1167,7 @@ namespace BantworksMCP
             // Select the new object
             Selection.activeGameObject = obj;
 
-            Debug.Log($"[BANTWORKS MCP] Created GameObject: {cmd.name}");
+            Debug.Log($"[Creator Works MCP] Created GameObject: {cmd.name}");
             ExportSceneHierarchy();
         }
 
@@ -1109,7 +1176,7 @@ namespace BantworksMCP
             var obj = ResolveGameObject(cmd?.objectId, cmd?.objectPath);
             Undo.DestroyObjectImmediate(obj);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Deleted GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
+            Debug.Log($"[Creator Works MCP] Deleted GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
         }
 
@@ -1159,25 +1226,49 @@ namespace BantworksMCP
                 : cmd.source.Trim().ToLowerInvariant();
             int width = cmd.width == 0 ? 1280 : cmd.width;
             int height = cmd.height == 0 ? 720 : cmd.height;
-            if (width < 64 || width > 4096 || height < 64 || height > 4096)
-                throw new InvalidOperationException("Screenshot width and height must be between 64 and 4096 pixels");
+            if (width < 64 || width > 2048 || height < 64 || height > 2048)
+                throw new InvalidOperationException("Screenshot width and height must be between 64 and 2048 pixels");
 
             Camera camera;
+            string cameraSelection;
+            int cameraCandidateCount;
+            bool cameraSelectionAmbiguous;
+            string sceneViewName = null;
             switch (source)
             {
                 case "game":
+                {
                     camera = ResolveScreenshotCamera(cmd.cameraId, cmd.cameraPath);
+                    var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+                    Camera[] candidates = Resources.FindObjectsOfTypeAll<Camera>()
+                        .Where(candidate => candidate.gameObject.scene == activeScene && candidate.enabled)
+                        .ToArray();
+                    cameraCandidateCount = candidates.Length;
+                    cameraSelection = !string.IsNullOrWhiteSpace(cmd.cameraId)
+                        ? "explicit-id"
+                        : !string.IsNullOrWhiteSpace(cmd.cameraPath)
+                            ? "explicit-path"
+                            : Camera.main == camera ? "main-camera" : "first-enabled-camera";
+                    cameraSelectionAmbiguous = string.IsNullOrWhiteSpace(cmd.cameraId) &&
+                        string.IsNullOrWhiteSpace(cmd.cameraPath) && candidates.Length > 1;
                     break;
+                }
                 case "scene":
-                    var sceneView = SceneView.lastActiveSceneView ?? SceneView.sceneViews.OfType<SceneView>().FirstOrDefault();
+                {
+                    SceneView[] sceneViews = SceneView.sceneViews.OfType<SceneView>().ToArray();
+                    var sceneView = SceneView.lastActiveSceneView ?? sceneViews.FirstOrDefault();
                     camera = sceneView?.camera;
                     if (camera == null)
                         throw new InvalidOperationException("No Scene View camera is available. Open a Scene View and try again.");
+                    cameraCandidateCount = sceneViews.Length;
+                    cameraSelection = SceneView.lastActiveSceneView != null ? "last-active-scene-view" : "first-scene-view";
+                    cameraSelectionAmbiguous = sceneViews.Length > 1 && SceneView.lastActiveSceneView == null;
+                    sceneViewName = sceneView.titleContent != null ? sceneView.titleContent.text : null;
                     break;
+                }
                 default:
                     throw new InvalidOperationException($"Unknown screenshot source: {cmd.source}");
             }
-
             string outputPath = Path.Combine(ScreenshotResultsFolder, cmd.id + ".png");
             RenderTexture renderTexture = null;
             Texture2D texture = null;
@@ -1200,8 +1291,30 @@ namespace BantworksMCP
                     throw new InvalidOperationException("Unity returned an empty screenshot");
 
                 WriteAtomicBytes(outputPath, png);
+                var screenshotResult = new ScreenshotResult
+                {
+                    commandId = cmd.id,
+                    success = true,
+                    source = source,
+                    width = width,
+                    height = height,
+                    byteLength = png.Length,
+                    cameraId = source == "game" ? GetStableObjectId(camera) : null,
+                    cameraPath = source == "game" ? GetGameObjectPath(camera.gameObject) : null,
+                    cameraName = camera.name,
+                    cameraSelection = cameraSelection,
+                    cameraCandidateCount = cameraCandidateCount,
+                    cameraSelectionAmbiguous = cameraSelectionAmbiguous,
+                    sceneViewName = sceneViewName,
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                };
+                WriteAtomicText(
+                    Path.Combine(ScreenshotResultsFolder, cmd.id + ".json"),
+                    JsonUtility.ToJson(screenshotResult, true));
                 DeleteOldFiles(ScreenshotResultsFolder, "*.png", 20);
-                Debug.Log($"[BANTWORKS MCP] Captured {source} screenshot {width}x{height} using {camera.name}");
+                DeleteOldFiles(ScreenshotResultsFolder, "*.json", 20);
+
+                Debug.Log($"[Creator Works MCP] Captured {source} screenshot {width}x{height} using {camera.name}");
             }
             finally
             {
@@ -1613,7 +1726,8 @@ namespace BantworksMCP
                             info = CreateGameObjectInfo(
                                 candidate.gameObject,
                                 candidate.depth,
-                                string.IsNullOrWhiteSpace(cmd.componentType) ? null : matchingComponents);
+                                string.IsNullOrWhiteSpace(cmd.componentType) ? null : matchingComponents,
+                                cmd.propertyNames);
                         }
                         if (containsFilter && !MatchesHierarchyQueryFilter(info, cmd.filter))
                             continue;
@@ -1645,7 +1759,7 @@ namespace BantworksMCP
                             type = component.GetType().Name,
                             fullType = component.GetType().FullName,
                             globalObjectId = GetStableObjectId(component),
-                            properties = SerializeComponent(component).properties
+                            properties = SerializeComponent(component, cmd.propertyNames).properties
                         };
                         if (containsFilter && !MatchesComponentQueryFilter(info, cmd.filter))
                         {
@@ -1924,7 +2038,7 @@ namespace BantworksMCP
         private static void ValidateBanterVisualScripting(ValidateBanterVisualScriptingCommand cmd)
         {
             if (cmd == null || !IsSafeCorrelationId(cmd.id))
-                throw new InvalidOperationException("Banter Visual Scripting validation requires a safe correlation ID");
+                throw new InvalidOperationException("SideQuest SDK Visual Scripting validation requires a safe correlation ID");
 
             const int maxDiagnostics = 200;
             const int maxDiagnosticStackTraceLength = 2048;
@@ -1946,15 +2060,26 @@ namespace BantworksMCP
                 if (EditorApplication.isCompiling || EditorApplication.isUpdating)
                     throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle.");
 
-                const string validatorTypeName = "Banter.SDKEditor.ValidateVisualScripting";
-                Type validatorType = Type.GetType(validatorTypeName + ", Banter.SDKEditor", false) ??
-                    AppDomain.CurrentDomain.GetAssemblies()
-                        .Select(assembly => assembly.GetType(validatorTypeName, false))
-                        .FirstOrDefault(candidate => candidate != null);
+                string[] validatorTypeNames =
+                {
+                    "BS.SDKEditor.ValidateVisualScripting",
+                    "Banter.SDKEditor.ValidateVisualScripting"
+                };
+                string[] validatorAssemblyNames = { "BS.SDKEditor", "Banter.SDKEditor" };
+                Type validatorType = null;
+                for (int index = 0; index < validatorTypeNames.Length && validatorType == null; index++)
+                {
+                    string candidateTypeName = validatorTypeNames[index];
+                    string candidateAssemblyName = validatorAssemblyNames[index];
+                    validatorType = Type.GetType(candidateTypeName + ", " + candidateAssemblyName, false) ??
+                        AppDomain.CurrentDomain.GetAssemblies()
+                            .Select(assembly => assembly.GetType(candidateTypeName, false))
+                            .FirstOrDefault(candidate => candidate != null);
+                }
                 if (validatorType == null)
                 {
                     throw new InvalidOperationException(
-                        "Banter's Visual Scripting validator is unavailable. Install a compatible Banter SDK and Unity Visual Scripting package, then wait for compilation to finish.");
+                        "No supported SideQuest Visual Scripting validator is available. Install either the Creator SDK or Banter SDK with Unity Visual Scripting, then wait for compilation to finish.");
                 }
 
                 MethodInfo validatorMethod = validatorType.GetMethod(
@@ -1970,6 +2095,9 @@ namespace BantworksMCP
                 result.validatorType = validatorType.FullName;
                 result.validatorAssembly = validatorType.Assembly.GetName().Name;
                 result.validatorMethod = validatorMethod.Name;
+                result.sdkProfile = validatorType.FullName.StartsWith("BS.", StringComparison.Ordinal)
+                    ? "creator"
+                    : "banter";
 
                 diagnosticCapture = (condition, stackTrace, logType) =>
                 {
@@ -2000,7 +2128,7 @@ namespace BantworksMCP
                 result.validationCompleted = true;
                 result.success = result.validationPassed;
                 if (!result.validationPassed)
-                    result.error = "Banter's Visual Scripting validator reported one or more errors.";
+                    result.error = "The selected SideQuest SDK Visual Scripting validator reported one or more errors.";
             }
             catch (Exception exception)
             {
@@ -2465,7 +2593,7 @@ namespace BantworksMCP
                 }
                 catch (Exception exception)
                 {
-                    Debug.LogWarning("[BANTWORKS MCP] Could not unregister Test Runner callback: " + exception.Message);
+                    Debug.LogWarning("[Creator Works MCP] Could not unregister Test Runner callback: " + exception.Message);
                 }
 
                 if (activeTestRunnerApi is UnityEngine.Object unityObject)
@@ -2496,7 +2624,7 @@ namespace BantworksMCP
             try
             {
                 RegisterTestRunnerCallback(pending.commandId);
-                Debug.Log("[BANTWORKS MCP] Restored Test Runner callback for " + pending.commandId);
+                Debug.Log("[Creator Works MCP] Restored Test Runner callback for " + pending.commandId);
             }
             catch (Exception exception)
             {
@@ -2661,7 +2789,7 @@ namespace BantworksMCP
             }
             catch (Exception exception)
             {
-                Debug.LogError("[BANTWORKS MCP] Test Runner callback failed: " + exception);
+                Debug.LogError("[Creator Works MCP] Test Runner callback failed: " + exception);
                 FailTestRun(run, "Could not serialize Unity Test Runner result: " + exception.Message);
                 UnregisterActiveTestRunnerCallback();
             }
@@ -3019,7 +3147,7 @@ namespace BantworksMCP
             }
 
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Modified GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
+            Debug.Log($"[Creator Works MCP] Modified GameObject: {DescribeObject(cmd.objectId, cmd.objectPath)}");
             ExportSceneHierarchy();
         }
 
@@ -3036,7 +3164,7 @@ namespace BantworksMCP
 
             Undo.AddComponent(obj, componentType);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Added component {cmd.componentType} to {cmd.objectPath}");
+            Debug.Log($"[Creator Works MCP] Added component {cmd.componentType} to {cmd.objectPath}");
             ExportSceneHierarchy();
         }
 
@@ -3047,7 +3175,7 @@ namespace BantworksMCP
 
             Undo.DestroyObjectImmediate(component);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Removed component {cmd.componentType} from {cmd.objectPath}");
+            Debug.Log($"[Creator Works MCP] Removed component {cmd.componentType} from {cmd.objectPath}");
             ExportSceneHierarchy();
         }
 
@@ -3069,7 +3197,7 @@ namespace BantworksMCP
 
             so.ApplyModifiedProperties();
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Set {cmd.propertyName} on {cmd.componentType}");
+            Debug.Log($"[Creator Works MCP] Set {cmd.propertyName} on {cmd.componentType}");
             ExportSceneHierarchy();
         }
 
@@ -3111,7 +3239,7 @@ namespace BantworksMCP
             so.ApplyModifiedProperties();
 
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Set reference {cmd.propertyName} on {cmd.componentType}");
+            Debug.Log($"[Creator Works MCP] Set reference {cmd.propertyName} on {cmd.componentType}");
             ExportSceneHierarchy();
         }
 
@@ -3185,7 +3313,7 @@ namespace BantworksMCP
 
             EditorUtility.SetDirty(component);
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-            Debug.Log($"[BANTWORKS MCP] Set asset reference {cmd.propertyName} on {cmd.componentType} -> {(cmd.clear ? "null" : resolvedPath)}");
+            Debug.Log($"[Creator Works MCP] Set asset reference {cmd.propertyName} on {cmd.componentType} -> {(cmd.clear ? "null" : resolvedPath)}");
             ExportSceneHierarchy();
             return cmd.clear ? "null" : resolvedPath;
         }
@@ -3463,6 +3591,7 @@ namespace BantworksMCP
                 "UnityEngine.",
                 "UnityEngine.UI.",
                 "",
+                "BS.",
                 "Banter.",
                 "Banter.SDK."
             };
@@ -3489,21 +3618,18 @@ namespace BantworksMCP
                 {
                     // First try exact match by full name (namespace.classname)
                     var type = assembly.GetType(typeName);
-                    if (type != null && typeof(Component).IsAssignableFrom(type))
+                    if (type != null &&
+                        typeof(Component).IsAssignableFrom(type) &&
+                        (IsAllowedSDKComponentType(type) || EnableCustomScripts))
                         return type;
 
-                    // Then try by simple name only (for Banter SDK types)
-                    type = assembly.GetTypes().FirstOrDefault(t => t.Name == typeName);
-                    if (type != null && typeof(Component).IsAssignableFrom(type))
-                    {
-                        // Check if it's a Banter type or if custom scripts are enabled
-                        string typeNamespace = type.Namespace ?? "";
-                        bool isBanterType = typeNamespace.StartsWith("Banter") ||
-                                           typeNamespace.StartsWith("UnityEngine");
-
-                        if (isBanterType || EnableCustomScripts)
-                            return type;
-                    }
+                    // Then try by simple name, preserving the SDK-only component boundary.
+                    type = assembly.GetTypes().FirstOrDefault(t =>
+                        t.Name == typeName &&
+                        typeof(Component).IsAssignableFrom(t) &&
+                        (IsAllowedSDKComponentType(t) || EnableCustomScripts));
+                    if (type != null)
+                        return type;
 
                     // Only search user namespaces if custom scripts toggle is ON
                     if (EnableCustomScripts)
@@ -3534,6 +3660,17 @@ namespace BantworksMCP
             }
 
             return null;
+        }
+
+        private static bool IsAllowedSDKComponentType(Type type)
+        {
+            string typeNamespace = type.Namespace ?? "";
+            return typeNamespace == "BS" ||
+                   typeNamespace.StartsWith("BS.", StringComparison.Ordinal) ||
+                   typeNamespace == "Banter" ||
+                   typeNamespace.StartsWith("Banter.", StringComparison.Ordinal) ||
+                   typeNamespace == "UnityEngine" ||
+                   typeNamespace.StartsWith("UnityEngine.", StringComparison.Ordinal);
         }
 
         private static GameObject ResolveGameObject(string objectId, string objectPath)
@@ -3689,7 +3826,7 @@ namespace BantworksMCP
             // Mark scene dirty
             EditorSceneManager.MarkSceneDirty(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
 
-            Debug.Log($"[BANTWORKS MCP] Instantiated prefab: {cmd.prefabPath}");
+            Debug.Log($"[Creator Works MCP] Instantiated prefab: {cmd.prefabPath}");
             ExportSceneHierarchy();
         }
 
@@ -3727,7 +3864,7 @@ namespace BantworksMCP
 
             Bounds bounds = CalculateGameObjectBounds(obj);
             ExportBoundsResult(cmd.id, GetStableObjectId(obj), GetGameObjectPath(obj), true, bounds);
-            Debug.Log($"[BANTWORKS MCP] Got bounds for {GetGameObjectPath(obj)}: size={bounds.size}, center={bounds.center}");
+            Debug.Log($"[Creator Works MCP] Got bounds for {GetGameObjectPath(obj)}: size={bounds.size}, center={bounds.center}");
         }
 
         private static void ExportBoundsResult(string commandId, string objectId, string objectPath, bool success, Bounds? bounds)
@@ -3766,7 +3903,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting bounds result: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting bounds result: {e.Message}");
             }
         }
 
@@ -3783,7 +3920,7 @@ namespace BantworksMCP
 
             Undo.IncrementCurrentGroup();
             int undoGroup = Undo.GetCurrentGroup();
-            Undo.SetCurrentGroupName("BANTWORKS MCP Batch");
+            Undo.SetCurrentGroupName("Creator Works MCP Batch");
 
             int appliedCount = 0;
             var errors = new List<string>();
@@ -3799,7 +3936,7 @@ namespace BantworksMCP
                 {
                     string error = $"Operation {index + 1} failed: {e.Message}";
                     errors.Add(error);
-                    Debug.LogError($"[BANTWORKS MCP] Batch {error}");
+                    Debug.LogError($"[Creator Works MCP] Batch {error}");
 
                     if (!batchCmd.continueOnError)
                     {
@@ -3820,7 +3957,7 @@ namespace BantworksMCP
                     $"Batch completed with {errors.Count} failed operation(s) and {appliedCount} applied operation(s): {string.Join("; ", errors)}");
             }
 
-            Debug.Log($"[BANTWORKS MCP] Batch completed: {appliedCount} operations");
+            Debug.Log($"[Creator Works MCP] Batch completed: {appliedCount} operations");
         }
 
         private static void ExecuteBatchCommand(string commandJson)
@@ -4283,6 +4420,1252 @@ namespace BantworksMCP
             }
         }
 
+        private static void ExecuteShaderGraphCommand(ShaderGraphCommand cmd, ShaderGraphOperation operation)
+        {
+            if (cmd == null || !IsSafeCorrelationId(cmd.id))
+                throw new InvalidOperationException("Shader Graph commands require a safe correlation ID");
+
+            var result = new ShaderGraphCommandResult
+            {
+                commandId = cmd.id,
+                success = false,
+                operation = operation.ToString(),
+                assetPath = cmd.assetPath,
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                warnings = new List<string>()
+            };
+
+            try
+            {
+                if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+                    throw new InvalidOperationException("Unity is compiling or importing assets. Wait for the Editor to settle.");
+
+                switch (operation)
+                {
+                    case ShaderGraphOperation.Capabilities:
+                        result.capabilities = ProbeShaderGraphCapabilities();
+                        result.success = true;
+                        break;
+                    case ShaderGraphOperation.List:
+                        result.capabilities = ProbeShaderGraphCapabilities();
+                        result.assets = ListShaderGraphAssets(cmd.limit <= 0 ? 200 : Mathf.Clamp(cmd.limit, 1, 1000));
+                        result.success = true;
+                        break;
+                    case ShaderGraphOperation.Inspect:
+                        result.assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+                        result.graph = InspectShaderGraph(result.assetPath, cmd.openInEditor);
+                        result.success = result.graph.graphDeserialized;
+                        if (!result.success)
+                            result.error = "Unity could not deserialize the Shader Graph with the installed package API.";
+                        break;
+                    case ShaderGraphOperation.Validate:
+                        result.assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+                        result.graph = InspectShaderGraph(result.assetPath, false);
+                        result.success = result.graph.validationPassed;
+                        if (!result.success)
+                            result.error = BuildShaderGraphValidationError(result.graph);
+                        break;
+                    case ShaderGraphOperation.Create:
+                        CreateShaderGraphTransactional(cmd, result);
+                        break;
+                    case ShaderGraphOperation.AddNode:
+                        MutateShaderGraphTransactional(cmd, result, ShaderGraphOperation.AddNode);
+                        break;
+                    case ShaderGraphOperation.Connect:
+                        MutateShaderGraphTransactional(cmd, result, ShaderGraphOperation.Connect);
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                Exception actual = exception;
+                while (actual is TargetInvocationException && actual.InnerException != null)
+                    actual = actual.InnerException;
+                result.error = actual.Message;
+                result.errorType = actual.GetType().FullName;
+            }
+
+            WriteAtomicText(
+                Path.Combine(ShaderGraphResultsFolder, cmd.id + ".json"),
+                JsonUtility.ToJson(result, true));
+            DeleteOldFiles(ShaderGraphResultsFolder, "*.json", 50);
+        }
+
+        private static ShaderGraphCapabilities ProbeShaderGraphCapabilities()
+        {
+            var missing = new List<string>();
+            var package = UnityEditor.PackageManager.PackageInfo.GetAllRegisteredPackages()
+                .FirstOrDefault(item => string.Equals(item.name, "com.unity.shadergraph", StringComparison.Ordinal));
+            System.Reflection.Assembly assembly = GetShaderGraphAssembly();
+            Type graphData = FindLoadedType("UnityEditor.ShaderGraph.GraphData");
+            Type fileUtilities = FindLoadedType("UnityEditor.ShaderGraph.FileUtilities");
+            Type multiJson = FindLoadedType("UnityEditor.ShaderGraph.Serialization.MultiJson");
+            Type abstractNode = FindLoadedType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            Type materialSlot = FindLoadedType("UnityEditor.ShaderGraph.MaterialSlot");
+            Type target = FindLoadedType("UnityEditor.ShaderGraph.Target");
+            Type block = FindLoadedType("UnityEditor.ShaderGraph.BlockFieldDescriptor");
+            Type category = FindLoadedType("UnityEditor.ShaderGraph.CategoryData");
+
+            if (graphData == null) missing.Add("UnityEditor.ShaderGraph.GraphData");
+            if ((fileUtilities == null || FindTryReadGraphMethod(fileUtilities) == null) &&
+                (multiJson == null || FindMultiJsonDeserializeMethod(multiJson, graphData) == null))
+                missing.Add("FileUtilities.TryReadGraphDataFromDisk or MultiJson.Deserialize<GraphData>");
+            if (multiJson == null || FindMultiJsonSerializeMethod(multiJson, graphData) == null)
+                missing.Add("MultiJson.Serialize");
+            if (abstractNode == null) missing.Add("AbstractMaterialNode");
+            if (materialSlot == null) missing.Add("MaterialSlot");
+            if (target == null) missing.Add("Target");
+            if (block == null) missing.Add("BlockFieldDescriptor");
+            if (category == null || !category.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .Any(method => method.Name == "DefaultCategory" &&
+                    method.GetParameters().All(parameter => parameter.IsOptional)))
+                missing.Add("CategoryData.DefaultCategory(optional arguments)");
+
+            bool canRead = graphData != null &&
+                ((fileUtilities != null && FindTryReadGraphMethod(fileUtilities) != null) ||
+                    (multiJson != null && FindMultiJsonDeserializeMethod(multiJson, graphData) != null));
+            bool canWrite = canRead && multiJson != null &&
+                FindMultiJsonSerializeMethod(multiJson, graphData) != null;
+            bool canCreate = canWrite && target != null && block != null && category != null &&
+                graphData.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "InitializeOutputs" && method.GetParameters().Length == 2) &&
+                graphData.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "AddCategory" && method.GetParameters().Length == 1);
+            bool canMutateNodes = canWrite && abstractNode != null &&
+                graphData.GetMethod("AddNode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null;
+            bool canConnect = canMutateNodes && materialSlot != null &&
+                graphData.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "Connect" && method.GetParameters().Length == 2) &&
+                materialSlot.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    .Any(method => method.Name == "IsCompatibleWith" && method.GetParameters().Length == 1);
+
+            return new ShaderGraphCapabilities
+            {
+                packageInstalled = package != null,
+                assemblyLoaded = assembly != null,
+                readSupported = canRead,
+                writeSupported = canWrite,
+                createSupported = canCreate,
+                nodeMutationSupported = canMutateNodes,
+                connectionSupported = canConnect,
+                packageVersion = package?.version,
+                assemblyVersion = assembly?.GetName().Version?.ToString(),
+                activeRenderPipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline == null
+                    ? "BuiltIn"
+                    : UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline.GetType().FullName,
+                supportedTemplates = DiscoverShaderGraphTemplates(),
+                missingMembers = missing
+            };
+        }
+
+        private static List<string> DiscoverShaderGraphTemplates()
+        {
+            var templates = new List<string>();
+            if (FindLoadedType("UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInTarget") != null)
+            {
+                templates.Add("built_in/unlit");
+                templates.Add("built_in/lit");
+            }
+            if (FindLoadedType("UnityEditor.Rendering.Universal.ShaderGraph.UniversalTarget") != null)
+            {
+                templates.Add("urp/unlit");
+                templates.Add("urp/lit");
+            }
+            return templates;
+        }
+
+        private static List<ShaderGraphAssetEntry> ListShaderGraphAssets(int limit)
+        {
+            var results = new List<ShaderGraphAssetEntry>();
+            foreach (string assetPath in AssetDatabase.GetAllAssetPaths()
+                .Where(path => path.StartsWith("Assets/", StringComparison.Ordinal) &&
+                    path.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => path, StringComparer.Ordinal)
+                .Take(limit))
+            {
+                Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(assetPath);
+                results.Add(new ShaderGraphAssetEntry
+                {
+                    assetPath = assetPath,
+                    guid = AssetDatabase.AssetPathToGUID(assetPath),
+                    name = Path.GetFileNameWithoutExtension(assetPath),
+                    dependencyHash = AssetDatabase.GetAssetDependencyHash(assetPath).ToString(),
+                    hasCompileErrors = shader != null && ShaderUtil.ShaderHasError(shader)
+                });
+            }
+            return results;
+        }
+
+        private static ShaderGraphSummary InspectShaderGraph(string assetPath, bool openInEditor)
+        {
+            string normalized = NormalizeShaderGraphAssetPath(assetPath);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException("Shader Graph asset does not exist", normalized);
+
+            ShaderGraphCapabilities capabilities = ProbeShaderGraphCapabilities();
+            if (!capabilities.readSupported)
+                throw new InvalidOperationException(
+                    "The installed Shader Graph package does not expose the required GraphData reader: " +
+                    string.Join(", ", capabilities.missingMembers));
+
+            AssetDatabase.ImportAsset(
+                normalized,
+                ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+            Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(normalized);
+            object graph = ReadShaderGraphData(normalized);
+            var summary = BuildShaderGraphSummary(normalized, graph, shader);
+            if (openInEditor && shader != null)
+                AssetDatabase.OpenAsset(shader);
+            return summary;
+        }
+
+        private static ShaderGraphSummary BuildShaderGraphSummary(string assetPath, object graph, Shader shader)
+        {
+            var summary = new ShaderGraphSummary
+            {
+                assetPath = assetPath,
+                assetGuid = AssetDatabase.AssetPathToGUID(assetPath),
+                dependencyHash = AssetDatabase.GetAssetDependencyHash(assetPath).ToString(),
+                contentHash = ComputeSha256(File.ReadAllBytes(Path.GetFullPath(Path.Combine(ProjectRoot, assetPath)))),
+                shaderLoaded = shader != null,
+                shaderName = shader?.name,
+                graphDeserialized = graph != null,
+                nodes = new List<ShaderGraphNodeInfo>(),
+                edges = new List<ShaderGraphEdgeInfo>(),
+                targets = new List<ShaderGraphTargetInfo>(),
+                properties = new List<ShaderGraphPropertyInfo>(),
+                diagnostics = ReadShaderDiagnostics(shader),
+                warnings = new List<string>()
+            };
+            if (graph == null)
+                return summary;
+
+            var unknownObjects = new HashSet<object>();
+
+            Type abstractNodeType = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            IEnumerable nodes = InvokeGenericEnumerable(graph, "GetNodes", abstractNodeType);
+            if (nodes == null)
+                throw new InvalidOperationException("GraphData.GetNodes<AbstractMaterialNode>() was unavailable.");
+
+            foreach (object node in nodes)
+            {
+                if (node == null)
+                {
+                    unknownObjects.Add("null-node:" + summary.nodes.Count);
+                    continue;
+                }
+                ShaderGraphNodeInfo info = BuildShaderGraphNodeInfo(node);
+                summary.nodes.Add(info);
+                TrackUnknownShaderGraphObject(node, unknownObjects);
+                foreach (ShaderGraphSlotInfo slot in info.slots)
+                {
+                    if (slot.type.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                        unknownObjects.Add(slot.type + ":" + info.id + ":" + slot.id);
+                }
+                object descriptor = ReadMember(node, "descriptor");
+                if (descriptor != null && ReadBoolMember(descriptor, "isUnknown"))
+                    unknownObjects.Add(descriptor);
+            }
+
+            foreach (object edge in ReadEnumerableMember(graph, "edges"))
+            {
+                object output = ReadMember(edge, "outputSlot");
+                object input = ReadMember(edge, "inputSlot");
+                summary.edges.Add(new ShaderGraphEdgeInfo
+                {
+                    outputNodeId = ReadStringMember(ReadMember(output, "node"), "objectId"),
+                    outputSlotId = ReadIntMember(output, "slotId"),
+                    inputNodeId = ReadStringMember(ReadMember(input, "node"), "objectId"),
+                    inputSlotId = ReadIntMember(input, "slotId")
+                });
+            }
+
+            foreach (object target in ReadEnumerableMember(graph, "activeTargets"))
+            {
+                if (target == null)
+                {
+                    unknownObjects.Add("null-target:" + summary.targets.Count);
+                    continue;
+                }
+                string type = target.GetType().FullName ?? target.GetType().Name;
+                summary.targets.Add(new ShaderGraphTargetInfo
+                {
+                    type = type,
+                    displayName = ReadStringMember(target, "displayName") ?? target.GetType().Name
+                });
+                TrackUnknownShaderGraphObject(target, unknownObjects);
+                TrackUnknownShaderGraphObject(ReadMember(target, "activeSubTarget"), unknownObjects);
+            }
+
+            foreach (object property in ReadEnumerableMember(graph, "properties"))
+            {
+                if (property == null)
+                {
+                    unknownObjects.Add("null-property:" + summary.properties.Count);
+                    continue;
+                }
+                string type = property.GetType().FullName ?? property.GetType().Name;
+                summary.properties.Add(new ShaderGraphPropertyInfo
+                {
+                    id = ReadStringMember(property, "objectId"),
+                    type = type,
+                    displayName = ReadStringMember(property, "displayName"),
+                    referenceName = ReadStringMember(property, "referenceName"),
+                    exposed = ReadBoolMember(property, "isExposed") || ReadBoolMember(property, "generatePropertyBlock")
+                });
+                TrackUnknownShaderGraphObject(property, unknownObjects);
+            }
+
+            foreach (object target in ReadEnumerableMember(graph, "allPotentialTargets"))
+            {
+                TrackUnknownShaderGraphObject(target, unknownObjects);
+                TrackUnknownShaderGraphObject(ReadMember(target, "activeSubTarget"), unknownObjects);
+            }
+            foreach (object extension in ReadEnumerableMember(graph, "SubDatas"))
+                TrackUnknownShaderGraphObject(extension, unknownObjects);
+
+            summary.nodeCount = summary.nodes.Count;
+            summary.edgeCount = summary.edges.Count;
+            summary.targetCount = summary.targets.Count;
+            summary.propertyCount = summary.properties.Count;
+            summary.unknownObjectCount = unknownObjects.Count;
+            summary.hasCompileErrors = summary.diagnostics.Any(item =>
+                item.severity.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0) ||
+                (shader != null && ShaderUtil.ShaderHasError(shader));
+            if (summary.targetCount == 0)
+                summary.warnings.Add("The graph has no active target and cannot generate a functional shader.");
+            if (summary.unknownObjectCount > 0)
+                summary.warnings.Add($"The graph contains {summary.unknownObjectCount} unresolved serialized objects.");
+            if (summary.hasCompileErrors)
+                summary.warnings.Add("Unity reports Shader Graph compiler errors.");
+            summary.validationPassed = summary.graphDeserialized && shader != null &&
+                summary.targetCount > 0 && summary.unknownObjectCount == 0 && !summary.hasCompileErrors;
+            return summary;
+        }
+
+        private static void TrackUnknownShaderGraphObject(object value, HashSet<object> unknownObjects)
+        {
+            if (value == null)
+                return;
+            string type = value.GetType().FullName ?? value.GetType().Name;
+            if (type.IndexOf("Unknown", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                type.IndexOf("LegacyUnknown", StringComparison.OrdinalIgnoreCase) >= 0)
+                unknownObjects.Add(value);
+        }
+
+        private static ShaderGraphNodeInfo BuildShaderGraphNodeInfo(object node)
+        {
+            Rect rect = ReadShaderGraphNodeRect(node);
+            string type = node.GetType().FullName ?? node.GetType().Name;
+            object descriptor = ReadMember(node, "descriptor");
+            return new ShaderGraphNodeInfo
+            {
+                id = ReadStringMember(node, "objectId"),
+                name = ReadStringMember(node, "name") ?? node.GetType().Name,
+                type = type,
+                isBlock = type.EndsWith(".BlockNode", StringComparison.Ordinal) || node.GetType().Name == "BlockNode",
+                blockDescriptor = descriptor == null
+                    ? null
+                    : ReadStringMember(descriptor, "name") ?? ReadStringMember(descriptor, "displayName"),
+                position = new[] { rect.x, rect.y, rect.width, rect.height },
+                slots = ReadShaderGraphSlots(node)
+            };
+        }
+
+        private static List<ShaderGraphSlotInfo> ReadShaderGraphSlots(object node)
+        {
+            Type slotType = RequireShaderGraphType("UnityEditor.ShaderGraph.MaterialSlot");
+            Type listType = typeof(List<>).MakeGenericType(slotType);
+            object list = Activator.CreateInstance(listType);
+            MethodInfo method = node.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(item => item.Name == "GetSlots" && item.IsGenericMethodDefinition &&
+                    item.GetParameters().Length == 1);
+            if (method == null)
+                throw new InvalidOperationException($"{node.GetType().FullName} does not expose GetSlots<T>.");
+            method.MakeGenericMethod(slotType).Invoke(node, new[] { list });
+
+            var slots = new List<ShaderGraphSlotInfo>();
+            foreach (object slot in (IEnumerable)list)
+            {
+                slots.Add(new ShaderGraphSlotInfo
+                {
+                    id = ReadIntMember(slot, "id"),
+                    name = ReadStringMember(slot, "displayName"),
+                    type = slot.GetType().FullName ?? slot.GetType().Name,
+                    direction = ReadBoolMember(slot, "isInputSlot") ? "input" : "output",
+                    valueType = ReadMember(slot, "concreteValueType")?.ToString() ??
+                        ReadMember(slot, "valueType")?.ToString()
+                });
+            }
+            return slots;
+        }
+
+        private static List<ShaderGraphCompilerDiagnostic> ReadShaderDiagnostics(Shader shader)
+        {
+            var diagnostics = new List<ShaderGraphCompilerDiagnostic>();
+            if (shader == null)
+                return diagnostics;
+
+            MethodInfo getMessages = typeof(ShaderUtil).GetMethod(
+                "GetShaderMessages",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(Shader) },
+                null);
+            var messages = getMessages?.Invoke(null, new object[] { shader }) as IEnumerable;
+            if (messages == null)
+                return diagnostics;
+
+            foreach (object message in messages)
+            {
+                diagnostics.Add(new ShaderGraphCompilerDiagnostic
+                {
+                    severity = ReadMember(message, "severity")?.ToString() ?? "Unknown",
+                    message = ReadStringMember(message, "message"),
+                    file = ReadStringMember(message, "file"),
+                    line = ReadIntMember(message, "line")
+                });
+                if (diagnostics.Count >= 200)
+                    break;
+            }
+            return diagnostics;
+        }
+
+        private static void CreateShaderGraphTransactional(ShaderGraphCommand cmd, ShaderGraphCommandResult result)
+        {
+            string assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            bool existed = File.Exists(fullPath);
+            if (existed && !cmd.overwrite)
+                throw new InvalidOperationException("Shader Graph already exists. Set overwrite=true to replace it.");
+
+            byte[] original = existed ? File.ReadAllBytes(fullPath) : null;
+            result.assetPath = assetPath;
+            result.originalHash = ComputeSha256(original);
+            if (existed)
+            {
+                EnsureShaderGraphAssetIsNotOpen(assetPath);
+                EnsureExpectedShaderGraphHash(cmd.expectedContentHash, result.originalHash);
+            }
+            try
+            {
+                EnsureUnityAssetFolder(Path.GetDirectoryName(assetPath).Replace('\\', '/'));
+                object graph = CreateTargetedShaderGraphData(cmd.pipeline, cmd.shaderType);
+                var requestedNodes = new Dictionary<string, object>(StringComparer.Ordinal);
+                foreach (ShaderGraphNodeRequest request in cmd.nodes ?? Array.Empty<ShaderGraphNodeRequest>())
+                {
+                    if (request == null || string.IsNullOrWhiteSpace(request.id))
+                        throw new InvalidOperationException("Every Shader Graph node requires a non-empty request id.");
+                    if (requestedNodes.ContainsKey(request.id))
+                        throw new InvalidOperationException("Duplicate Shader Graph node request id: " + request.id);
+                    object node = AddShaderGraphNodeToData(graph, request.nodeType, request.position, true);
+                    requestedNodes.Add(request.id, node);
+                }
+                foreach (ShaderGraphConnectionRequest connection in cmd.connections ?? Array.Empty<ShaderGraphConnectionRequest>())
+                {
+                    object source = ResolveShaderGraphNode(graph, requestedNodes, connection.from);
+                    object destination = ResolveShaderGraphNode(graph, requestedNodes, connection.to);
+                    ConnectShaderGraphNodeData(
+                        graph,
+                        source,
+                        connection.fromSlot,
+                        destination,
+                        connection.toSlot,
+                        false);
+                }
+
+                result.writeAttempted = true;
+                WriteShaderGraphData(assetPath, graph);
+                result.writeCompleted = true;
+                result.writtenHash = ComputeSha256(File.ReadAllBytes(fullPath));
+                result.graph = InspectShaderGraph(assetPath, cmd.openInEditor);
+                if (!result.graph.validationPassed)
+                    throw new InvalidOperationException(BuildShaderGraphValidationError(result.graph));
+                result.success = true;
+            }
+            catch (Exception mutationException)
+            {
+                TryRollBackShaderGraphAsset(assetPath, original, existed, mutationException, result);
+                throw;
+            }
+        }
+
+        private static void MutateShaderGraphTransactional(
+            ShaderGraphCommand cmd,
+            ShaderGraphCommandResult result,
+            ShaderGraphOperation operation)
+        {
+            string assetPath = NormalizeShaderGraphAssetPath(cmd.assetPath);
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            if (!File.Exists(fullPath))
+                throw new FileNotFoundException("Shader Graph asset does not exist", assetPath);
+
+            byte[] original = File.ReadAllBytes(fullPath);
+            result.assetPath = assetPath;
+            result.originalHash = ComputeSha256(original);
+            EnsureShaderGraphAssetIsNotOpen(assetPath);
+            EnsureExpectedShaderGraphHash(cmd.expectedContentHash, result.originalHash);
+            try
+            {
+                object graph = ReadShaderGraphData(assetPath);
+                if (operation == ShaderGraphOperation.AddNode)
+                {
+                    ShaderGraphPoint position = cmd.hasPosition ? cmd.position : FindOpenShaderGraphPosition(graph);
+                    object node = AddShaderGraphNodeToData(graph, cmd.nodeType, position, true);
+                    result.mutation = new ShaderGraphMutationResult
+                    {
+                        nodeId = ReadStringMember(node, "objectId"),
+                        nodeType = node.GetType().FullName,
+                        slots = ReadShaderGraphSlots(node)
+                    };
+                }
+                else
+                {
+                    object source = ResolveShaderGraphNode(graph, null, cmd.sourceNodeId);
+                    object destination = ResolveShaderGraphNode(graph, null, cmd.destinationNodeId);
+                    ConnectShaderGraphNodeData(
+                        graph,
+                        source,
+                        cmd.sourceSlotId,
+                        destination,
+                        cmd.destinationSlotId,
+                        cmd.replaceExistingInput);
+                    result.mutation = new ShaderGraphMutationResult { connectionCreated = true };
+                }
+
+                result.writeAttempted = true;
+                WriteShaderGraphData(assetPath, graph);
+                result.writeCompleted = true;
+                result.writtenHash = ComputeSha256(File.ReadAllBytes(fullPath));
+                result.graph = InspectShaderGraph(assetPath, false);
+                if (!result.graph.validationPassed)
+                    throw new InvalidOperationException(BuildShaderGraphValidationError(result.graph));
+                result.success = true;
+            }
+            catch (Exception mutationException)
+            {
+                TryRollBackShaderGraphAsset(assetPath, original, true, mutationException, result);
+                throw;
+            }
+        }
+
+        private static void EnsureExpectedShaderGraphHash(string expectedHash, string actualHash)
+        {
+            if (string.IsNullOrWhiteSpace(expectedHash) ||
+                !System.Text.RegularExpressions.Regex.IsMatch(expectedHash, "^[a-fA-F0-9]{64}$"))
+                throw new InvalidOperationException(
+                    "Shader Graph mutation requires expectedContentHash from inspect_shader_graph.");
+            if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Shader Graph changed since inspection. Expected {expectedHash.ToLowerInvariant()}, " +
+                    $"but current content hash is {actualHash}. Inspect the graph again before mutating it.");
+        }
+
+        private static void EnsureShaderGraphAssetIsNotOpen(string assetPath)
+        {
+            string guid = AssetDatabase.AssetPathToGUID(assetPath);
+            if (string.IsNullOrEmpty(guid))
+                return;
+            foreach (EditorWindow window in UnityEngine.Resources.FindObjectsOfTypeAll<EditorWindow>())
+            {
+                if (window == null || window.GetType().FullName !=
+                    "UnityEditor.ShaderGraph.Drawing.MaterialGraphEditWindow")
+                    continue;
+                if (string.Equals(ReadStringMember(window, "selectedGuid"), guid, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        "Close this asset's Shader Graph window before mutating it. " +
+                        "This prevents overwriting unsaved or stale in-memory graph state.");
+                }
+            }
+        }
+
+        private static object CreateTargetedShaderGraphData(string requestedPipeline, string requestedShaderType)
+        {
+            ShaderGraphCapabilities capabilities = ProbeShaderGraphCapabilities();
+            if (!capabilities.createSupported)
+                throw new InvalidOperationException(
+                    "Shader Graph creation is unavailable: " + string.Join(", ", capabilities.missingMembers));
+
+            string pipeline = string.IsNullOrWhiteSpace(requestedPipeline)
+                ? "auto"
+                : requestedPipeline.Trim().ToLowerInvariant();
+            string shaderType = string.IsNullOrWhiteSpace(requestedShaderType)
+                ? "unlit"
+                : requestedShaderType.Trim().ToLowerInvariant();
+            if (shaderType != "lit" && shaderType != "unlit")
+                throw new InvalidOperationException("shaderType must be 'lit' or 'unlit'.");
+            if (pipeline == "auto")
+            {
+                string current = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline?.GetType().FullName ?? "";
+                if (string.IsNullOrEmpty(current))
+                    pipeline = "built_in";
+                else if (current.IndexOf("Universal", StringComparison.OrdinalIgnoreCase) >= 0)
+                    pipeline = "urp";
+                else
+                    throw new InvalidOperationException(
+                        "pipeline=auto does not support the active render pipeline: " + current +
+                        ". Select a supported pipeline explicitly or use inspection-only tools.");
+            }
+            if (pipeline != "built_in" && pipeline != "urp")
+                throw new InvalidOperationException("pipeline must be 'auto', 'built_in', or 'urp'.");
+
+            string targetName = pipeline == "urp"
+                ? "UnityEditor.Rendering.Universal.ShaderGraph.UniversalTarget"
+                : "UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInTarget";
+            string subTargetName = pipeline == "urp"
+                ? (shaderType == "lit"
+                    ? "UnityEditor.Rendering.Universal.ShaderGraph.UniversalLitSubTarget"
+                    : "UnityEditor.Rendering.Universal.ShaderGraph.UniversalUnlitSubTarget")
+                : (shaderType == "lit"
+                    ? "UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInLitSubTarget"
+                    : "UnityEditor.Rendering.BuiltIn.ShaderGraph.BuiltInUnlitSubTarget");
+            Type targetType = FindLoadedType(targetName);
+            Type subTargetType = FindLoadedType(subTargetName);
+            if (targetType == null || subTargetType == null)
+                throw new InvalidOperationException(
+                    $"The installed packages do not provide the requested {pipeline}/{shaderType} Shader Graph target.");
+
+            object target = Activator.CreateInstance(targetType, true);
+            MethodInfo setSubTarget = targetType.GetMethod(
+                "TrySetActiveSubTarget",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(Type) },
+                null);
+            if (setSubTarget == null || !(bool)setSubTarget.Invoke(target, new object[] { subTargetType }))
+                throw new InvalidOperationException("Shader Graph rejected the requested active sub-target.");
+
+            Type targetBase = RequireShaderGraphType("UnityEditor.ShaderGraph.Target");
+            Array targets = Array.CreateInstance(targetBase, 1);
+            targets.SetValue(target, 0);
+            Array blocks = BuildShaderGraphBlockDescriptors(shaderType);
+
+            Type graphType = RequireShaderGraphType("UnityEditor.ShaderGraph.GraphData");
+            object graph = Activator.CreateInstance(graphType, true);
+            InvokeRequired(graph, "AddContexts");
+            InvokeRequired(graph, "InitializeOutputs", targets, blocks);
+            TryAddDefaultShaderGraphCategory(graph);
+            SetMember(graph, "path", "Shader Graphs");
+            return graph;
+        }
+
+        private static Array BuildShaderGraphBlockDescriptors(string shaderType)
+        {
+            Type blockType = RequireShaderGraphType("UnityEditor.ShaderGraph.BlockFieldDescriptor");
+            Type blockFields = RequireShaderGraphType("UnityEditor.ShaderGraph.BlockFields");
+            var names = new List<string>
+            {
+                "VertexDescription.Position",
+                "VertexDescription.Normal",
+                "VertexDescription.Tangent",
+                "SurfaceDescription.BaseColor"
+            };
+            if (shaderType == "lit")
+            {
+                names.AddRange(new[]
+                {
+                    "SurfaceDescription.NormalTS",
+                    "SurfaceDescription.Metallic",
+                    "SurfaceDescription.Smoothness",
+                    "SurfaceDescription.Emission",
+                    "SurfaceDescription.Occlusion"
+                });
+            }
+
+            Array blocks = Array.CreateInstance(blockType, names.Count);
+            for (int index = 0; index < names.Count; index++)
+            {
+                string[] parts = names[index].Split('.');
+                Type nested = blockFields.GetNestedType(parts[0], BindingFlags.Public | BindingFlags.NonPublic);
+                FieldInfo field = nested?.GetField(parts[1], BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+                object descriptor = field?.GetValue(null);
+                if (descriptor == null)
+                    throw new InvalidOperationException("Shader Graph block descriptor is unavailable: " + names[index]);
+                blocks.SetValue(descriptor, index);
+            }
+            return blocks;
+        }
+
+        private static void TryAddDefaultShaderGraphCategory(object graph)
+        {
+            Type categoryType = FindLoadedType("UnityEditor.ShaderGraph.CategoryData");
+            const BindingFlags staticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            const BindingFlags instanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            MethodInfo defaultCategory = categoryType?.GetMethods(staticFlags)
+                .Where(method => method.Name == "DefaultCategory")
+                .OrderBy(method => method.GetParameters().Length)
+                .FirstOrDefault(method => method.GetParameters().All(parameter => parameter.IsOptional));
+            if (defaultCategory == null)
+                throw new InvalidOperationException("Shader Graph CategoryData.DefaultCategory is unavailable.");
+
+            object category = defaultCategory.Invoke(
+                null,
+                defaultCategory.GetParameters()
+                    .Select(parameter => parameter.DefaultValue == DBNull.Value ? Type.Missing : parameter.DefaultValue)
+                    .ToArray());
+            MethodInfo addCategory = graph.GetType().GetMethods(instanceFlags)
+                .FirstOrDefault(method =>
+                    method.Name == "AddCategory" &&
+                    method.GetParameters().Length == 1 &&
+                    method.GetParameters()[0].ParameterType.IsInstanceOfType(category));
+            if (addCategory == null)
+                throw new InvalidOperationException("Shader Graph GraphData.AddCategory is unavailable.");
+            addCategory.Invoke(graph, new[] { category });
+        }
+
+        private static object AddShaderGraphNodeToData(
+            object graph,
+            string nodeTypeName,
+            ShaderGraphPoint position,
+            bool positionRequired)
+        {
+            Type nodeType = ResolveShaderGraphNodeType(nodeTypeName);
+            if (nodeType == null)
+                throw new InvalidOperationException("Unknown or unsupported Shader Graph node type: " + nodeTypeName);
+            object node = Activator.CreateInstance(nodeType, true);
+            InvokeOptional(node, "UpdateNodeAfterDeserialization");
+            SetShaderGraphNodePosition(node, positionRequired ? position : null);
+            InvokeRequired(graph, "AddNode", node);
+            InvokeOptional(node, "UpdateNodeAfterDeserialization");
+            string objectId = ReadStringMember(node, "objectId");
+            if (string.IsNullOrEmpty(objectId))
+                throw new InvalidOperationException("Shader Graph did not assign an object ID to the new node.");
+            return node;
+        }
+
+        private static Type ResolveShaderGraphNodeType(string requested)
+        {
+            if (string.IsNullOrWhiteSpace(requested))
+                return null;
+            Type baseType = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            Type exact = FindLoadedType(requested.Trim());
+            if (exact != null && !exact.IsAbstract && baseType.IsAssignableFrom(exact))
+                return exact;
+
+            string normalized = new string(requested.Where(char.IsLetterOrDigit).ToArray());
+            if (!normalized.EndsWith("Node", StringComparison.OrdinalIgnoreCase))
+                normalized += "Node";
+            var matches = new List<Type>();
+            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                foreach (Type candidate in GetLoadableTypes(assembly))
+                {
+                    if (candidate == null || candidate.IsAbstract || !baseType.IsAssignableFrom(candidate))
+                        continue;
+                    if (string.Equals(candidate.Name, normalized, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matches.Add(candidate);
+                        continue;
+                    }
+                    string candidateLabel = new string(candidate.Name.Where(char.IsLetterOrDigit).ToArray());
+                    if (string.Equals(candidateLabel, normalized, StringComparison.OrdinalIgnoreCase))
+                        matches.Add(candidate);
+                }
+            }
+            matches = matches.Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal).ToList();
+            if (matches.Count > 1)
+            {
+                throw new InvalidOperationException(
+                    "Shader Graph node name is ambiguous. Use one of these fully-qualified types: " +
+                    string.Join(", ", matches.Select(type => type.FullName)));
+            }
+            return matches.SingleOrDefault();
+        }
+
+        private static object ResolveShaderGraphNode(
+            object graph,
+            Dictionary<string, object> requestedNodes,
+            string selector)
+        {
+            if (string.IsNullOrWhiteSpace(selector))
+                throw new InvalidOperationException("Shader Graph connections require node selectors.");
+            if (requestedNodes != null && requestedNodes.TryGetValue(selector, out object requested))
+                return requested;
+
+            Type abstractNode = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            IEnumerable nodes = InvokeGenericEnumerable(graph, "GetNodes", abstractNode);
+            string blockName = selector.StartsWith("block:", StringComparison.OrdinalIgnoreCase)
+                ? selector.Substring("block:".Length)
+                : null;
+            foreach (object node in nodes)
+            {
+                if (string.Equals(ReadStringMember(node, "objectId"), selector, StringComparison.Ordinal))
+                    return node;
+                if (blockName != null)
+                {
+                    object descriptor = ReadMember(node, "descriptor");
+                    string name = ReadStringMember(descriptor, "name") ?? ReadStringMember(descriptor, "displayName");
+                    if (string.Equals(name, blockName, StringComparison.OrdinalIgnoreCase))
+                        return node;
+                }
+            }
+            throw new InvalidOperationException("Shader Graph node was not found: " + selector);
+        }
+
+        private static void ConnectShaderGraphNodeData(
+            object graph,
+            object sourceNode,
+            int sourceSlotId,
+            object destinationNode,
+            int destinationSlotId,
+            bool replaceExistingInput)
+        {
+            object sourceSlot = FindShaderGraphSlot(sourceNode, sourceSlotId);
+            object destinationSlot = FindShaderGraphSlot(destinationNode, destinationSlotId);
+            if (!ReadBoolMember(sourceSlot, "isOutputSlot"))
+                throw new InvalidOperationException($"Source slot {sourceSlotId} is not an output slot.");
+            if (!ReadBoolMember(destinationSlot, "isInputSlot"))
+                throw new InvalidOperationException($"Destination slot {destinationSlotId} is not an input slot.");
+
+            MethodInfo compatible = sourceSlot.GetType()
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method =>
+                    method.Name == "IsCompatibleWith" &&
+                    method.GetParameters().Length == 1 &&
+                    method.GetParameters()[0].ParameterType.IsInstanceOfType(destinationSlot));
+            if (compatible != null && !(bool)compatible.Invoke(sourceSlot, new[] { destinationSlot }))
+                throw new InvalidOperationException("Shader Graph rejected the connection because the slots are incompatible.");
+
+            object sourceReference = ReadMember(sourceSlot, "slotReference");
+            object destinationReference = ReadMember(destinationSlot, "slotReference");
+            bool destinationOccupied = ReadEnumerableMember(graph, "edges").Cast<object>().Any(edge =>
+            {
+                object input = ReadMember(edge, "inputSlot");
+                return ReferenceEquals(ReadMember(input, "node"), destinationNode) &&
+                    ReadIntMember(input, "slotId") == destinationSlotId;
+            });
+            if (destinationOccupied && !replaceExistingInput)
+            {
+                throw new InvalidOperationException(
+                    $"Destination input slot {destinationSlotId} already has a connection. " +
+                    "Set replaceExistingInput=true only if replacing that edge is intentional.");
+            }
+            MethodInfo connect = graph.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "Connect" && method.GetParameters().Length == 2 &&
+                    method.GetParameters()[0].ParameterType.IsInstanceOfType(sourceReference) &&
+                    method.GetParameters()[1].ParameterType.IsInstanceOfType(destinationReference));
+            if (connect == null)
+                throw new InvalidOperationException("GraphData.Connect(SlotReference, SlotReference) is unavailable.");
+            object edge = connect.Invoke(graph, new[] { sourceReference, destinationReference });
+            if (edge == null)
+                throw new InvalidOperationException("Shader Graph did not create the requested connection.");
+            InvokeOptional(graph, "ValidateGraph");
+        }
+
+        private static object FindShaderGraphSlot(object node, int slotId)
+        {
+            Type slotType = RequireShaderGraphType("UnityEditor.ShaderGraph.MaterialSlot");
+            Type listType = typeof(List<>).MakeGenericType(slotType);
+            object list = Activator.CreateInstance(listType);
+            MethodInfo method = node.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(item => item.Name == "GetSlots" && item.IsGenericMethodDefinition &&
+                    item.GetParameters().Length == 1);
+            method?.MakeGenericMethod(slotType).Invoke(node, new[] { list });
+            foreach (object slot in (IEnumerable)list)
+            {
+                if (ReadIntMember(slot, "id") == slotId)
+                    return slot;
+            }
+            throw new InvalidOperationException($"Slot {slotId} was not found on node {ReadStringMember(node, "objectId")}.");
+        }
+
+        private static ShaderGraphPoint FindOpenShaderGraphPosition(object graph)
+        {
+            Type abstractNode = RequireShaderGraphType("UnityEditor.ShaderGraph.AbstractMaterialNode");
+            var occupied = new List<Rect>();
+            foreach (object node in InvokeGenericEnumerable(graph, "GetNodes", abstractNode))
+                occupied.Add(ReadShaderGraphNodeRect(node));
+
+            float x = occupied.Count == 0 ? 0 : Mathf.Ceil(occupied.Max(rect => rect.xMax) / 24f) * 24f + 96f;
+            float y = 0;
+            var candidate = new Rect(x, y, 240, 144);
+            while (occupied.Any(rect => RectsOverlapWithPadding(candidate, rect, 24f)))
+            {
+                y += 192f;
+                candidate.y = y;
+            }
+            return new ShaderGraphPoint { x = x, y = y };
+        }
+
+        private static bool RectsOverlapWithPadding(Rect left, Rect right, float padding)
+        {
+            return left.xMin < right.xMax + padding && left.xMax + padding > right.xMin &&
+                left.yMin < right.yMax + padding && left.yMax + padding > right.yMin;
+        }
+
+        private static Rect ReadShaderGraphNodeRect(object node)
+        {
+            object drawState = ReadMember(node, "drawState");
+            object position = ReadMember(drawState, "position");
+            return position is Rect ? (Rect)position : new Rect(0, 0, 240, 144);
+        }
+
+        private static void SetShaderGraphNodePosition(object node, ShaderGraphPoint position)
+        {
+            if (position == null || float.IsNaN(position.x) || float.IsInfinity(position.x) ||
+                float.IsNaN(position.y) || float.IsInfinity(position.y))
+            {
+                throw new InvalidOperationException("Shader Graph node positions must contain finite x and y values.");
+            }
+
+            System.Reflection.PropertyInfo drawStateProperty = node.GetType().GetProperty(
+                "drawState",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (drawStateProperty == null || !drawStateProperty.CanWrite)
+                throw new InvalidOperationException("Shader Graph node drawState is unavailable.");
+            object drawState = drawStateProperty.GetValue(node);
+            Rect current = ReadMember(drawState, "position") is Rect
+                ? (Rect)ReadMember(drawState, "position")
+                : new Rect(0, 0, 240, 144);
+            SetMember(drawState, "position", new Rect(position.x, position.y, current.width, current.height));
+            drawStateProperty.SetValue(node, drawState);
+        }
+
+        private static object ReadShaderGraphData(string assetPath)
+        {
+            Type fileUtilities = FindLoadedType("UnityEditor.ShaderGraph.FileUtilities");
+            MethodInfo reader = FindTryReadGraphMethod(fileUtilities);
+            if (reader != null)
+            {
+                object[] args = { assetPath, null };
+                bool read = (bool)reader.Invoke(null, args);
+                if (!read || args[1] == null)
+                    throw new InvalidOperationException("Shader Graph MultiJson deserialization failed.");
+                return args[1];
+            }
+
+            Type graphType = RequireShaderGraphType("UnityEditor.ShaderGraph.GraphData");
+            Type multiJson = RequireShaderGraphType("UnityEditor.ShaderGraph.Serialization.MultiJson");
+            MethodInfo deserialize = FindMultiJsonDeserializeMethod(multiJson, graphType);
+            if (deserialize == null)
+                throw new InvalidOperationException(
+                    "Neither FileUtilities.TryReadGraphDataFromDisk nor MultiJson.Deserialize<GraphData> is available.");
+
+            object graph = Activator.CreateInstance(graphType, true);
+            SetMember(graph, "assetGuid", AssetDatabase.AssetPathToGUID(assetPath));
+            Type messageManager = FindLoadedType("UnityEditor.ShaderGraph.MessageManager");
+            if (messageManager != null)
+                SetMember(graph, "messageManager", Activator.CreateInstance(messageManager, true));
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            string contents = File.ReadAllText(fullPath, Encoding.UTF8);
+            MethodInfo closedDeserialize = deserialize.MakeGenericMethod(graphType);
+            object[] deserializeArgs = closedDeserialize.GetParameters()
+                .Select((parameter, index) => index == 0
+                    ? graph
+                    : index == 1
+                        ? contents
+                        : parameter.DefaultValue == DBNull.Value ? Type.Missing : parameter.DefaultValue)
+                .ToArray();
+            closedDeserialize.Invoke(null, deserializeArgs);
+            InvokeOptional(graph, "OnEnable");
+            InvokeOptional(graph, "ValidateGraph");
+            return graph;
+        }
+
+        private static void WriteShaderGraphData(string assetPath, object graph)
+        {
+            Type multiJson = RequireShaderGraphType("UnityEditor.ShaderGraph.Serialization.MultiJson");
+            MethodInfo serialize = FindMultiJsonSerializeMethod(multiJson, graph.GetType());
+            if (serialize == null)
+                throw new InvalidOperationException("MultiJson.Serialize(GraphData) is unavailable.");
+            string contents = serialize.Invoke(null, new[] { graph }) as string;
+            if (string.IsNullOrWhiteSpace(contents))
+                throw new InvalidOperationException("Shader Graph serialization produced no content.");
+
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            WriteAtomicText(fullPath, contents);
+            AssetDatabase.ImportAsset(
+                assetPath,
+                ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+        }
+
+        private static void TryRollBackShaderGraphAsset(
+            string assetPath,
+            byte[] original,
+            bool existed,
+            Exception mutationException,
+            ShaderGraphCommandResult result)
+        {
+            try
+            {
+                RollBackShaderGraphAsset(assetPath, original, existed);
+                result.rolledBack = true;
+            }
+            catch (Exception rollbackException)
+            {
+                result.rollbackError = rollbackException.Message;
+                throw new InvalidOperationException(
+                    $"Shader Graph mutation failed: {mutationException.Message} " +
+                    $"Rollback also failed: {rollbackException.Message}",
+                    new AggregateException(mutationException, rollbackException));
+            }
+        }
+
+        private static void RollBackShaderGraphAsset(string assetPath, byte[] original, bool existed)
+        {
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, assetPath));
+            if (existed && original != null)
+            {
+                WriteAtomicBytes(fullPath, original);
+                string restoredHash = ComputeSha256(File.ReadAllBytes(fullPath));
+                string expectedHash = ComputeSha256(original);
+                if (!string.Equals(restoredHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Restored Shader Graph bytes did not match the original SHA-256 hash.");
+                AssetDatabase.ImportAsset(
+                    assetPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+            }
+            else
+            {
+                string metaPath = fullPath + ".meta";
+                bool deletedByAssetDatabase = AssetDatabase.DeleteAsset(assetPath);
+                if (!deletedByAssetDatabase && File.Exists(fullPath))
+                    File.Delete(fullPath);
+                if (!deletedByAssetDatabase && File.Exists(metaPath))
+                    File.Delete(metaPath);
+                if (File.Exists(fullPath) || File.Exists(metaPath))
+                    throw new IOException("New Shader Graph asset or metadata remained after rollback.");
+            }
+        }
+
+        private static string BuildShaderGraphValidationError(ShaderGraphSummary graph)
+        {
+            if (graph == null || !graph.graphDeserialized)
+                return "Unity could not deserialize the Shader Graph.";
+            if (graph.targetCount == 0)
+                return "Shader Graph has no active target.";
+            if (!graph.shaderLoaded)
+                return "Shader Graph import did not produce a loadable Shader asset.";
+            if (graph.unknownObjectCount > 0)
+                return $"Shader Graph contains {graph.unknownObjectCount} unresolved serialized objects.";
+            ShaderGraphCompilerDiagnostic firstError = graph.diagnostics?.FirstOrDefault(item =>
+                item.severity.IndexOf("Error", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (firstError != null)
+                return "Shader Graph compilation failed: " + firstError.message;
+            if (graph.hasCompileErrors)
+                return "Unity reports Shader Graph compiler errors.";
+            return "Shader Graph validation did not pass.";
+        }
+
+        private static string NormalizeShaderGraphAssetPath(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length > 1024)
+                throw new InvalidOperationException("assetPath is required and must be at most 1024 characters.");
+            string normalized = value.Trim().Replace('\\', '/');
+            if (!normalized.StartsWith("Assets/", StringComparison.Ordinal) ||
+                !normalized.EndsWith(".shadergraph", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Split('/').Any(part => part == ".." || part.Length == 0))
+            {
+                throw new InvalidOperationException("assetPath must be a normalized Assets/... path ending in .shadergraph.");
+            }
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectRoot, normalized));
+            string assetsRoot = Path.GetFullPath(Application.dataPath).TrimEnd(Path.DirectorySeparatorChar) +
+                Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(assetsRoot, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Shader Graph assetPath escaped the project's Assets folder.");
+            return normalized;
+        }
+
+        private static void EnsureUnityAssetFolder(string assetFolder)
+        {
+            if (string.IsNullOrEmpty(assetFolder) || assetFolder == "Assets")
+                return;
+            string[] parts = assetFolder.Split('/');
+            string current = parts[0];
+            for (int index = 1; index < parts.Length; index++)
+            {
+                string next = current + "/" + parts[index];
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    string guid = AssetDatabase.CreateFolder(current, parts[index]);
+                    if (string.IsNullOrEmpty(guid))
+                        throw new InvalidOperationException("Could not create Shader Graph folder: " + next);
+                }
+                current = next;
+            }
+        }
+
+        private static System.Reflection.Assembly GetShaderGraphAssembly()
+        {
+            System.Reflection.Assembly assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(item =>
+                string.Equals(item.GetName().Name, "Unity.ShaderGraph.Editor", StringComparison.Ordinal));
+            if (assembly != null)
+                return assembly;
+            try
+            {
+                return System.Reflection.Assembly.Load("Unity.ShaderGraph.Editor");
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Type FindLoadedType(string fullName)
+        {
+            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = assembly.GetType(fullName, false);
+                if (type != null)
+                    return type;
+            }
+            GetShaderGraphAssembly();
+            foreach (System.Reflection.Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type type = assembly.GetType(fullName, false);
+                if (type != null)
+                    return type;
+            }
+            return null;
+        }
+
+        private static Type RequireShaderGraphType(string fullName)
+        {
+            Type type = FindLoadedType(fullName);
+            if (type == null)
+                throw new InvalidOperationException("Shader Graph API type is unavailable: " + fullName);
+            return type;
+        }
+
+        private static Type[] GetLoadableTypes(System.Reflection.Assembly assembly)
+        {
+            try
+            {
+                return assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException exception)
+            {
+                return exception.Types.Where(type => type != null).ToArray();
+            }
+            catch
+            {
+                return Array.Empty<Type>();
+            }
+        }
+
+        private static MethodInfo FindTryReadGraphMethod(Type fileUtilities)
+        {
+            return fileUtilities?.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "TryReadGraphDataFromDisk" &&
+                    method.GetParameters().Length == 2 && method.GetParameters()[1].IsOut);
+        }
+
+        private static MethodInfo FindMultiJsonDeserializeMethod(Type multiJson, Type graphType)
+        {
+            if (multiJson == null || graphType == null)
+                return null;
+
+            return multiJson.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "Deserialize" &&
+                    method.IsGenericMethodDefinition && method.GetGenericArguments().Length == 1 &&
+                    method.GetParameters().Length >= 2 &&
+                    method.GetParameters()[0].ParameterType.IsGenericParameter &&
+                    method.GetParameters()[1].ParameterType == typeof(string) &&
+                    method.GetParameters().Skip(2).All(parameter => parameter.IsOptional));
+        }
+
+        private static MethodInfo FindMultiJsonSerializeMethod(Type multiJson, Type graphType)
+        {
+            if (multiJson == null || graphType == null)
+                return null;
+            return multiJson.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == "Serialize" && method.GetParameters().Length == 1 &&
+                    method.GetParameters()[0].ParameterType.IsAssignableFrom(graphType));
+        }
+
+        private static IEnumerable InvokeGenericEnumerable(object target, string methodName, Type genericType)
+        {
+            MethodInfo method = target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(item => item.Name == methodName && item.IsGenericMethodDefinition &&
+                    item.GetGenericArguments().Length == 1 && item.GetParameters().Length == 0);
+            return method?.MakeGenericMethod(genericType).Invoke(target, null) as IEnumerable;
+        }
+
+        private static IEnumerable ReadEnumerableMember(object target, string name)
+        {
+            return ReadMember(target, name) as IEnumerable ?? Array.Empty<object>();
+        }
+
+        private static object ReadMember(object target, string name)
+        {
+            if (target == null)
+                return null;
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Static |
+                BindingFlags.Public | BindingFlags.NonPublic;
+            Type type = target as Type ?? target.GetType();
+            object instance = target is Type ? null : target;
+            System.Reflection.PropertyInfo property = type.GetProperty(name, flags);
+            if (property != null && property.GetIndexParameters().Length == 0)
+                return property.GetValue(instance);
+            FieldInfo field = type.GetField(name, flags) ?? type.GetField("m_" + char.ToUpperInvariant(name[0]) + name.Substring(1), flags);
+            return field?.GetValue(instance);
+        }
+
+        private static void SetMember(object target, string name, object value)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            Type type = target.GetType();
+            System.Reflection.PropertyInfo property = type.GetProperty(name, flags);
+            if (property != null && property.CanWrite)
+            {
+                property.SetValue(target, value);
+                return;
+            }
+            FieldInfo field = type.GetField(name, flags) ?? type.GetField("m_" + char.ToUpperInvariant(name[0]) + name.Substring(1), flags);
+            if (field == null)
+                throw new InvalidOperationException($"{type.FullName}.{name} is unavailable.");
+            field.SetValue(target, value);
+        }
+
+        private static string ReadStringMember(object target, string name)
+        {
+            return ReadMember(target, name)?.ToString();
+        }
+
+        private static int ReadIntMember(object target, string name)
+        {
+            object value = ReadMember(target, name);
+            return value == null ? 0 : Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }
+
+        private static bool ReadBoolMember(object target, string name)
+        {
+            object value = ReadMember(target, name);
+            return value != null && Convert.ToBoolean(value, CultureInfo.InvariantCulture);
+        }
+
+        private static object InvokeRequired(object target, string methodName, params object[] args)
+        {
+            MethodInfo method = FindCompatibleMethod(target.GetType(), methodName, args);
+            if (method == null)
+                throw new InvalidOperationException($"{target.GetType().FullName}.{methodName} is unavailable.");
+            return method.Invoke(target, args);
+        }
+
+        private static object InvokeOptional(object target, string methodName, params object[] args)
+        {
+            MethodInfo method = FindCompatibleMethod(target.GetType(), methodName, args);
+            return method?.Invoke(target, args);
+        }
+
+        private static MethodInfo FindCompatibleMethod(Type type, string name, object[] args)
+        {
+            return type.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(method => method.Name == name && method.GetParameters().Length == args.Length &&
+                    method.GetParameters().Select((parameter, index) =>
+                        args[index] == null || parameter.ParameterType.IsInstanceOfType(args[index])).All(matches => matches));
+        }
+
+        private static string ComputeSha256(byte[] bytes)
+        {
+            if (bytes == null)
+                return null;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+        }
+
         #endregion
 
         #region State Export
@@ -4362,7 +5745,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Could not prune old result files in {folder}: {e.Message}");
+                Debug.LogWarning($"[Creator Works MCP] Could not prune old result files in {folder}: {e.Message}");
             }
         }
 
@@ -4405,7 +5788,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting hierarchy: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting hierarchy: {e.Message}");
             }
         }
 
@@ -4423,7 +5806,7 @@ namespace BantworksMCP
             }
         }
 
-        private static GameObjectInfo CreateGameObjectInfo(GameObject obj, int depth, Component[] includedComponents = null)
+        private static GameObjectInfo CreateGameObjectInfo(GameObject obj, int depth, Component[] includedComponents = null, string[] includedPropertyNames = null)
         {
             var info = new GameObjectInfo
             {
@@ -4474,13 +5857,13 @@ namespace BantworksMCP
             {
                 if (comp != null)
                 {
-                    info.components.Add(SerializeComponent(comp));
+                    info.components.Add(SerializeComponent(comp, includedPropertyNames));
                 }
             }
             return info;
         }
 
-        private static ComponentInfo SerializeComponent(Component comp)
+        private static ComponentInfo SerializeComponent(Component comp, string[] includedPropertyNames = null)
         {
             var info = new ComponentInfo
             {
@@ -4503,6 +5886,10 @@ namespace BantworksMCP
                     // Skip some internal properties
                     if (prop.name == "m_Script" || prop.name == "m_ObjectHideFlags")
                         continue;
+                    if (includedPropertyNames != null && includedPropertyNames.Length > 0 &&
+                        !includedPropertyNames.Any(name => string.Equals(name, prop.name, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, prop.propertyPath, StringComparison.OrdinalIgnoreCase)))
+                        continue;
 
                     info.properties.Add(new PropertyInfo
                     {
@@ -4511,13 +5898,52 @@ namespace BantworksMCP
                         value = GetSerializedPropertyValue(prop)
                     });
                 }
+
+                if (comp is Renderer renderer && includedPropertyNames != null &&
+                    includedPropertyNames.Any(name =>
+                        string.Equals(name, "materials", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "sharedMaterials", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(name, "m_Materials", StringComparison.OrdinalIgnoreCase)))
+                {
+                    info.properties.Add(CreateRendererMaterialProperty(renderer));
+                }
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[BANTWORKS MCP] Could not serialize component {comp.GetType().Name}: {e.Message}");
+                Debug.LogWarning($"[Creator Works MCP] Could not serialize component {comp.GetType().Name}: {e.Message}");
             }
 
             return info;
+        }
+
+        private static PropertyInfo CreateRendererMaterialProperty(Renderer renderer)
+        {
+            Material[] sharedMaterials = renderer.sharedMaterials ?? new Material[0];
+            var summary = new RendererMaterialSummary
+            {
+                totalCount = sharedMaterials.Length,
+                truncated = sharedMaterials.Length > 64,
+                materials = new List<MaterialReferenceInfo>()
+            };
+
+            foreach (Material material in sharedMaterials.Take(64))
+            {
+                string assetPath = material != null ? AssetDatabase.GetAssetPath(material) : null;
+                summary.materials.Add(new MaterialReferenceInfo
+                {
+                    name = material != null ? material.name : null,
+                    assetPath = string.IsNullOrWhiteSpace(assetPath) ? null : assetPath,
+                    assetGuid = string.IsNullOrWhiteSpace(assetPath) ? null : AssetDatabase.AssetPathToGUID(assetPath),
+                    shader = material != null && material.shader != null ? material.shader.name : null
+                });
+            }
+
+            return new PropertyInfo
+            {
+                name = "materials",
+                type = "Material[]",
+                value = JsonUtility.ToJson(summary)
+            };
         }
 
         private static string GetSerializedPropertyValue(SerializedProperty prop)
@@ -4598,7 +6024,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting editor state: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting editor state: {e.Message}");
             }
         }
 
@@ -4609,7 +6035,7 @@ namespace BantworksMCP
                 DateTime processStart = process.StartTime.ToUniversalTime();
                 var instance = new ProjectInstanceState
                 {
-                    editorInstanceId = process.Id + "-" + processStart.Ticks.ToString("x16", CultureInfo.InvariantCulture),
+                    editorInstanceId = GetEditorInstanceId(),
                     bridgeVersion = BridgeVersion,
                     protocolVersion = BridgeProtocolVersion,
                     minimumProtocolVersion = MinimumBridgeProtocolVersion,
@@ -4627,6 +6053,15 @@ namespace BantworksMCP
             }
         }
 
+        private static string GetEditorInstanceId()
+        {
+            using (var process = System.Diagnostics.Process.GetCurrentProcess())
+            {
+                DateTime processStart = process.StartTime.ToUniversalTime();
+                return process.Id + "-" + processStart.Ticks.ToString("x16", CultureInfo.InvariantCulture);
+            }
+        }
+
         private static string[] CurrentBridgeCapabilities()
         {
             var capabilities = new List<string>
@@ -4635,9 +6070,15 @@ namespace BantworksMCP
                 "correlated_command_results",
                 "manual_full_state_export",
                 "targeted_hierarchy_queries",
+                "project_bound_commands",
+                "command_status_polling",
+                "selective_component_properties",
+                "screenshot_metadata",
                 "main_thread_unity_api",
                 "unity_test_runner",
-                "banter_visual_scripting"
+                "banter_visual_scripting",
+                "sidequest_sdk_profiles",
+                "shader_graph_commands"
             };
             if (pipeServerAvailable)
                 capabilities.Insert(0, "named_pipe_commands");
@@ -4687,7 +6128,7 @@ namespace BantworksMCP
             catch (Exception e)
             {
                 // Avoid recursive logging by using Console.WriteLine
-                System.Console.WriteLine($"[BANTWORKS MCP] Error exporting console logs: {e.Message}");
+                System.Console.WriteLine($"[Creator Works MCP] Error exporting console logs: {e.Message}");
             }
         }
 
@@ -4708,7 +6149,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                Debug.LogError($"[BANTWORKS MCP] Error exporting import status: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error exporting import status: {e.Message}");
             }
         }
 
@@ -4720,7 +6161,7 @@ namespace BantworksMCP
         {
             try
             {
-                Debug.Log("[BANTWORKS MCP] Scanning prefabs...");
+                Debug.Log("[Creator Works MCP] Scanning prefabs...");
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
                 // Find all prefab GUIDs
@@ -4871,14 +6312,14 @@ namespace BantworksMCP
                 IsScanningPrefabs = false;
                 ScanStatus = $"Complete: {totalCount} prefabs in {categories.Count} categories ({stopwatch.ElapsedMilliseconds}ms)";
 
-                Debug.Log($"[BANTWORKS MCP] Prefab catalog exported: {totalCount} prefabs in {categories.Count} categories ({stopwatch.ElapsedMilliseconds}ms)");
+                Debug.Log($"[Creator Works MCP] Prefab catalog exported: {totalCount} prefabs in {categories.Count} categories ({stopwatch.ElapsedMilliseconds}ms)");
                 LastActivity = DateTime.Now.ToString("HH:mm:ss") + $" - Scanned {totalCount} prefabs";
             }
             catch (Exception e)
             {
                 IsScanningPrefabs = false;
                 ScanStatus = $"Error: {e.Message}";
-                Debug.LogError($"[BANTWORKS MCP] Error scanning prefabs: {e.Message}");
+                Debug.LogError($"[Creator Works MCP] Error scanning prefabs: {e.Message}");
             }
         }
 
@@ -5038,6 +6479,9 @@ namespace BantworksMCP
             public string path;
             public string stateType;
             public int protocolVersion;
+            public string expectedProjectId;
+            public string expectedProjectPath;
+            public string expectedEditorInstanceId;
             public long timestamp;
         }
 
@@ -5133,7 +6577,7 @@ namespace BantworksMCP
             }
             catch (Exception e)
             {
-                System.Console.WriteLine($"[BANTWORKS MCP] Error exporting compilation status: {e.Message}");
+                System.Console.WriteLine($"[Creator Works MCP] Error exporting compilation status: {e.Message}");
             }
         }
 
@@ -5156,6 +6600,24 @@ namespace BantworksMCP
             public string cameraPath;
         }
 
+        [Serializable]
+        private class ScreenshotResult
+        {
+            public string commandId;
+            public bool success;
+            public string source;
+            public int width;
+            public int height;
+            public int byteLength;
+            public string cameraId;
+            public string cameraPath;
+            public string cameraName;
+            public string cameraSelection;
+            public int cameraCandidateCount;
+            public bool cameraSelectionAmbiguous;
+            public string sceneViewName;
+            public long timestamp;
+        }
         [Serializable]
         private class AssetSearchCommand
         {
@@ -5187,6 +6649,207 @@ namespace BantworksMCP
             public string name;
             public string type;
             public bool isFolder;
+        }
+
+        private enum ShaderGraphOperation
+        {
+            Capabilities,
+            List,
+            Inspect,
+            Create,
+            AddNode,
+            Connect,
+            Validate
+        }
+
+        [Serializable]
+        private class ShaderGraphCommand
+        {
+            public string id;
+            public string type;
+            public string assetPath;
+            public string pipeline;
+            public string shaderType;
+            public bool overwrite;
+            public string expectedContentHash;
+            public bool openInEditor;
+            public int limit;
+            public string nodeType;
+            public bool hasPosition;
+            public ShaderGraphPoint position;
+            public string sourceNodeId;
+            public int sourceSlotId;
+            public string destinationNodeId;
+            public int destinationSlotId;
+            public bool replaceExistingInput;
+            public ShaderGraphNodeRequest[] nodes;
+            public ShaderGraphConnectionRequest[] connections;
+        }
+
+        [Serializable]
+        private class ShaderGraphPoint
+        {
+            public float x;
+            public float y;
+        }
+
+        [Serializable]
+        private class ShaderGraphNodeRequest
+        {
+            public string id;
+            public string nodeType;
+            public ShaderGraphPoint position;
+        }
+
+        [Serializable]
+        private class ShaderGraphConnectionRequest
+        {
+            public string from;
+            public int fromSlot;
+            public string to;
+            public int toSlot;
+        }
+
+        [Serializable]
+        private class ShaderGraphCommandResult
+        {
+            public string commandId;
+            public bool success;
+            public string operation;
+            public string assetPath;
+            public string error;
+            public string errorType;
+            public bool rolledBack;
+            public string rollbackError;
+            public bool writeAttempted;
+            public bool writeCompleted;
+            public string originalHash;
+            public string writtenHash;
+            public long timestamp;
+            public ShaderGraphCapabilities capabilities;
+            public List<ShaderGraphAssetEntry> assets;
+            public ShaderGraphSummary graph;
+            public ShaderGraphMutationResult mutation;
+            public List<string> warnings;
+        }
+
+        [Serializable]
+        private class ShaderGraphCapabilities
+        {
+            public bool packageInstalled;
+            public bool assemblyLoaded;
+            public bool readSupported;
+            public bool writeSupported;
+            public bool createSupported;
+            public bool nodeMutationSupported;
+            public bool connectionSupported;
+            public string packageVersion;
+            public string assemblyVersion;
+            public string activeRenderPipeline;
+            public List<string> supportedTemplates;
+            public List<string> missingMembers;
+        }
+
+        [Serializable]
+        private class ShaderGraphAssetEntry
+        {
+            public string assetPath;
+            public string guid;
+            public string name;
+            public string dependencyHash;
+            public bool hasCompileErrors;
+        }
+
+        [Serializable]
+        private class ShaderGraphSummary
+        {
+            public string assetPath;
+            public string assetGuid;
+            public string dependencyHash;
+            public string contentHash;
+            public string shaderName;
+            public bool shaderLoaded;
+            public int nodeCount;
+            public int edgeCount;
+            public int targetCount;
+            public int propertyCount;
+            public int unknownObjectCount;
+            public bool graphDeserialized;
+            public bool hasCompileErrors;
+            public bool validationPassed;
+            public List<ShaderGraphNodeInfo> nodes;
+            public List<ShaderGraphEdgeInfo> edges;
+            public List<ShaderGraphTargetInfo> targets;
+            public List<ShaderGraphPropertyInfo> properties;
+            public List<ShaderGraphCompilerDiagnostic> diagnostics;
+            public List<string> warnings;
+        }
+
+        [Serializable]
+        private class ShaderGraphNodeInfo
+        {
+            public string id;
+            public string name;
+            public string type;
+            public bool isBlock;
+            public string blockDescriptor;
+            public float[] position;
+            public List<ShaderGraphSlotInfo> slots;
+        }
+
+        [Serializable]
+        private class ShaderGraphSlotInfo
+        {
+            public int id;
+            public string name;
+            public string type;
+            public string direction;
+            public string valueType;
+        }
+
+        [Serializable]
+        private class ShaderGraphEdgeInfo
+        {
+            public string outputNodeId;
+            public int outputSlotId;
+            public string inputNodeId;
+            public int inputSlotId;
+        }
+
+        [Serializable]
+        private class ShaderGraphTargetInfo
+        {
+            public string type;
+            public string displayName;
+        }
+
+        [Serializable]
+        private class ShaderGraphPropertyInfo
+        {
+            public string id;
+            public string type;
+            public string displayName;
+            public string referenceName;
+            public bool exposed;
+        }
+
+        [Serializable]
+        private class ShaderGraphCompilerDiagnostic
+        {
+            public string severity;
+            public string message;
+            public string file;
+            public int line;
+        }
+
+        [Serializable]
+        private class ShaderGraphMutationResult
+        {
+            public string requestedId;
+            public string nodeId;
+            public string nodeType;
+            public List<ShaderGraphSlotInfo> slots;
+            public bool connectionCreated;
         }
 
         [Serializable]
@@ -5257,6 +6920,7 @@ namespace BantworksMCP
             public string validatorType;
             public string validatorAssembly;
             public string validatorMethod;
+            public string sdkProfile;
             public int diagnosticCount;
             public bool diagnosticsTruncated;
             public List<ConsoleLogEntry> diagnostics;
@@ -5323,6 +6987,7 @@ namespace BantworksMCP
             public int maxDepth;
             public int maxResults;
             public string componentType;
+            public string[] propertyNames;
         }
 
         [Serializable]
@@ -5719,6 +7384,23 @@ namespace BantworksMCP
         }
 
         [Serializable]
+        private class RendererMaterialSummary
+        {
+            public int totalCount;
+            public bool truncated;
+            public List<MaterialReferenceInfo> materials;
+        }
+
+        [Serializable]
+        private class MaterialReferenceInfo
+        {
+            public string name;
+            public string assetPath;
+            public string assetGuid;
+            public string shader;
+        }
+
+        [Serializable]
         private class EditorState
         {
             public bool isPlaying;
@@ -5808,6 +7490,8 @@ namespace BantworksMCP
             public string message;
             public string error;
             public long timestamp;
+            public string projectPath;
+            public string editorInstanceId;
         }
 
         private class PendingPipeCommand
@@ -5829,34 +7513,37 @@ namespace BantworksMCP
     }
 
     /// <summary>
-    /// Status window for BANTWORKS MCP
+    /// Status window for Creator Works MCP
     /// </summary>
     public class BantworksMCPWindow : EditorWindow
     {
+        private const string LogoAssetFileName = "CreatorWorksMCPLogo.png";
         private Vector2 scrollPosition;
+        private Texture2D logoTexture;
         private static readonly Color CyanColor = new Color(0f, 0.83f, 1f);   // #00d4ff
         private static readonly Color RedColor = new Color(1f, 0.23f, 0.23f); // #ff3b3b
+        private static readonly Color PreviewColor = new Color(1f, 0.67f, 0f); // #ffaa00
+        private static Color MpcTextColor => EditorGUIUtility.isProSkin
+            ? new Color(0.76f, 0.79f, 0.84f)
+            : new Color(0.24f, 0.27f, 0.32f);
 
         public static void ShowWindow()
         {
-            var window = GetWindow<BantworksMCPWindow>("BANTWORKS MCP");
+            var window = GetWindow<BantworksMCPWindow>("Creator Works MCP");
             window.minSize = new Vector2(350, 300);
+        }
+
+        private void OnEnable()
+        {
+            logoTexture = LoadLogoTexture();
+            titleContent = new GUIContent("Creator Works MCP", logoTexture);
         }
 
         private void OnGUI()
         {
             scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
 
-            // Header with branded colors
-            EditorGUILayout.BeginHorizontal();
-            GUIStyle headerStyle = new GUIStyle(EditorStyles.boldLabel) { fontSize = 14 };
-            GUI.color = CyanColor;
-            GUILayout.Label("BANT", headerStyle, GUILayout.ExpandWidth(false));
-            GUI.color = RedColor;
-            GUILayout.Label("WORKS", headerStyle, GUILayout.ExpandWidth(false));
-            GUI.color = Color.white;
-            GUILayout.Label(" MCP Status", headerStyle);
-            EditorGUILayout.EndHorizontal();
+            DrawBrandHeader();
             EditorGUILayout.Space();
 
             // Connection status
@@ -5983,14 +7670,14 @@ namespace BantworksMCP
             EditorGUILayout.Space();
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Custom Scripts:", GUILayout.Width(100));
+            GUILayout.Label("C# Components:", GUILayout.Width(100));
             bool customScriptsEnabled = BantworksMCPBridge.EnableCustomScripts;
             bool newValue = EditorGUILayout.Toggle(customScriptsEnabled, GUILayout.Width(20));
             if (newValue != customScriptsEnabled)
             {
                 BantworksMCPBridge.EnableCustomScripts = newValue;
             }
-            GUILayout.Label(newValue ? "Enabled (Non-Banter)" : "Disabled (Banter Only)",
+            GUILayout.Label(newValue ? "Enabled (Project Scripts)" : "Disabled (SDK Only)",
                 EditorStyles.miniLabel);
             EditorGUILayout.EndHorizontal();
 
@@ -5998,8 +7685,8 @@ namespace BantworksMCP
             GUILayout.Label("", GUILayout.Width(100));
             EditorGUILayout.HelpBox(
                 newValue
-                    ? "MCP can add custom C# scripts from Assembly-CSharp"
-                    : "MCP only adds Unity built-in and Banter SDK components",
+                    ? "MCP can add existing components from compiled project C# assemblies"
+                    : "MCP only adds Unity built-in, Banter SDK, and Creator SDK components",
                 MessageType.Info);
             EditorGUILayout.EndHorizontal();
 
@@ -6014,26 +7701,95 @@ namespace BantworksMCP
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Refresh State", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Refresh State");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Refresh State");
             }
             if (GUILayout.Button("Rescan Prefabs", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Scan Prefabs");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Scan Prefabs");
             }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Open MCP Folder", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Open MCP Folder");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Open MCP Folder");
             }
             if (GUILayout.Button("Clear Commands", GUILayout.Height(28)))
             {
-                EditorApplication.ExecuteMenuItem("BANTWORKS MCP/Clear Commands");
+                EditorApplication.ExecuteMenuItem("Creator Works MCP/Clear Commands");
             }
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawBrandHeader()
+        {
+            if (logoTexture == null)
+            {
+                logoTexture = LoadLogoTexture();
+                titleContent = new GUIContent("Creator Works MCP", logoTexture);
+            }
+
+            EditorGUILayout.BeginHorizontal(GUILayout.Height(42));
+            if (logoTexture != null)
+            {
+                GUILayout.Label(logoTexture, GUIStyle.none, GUILayout.Width(36), GUILayout.Height(36));
+            }
+            else
+            {
+                GUILayout.Space(36);
+            }
+
+            GUILayout.Space(8);
+            EditorGUILayout.BeginVertical();
+            GUILayout.Space(1);
+
+            var titleStyle = new GUIStyle(EditorStyles.boldLabel)
+            {
+                fontSize = 14,
+                richText = true,
+                alignment = TextAnchor.MiddleLeft
+            };
+            var mcpColor = ColorUtility.ToHtmlStringRGB(MpcTextColor);
+            GUILayout.Label(
+                $"<color=#{ColorUtility.ToHtmlStringRGB(CyanColor)}>CREATOR</color> " +
+                $"<color=#{ColorUtility.ToHtmlStringRGB(RedColor)}>WORKS</color> " +
+                $"<color=#{mcpColor}>MCP</color>",
+                titleStyle,
+                GUILayout.Height(18));
+
+            var previewStyle = new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                normal = { textColor = PreviewColor },
+                fontSize = 9,
+                alignment = TextAnchor.MiddleLeft
+            };
+            GUILayout.Label("SHADER GRAPH PREVIEW", previewStyle, GUILayout.Height(14));
+            EditorGUILayout.EndVertical();
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private Texture2D LoadLogoTexture()
+        {
+            var script = MonoScript.FromScriptableObject(this);
+            var scriptPath = AssetDatabase.GetAssetPath(script);
+            if (!string.IsNullOrEmpty(scriptPath))
+            {
+                var scriptDirectory = Path.GetDirectoryName(scriptPath);
+                if (!string.IsNullOrEmpty(scriptDirectory))
+                {
+                    var adjacentLogoPath = Path.Combine(scriptDirectory, LogoAssetFileName).Replace('\\', '/');
+                    var adjacentLogo = AssetDatabase.LoadAssetAtPath<Texture2D>(adjacentLogoPath);
+                    if (adjacentLogo != null)
+                    {
+                        return adjacentLogo;
+                    }
+                }
+            }
+
+            return AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Editor/" + LogoAssetFileName);
         }
 
         private void DrawSeparator()

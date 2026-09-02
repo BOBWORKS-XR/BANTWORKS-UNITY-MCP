@@ -46,6 +46,64 @@ function createProject(packageVersion = "3.2.2", revision = undefined, unityVers
   return { project, packageRoot };
 }
 
+function installCreatorSdkFixture(project, { version = "3.2.17", keepLegacy = false } = {}) {
+  const manifestPath = path.join(project, "Packages", "manifest.json");
+  const lockPath = path.join(project, "Packages", "packages-lock.json");
+  const manifest = keepLegacy
+    ? JSON.parse(fs.readFileSync(manifestPath, "utf8"))
+    : { dependencies: {} };
+  const lock = keepLegacy
+    ? JSON.parse(fs.readFileSync(lockPath, "utf8"))
+    : { dependencies: {} };
+  manifest.dependencies["com.sidequest.creator-sdk"] = version;
+  lock.dependencies["com.sidequest.creator-sdk"] = {
+    version,
+    depth: 0,
+    source: "registry",
+  };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  fs.writeFileSync(lockPath, JSON.stringify(lock));
+
+  const packageRoot = path.join(
+    project,
+    "Library",
+    "PackageCache",
+    "com.sidequest.creator-sdk@creatorfixture"
+  );
+  fs.mkdirSync(path.join(packageRoot, "VisualScripting"), { recursive: true });
+  fs.mkdirSync(
+    path.join(packageRoot, "Runtime", "Scripts", "Scene", "Components"),
+    { recursive: true }
+  );
+  fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
+    name: "com.sidequest.creator-sdk",
+    version,
+  }));
+
+  const nodeClasses = Object.keys(BANTER_CUSTOM_VS_NODES)
+    .map((name) => `public class ${name} {}`)
+    .join("\n");
+  fs.writeFileSync(
+    path.join(packageRoot, "VisualScripting", "Nodes.cs"),
+    `namespace BS.VisualScripting {\n${nodeClasses}\n}`
+  );
+
+  const componentClasses = Object.values(BANTER_COMPONENTS)
+    .filter((component) => component.kind !== "runtime-helper")
+    .map((component) => {
+      const name = component.name.startsWith("Banter")
+        ? `BS${component.name.slice("Banter".length)}`
+        : component.name;
+      return `public class ${name} : BSComponentBase {}`;
+    })
+    .join("\n");
+  fs.writeFileSync(
+    path.join(packageRoot, "Runtime", "Scripts", "Scene", "Components", "Components.cs"),
+    componentClasses
+  );
+  return packageRoot;
+}
+
 test("catalogue metadata stays source-checked and machine-counted", () => {
   assert.equal(Object.keys(BANTER_CUSTOM_VS_NODES).length, 162);
   assert.equal(BANTER_SDK_COMPATIBILITY.catalog.visualScriptingEventCount, 48);
@@ -155,6 +213,50 @@ test("reports an installed package with unknown coverage until Package Manager r
     assert.equal(result.installed, true);
     assert.equal(result.visualScripting.status, "unknown");
     assert.match(result.nextStep, /Open the project in Unity/);
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("detects Creator SDK and switches to concrete BS namespaces", () => {
+  const { project } = createProject();
+  try {
+    installCreatorSdkFixture(project);
+    const result = getBanterSDKInfo(createConfigForProject(project));
+
+    assert.equal(result.success, true);
+    assert.equal(result.installed, true);
+    assert.equal(result.sdkProfile, "creator");
+    assert.equal(result.packageId, "com.sidequest.creator-sdk");
+    assert.equal(result.namespaces.component, "BS");
+    assert.equal(result.namespaces.visualScripting, "BS.VisualScripting");
+    assert.deepEqual(result.validatorCandidates, ["BS.SDKEditor.ValidateVisualScripting"]);
+    assert.equal(result.visualScripting.status, "full");
+    assert.equal(result.components.status, "full");
+    assert.equal(result.publicReleaseValidation.status, "creator-sdk-not-in-legacy-matrix");
+    assert.match(result.compatibility.authoringPolicy, /concrete BS\.\*/);
+    assert.equal(result.readiness.packageDetected, true);
+    assert.equal(result.readiness.sourceResolved, true);
+    assert.equal(result.readiness.editorDomainLoaded, "not-checked");
+  } finally {
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test("reports hybrid projects explicitly and prefers Creator SDK for new authoring", () => {
+  const { project } = createProject();
+  try {
+    installCreatorSdkFixture(project, { keepLegacy: true });
+    const result = getBanterSDKInfo(createConfigForProject(project));
+
+    assert.equal(result.success, true);
+    assert.equal(result.sdkProfile, "hybrid");
+    assert.equal(result.packageId, "com.sidequest.creator-sdk");
+    assert.equal(result.packages.length, 2);
+    assert.deepEqual(result.validatorCandidates, [
+      "BS.SDKEditor.ValidateVisualScripting",
+      "Banter.SDKEditor.ValidateVisualScripting",
+    ]);
   } finally {
     fs.rmSync(project, { recursive: true, force: true });
   }

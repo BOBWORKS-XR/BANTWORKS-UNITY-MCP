@@ -1,5 +1,5 @@
 /**
- * Evidence-linked Banter workflows for MCP clients.
+ * Evidence-linked SideQuest SDK workflows for MCP clients.
  *
  * These recipes reference the source-checked component and custom-node
  * catalogues by name. Tests fail if a referenced capability disappears.
@@ -41,12 +41,13 @@ export interface BanterWorkflow {
 
 export const BANTER_WORKFLOW_CONTRACT = {
   authority: [
-    "Treat the selected project's installed Banter package as runtime authority.",
-    "Treat banter://components, banter://custom-vs-nodes, and banter://js-api as source-checked planning evidence, not proof that every nearby SDK revision is identical.",
+    "Treat the selected project's installed Creator SDK or Banter SDK package as authoring authority, and the target hosted client as runtime authority.",
+    "The resource URIs and catalogue keys retain legacy Banter names for client compatibility. Resolve them through get_banter_sdk_info before authoring: Creator uses BS.* and BS.VisualScripting; legacy Banter uses Banter.SDK.* and Banter.VisualScripting.",
+    "Treat banter://components, banter://custom-vs-nodes, and banter://js-api as source-checked planning evidence, not proof that every nearby SDK revision or compatibility alias is accepted by a hosted runtime.",
   ],
   preflight: [
     "Use get_bridge_status and stop on a stale, missing, or mismatched bridge.",
-    "Use get_banter_sdk_info before relying on catalogue coverage or custom nodes.",
+    "Use get_banter_sdk_info before relying on catalogue coverage or custom nodes, then record its sdkProfile and selected namespaces.",
     "Use query_project_state before selecting objects or changing components.",
     "Choose one implementation surface deliberately; do not duplicate behavior in Visual Scripting and WebRoot unless the design requires both.",
     "Use only tools returned by tools/list. If the selected path is unavailable, report the missing capability instead of inventing a write path.",
@@ -55,14 +56,14 @@ export const BANTER_WORKFLOW_CONTRACT = {
     "Generate the smallest graph that implements the requested behavior.",
     "Run validate_vs_graph before writing.",
     "After writing, run validate_vs_graph_in_unity to force import and deserialization.",
-    "For Banter custom nodes, run validate_banter_visual_scripting against the imported graph.",
+    "For SideQuest custom nodes, run validate_banter_visual_scripting against the imported graph; the legacy tool name invokes the selected Creator SDK or Banter SDK validator.",
     "Confirm the intended ScriptMachine references the graph asset. Use set_asset_reference with property nest.macro when attachment is requested, enforce Unity.VisualScripting.ScriptGraphAsset as the expected type, and re-query the component.",
     "Inspect check_import_status and get_console_logs before reporting the graph ready to test.",
   ],
   webRootGate: [
-    "Wait for the documented Banter scene lifecycle event before accessing runtime objects.",
+    "Wait for the documented lifecycle event for the selected target runtime before accessing runtime objects.",
     "Pair every event subscription with a cleanup path when the script can be reloaded or torn down.",
-    "Treat write_webroot_js structural checks as preflight only; verify behavior in a built Banter scene.",
+    "Treat write_webroot_js structural checks as preflight only; verify behavior in the built target scene.",
   ],
 } as const;
 
@@ -414,11 +415,16 @@ export function renderBanterWorkflowPrompt(id: BanterWorkflowId, goal?: string):
     `- ${path.id} (${path.surface}; groups: ${path.requiredToolGroups.join(",")}): ${path.useWhen}`
   ).join("\n");
 
-  return `Execute the BANTWORKS ${workflow.title} workflow in the selected Unity project.
+  return `Execute the Creator Works MCP ${workflow.title} workflow in the selected Unity project.
 ${goalLine}
 Read banter://workflows and use the '${id}' contract. Also read the evidence
 resources named by that contract. Run get_bridge_status, get_banter_sdk_info,
 and query_project_state before changing anything.
+
+Use the sdkProfile and namespaces returned by get_banter_sdk_info. Catalogue
+component names are legacy compatibility keys; emit concrete BS types for a
+Creator profile and Banter types for a legacy profile. Do not migrate existing
+assets merely because compatibility aliases compile.
 
 Choose the smallest applicable implementation path:
 ${pathSummary}

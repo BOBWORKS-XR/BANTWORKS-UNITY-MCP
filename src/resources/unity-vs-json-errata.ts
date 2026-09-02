@@ -1,11 +1,11 @@
 export const UNITY_VS_JSON_ERRATA = [
-  "# BANTWORKS Compatibility Errata",
+  "# Creator Works MCP Compatibility Errata",
   "",
   "These source-observed rules override conflicting statements in the supplied Visual Scripting manual below:",
   "",
   "- Unity Visual Scripting 1.9.4 and 1.9.9 serialize nodes and connections together in the canonical `graph.elements` array.",
   "- A node needs a string `$id` only when another serialized element references it. Unity can omit `$id` on unreferenced nodes.",
-  "- Visual Scripting 1.9.4 and 1.9.9 omit `$version` on control and value connection elements. BANTWORKS accepts an omitted connection version or `\"A\"`.",
+  "- Visual Scripting 1.9.4 and 1.9.9 omit `$version` on control and value connection elements. Creator Works MCP accepts an omitted connection version or `\"A\"`.",
   "- New Script Graph assets use `Unity.VisualScripting.Flow::Unity.VisualScripting.ScriptGraphAsset` as `m_EditorClassIdentifier` and `NativeFormatImporter` in the asset's `.meta` file.",
   "- An empty string is a valid control-port key. Banter action units such as `SendOneShot`, `SetSpaceStateProp`, and `LoadGltfUrl` deliberately use `\"\"` for their control input and output.",
   "- Event `coroutine` is not always false. Set it to true when a reachable control path enters a wait unit or a coroutine-only loader such as `LoadTextUrl`.",

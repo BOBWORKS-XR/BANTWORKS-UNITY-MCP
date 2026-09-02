@@ -1,12 +1,12 @@
 {
-  "name": "banter-mcp",
-  "version": "2.3.0",
-  "description": "Codex, Claude Code, and MCP-compatible Unity integration for Banter SDK development",
+  "name": "creator-works-mcp",
+  "version": "2.5.0",
+  "description": "Codex, Claude Code, and MCP-compatible Unity integration with first-class Creator SDK and Banter knowledge",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "bundle:server": "npm run build && esbuild dist/index.js --bundle --platform=node --format=esm --target=node20 --outfile=release/banter-mcp.mjs",
+    "bundle:server": "npm run build && esbuild dist/index.js --bundle --platform=node --format=esm --target=node20 --outfile=release/creator-works-mcp.mjs",
     "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-node-runtime.ps1",
     "check:version": "node scripts/check-version-sync.mjs",
     "test:bundle": "node scripts/smoke-release-bundle.mjs",
@@ -19,12 +19,15 @@
   },
   "keywords": [
     "mcp",
+    "creator-works",
+    "creator-sdk",
+    "sidequest",
     "banter",
     "unity",
     "visual-scripting",
     "vr"
   ],
-  "author": "",
+  "author": "Creator Works",
   "license": "MIT",
   "engines": {
     "node": ">=20"

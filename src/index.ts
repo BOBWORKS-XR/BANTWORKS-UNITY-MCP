@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Banter MCP Server
+ * Creator Works MCP Server
  *
- * Full-featured MCP server for Banter SDK development.
+ * Full-featured MCP server for Unity, Creator SDK, and Banter development.
  * Provides closed-loop integration with Unity Editor.
  *
  * Usage:
@@ -38,8 +38,8 @@ let toolGroupSelection: ToolGroupSelection = "all";
 // Create MCP server
 const server = new Server(
   {
-    name: "banter-mcp",
-    version: "2.3.0",
+    name: "creator-works-mcp",
+    version: "2.5.0",
   },
   {
     capabilities: {
@@ -89,19 +89,21 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 
 // Start server
 async function main() {
-  toolGroupSelection = parseToolGroupSelection(process.env.BANTWORKS_TOOL_GROUPS);
+  toolGroupSelection = parseToolGroupSelection(
+    process.env.CREATOR_WORKS_TOOL_GROUPS ?? process.env.BANTWORKS_TOOL_GROUPS
+  );
   const args = process.argv.slice(2);
   const useHttp = args.includes("--http");
 
   if (useHttp) {
-    console.error("Banter MCP HTTP transport is not implemented. Use stdio mode: node dist/index.js");
+    console.error("Creator Works MCP HTTP transport is not implemented. Use stdio mode: node dist/index.js");
     process.exit(1);
   } else {
     // Stdio transport for Codex, Claude Code, and other MCP clients.
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error(
-      `Banter MCP running on stdio (tool groups: ${describeToolGroupSelection(toolGroupSelection)})`
+      `Creator Works MCP running on stdio (tool groups: ${describeToolGroupSelection(toolGroupSelection)})`
     );
   }
 }

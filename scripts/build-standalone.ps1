@@ -14,9 +14,9 @@ if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z.-]*$') {
 
 $ReleaseRoot = Join-Path $RepoRoot "release"
 $StandaloneRoot = Join-Path $ReleaseRoot "standalone"
-$StagingRoot = Join-Path $StandaloneRoot "BANTWORKS-MCP-$Version"
-$ArchivePath = Join-Path $ReleaseRoot "BANTWORKS-MCP-$Version-standalone.zip"
-$ServerBundle = Join-Path $ReleaseRoot "banter-mcp.mjs"
+$StagingRoot = Join-Path $StandaloneRoot "Creator-Works-MCP-$Version"
+$ArchivePath = Join-Path $ReleaseRoot "Creator-Works-MCP-$Version-standalone.zip"
+$ServerBundle = Join-Path $ReleaseRoot "creator-works-mcp.mjs"
 
 if (-not (Test-Path -LiteralPath $ServerBundle -PathType Leaf)) {
     throw "Standalone server bundle is missing. Run 'npm run release:server' first."
@@ -33,7 +33,7 @@ if (Test-Path -LiteralPath $StagingRoot) {
 }
 New-Item -ItemType Directory -Path $StagingRoot | Out-Null
 
-Copy-Item -LiteralPath $ServerBundle -Destination (Join-Path $StagingRoot "banter-mcp.mjs")
+Copy-Item -LiteralPath $ServerBundle -Destination (Join-Path $StagingRoot "creator-works-mcp.mjs")
 $rootFiles = @(
     "setup.ps1",
     "setup.bat",
@@ -54,7 +54,7 @@ if (Test-Path -LiteralPath $ArchivePath) {
 }
 Compress-Archive -LiteralPath $StagingRoot -DestinationPath $ArchivePath
 
-$TestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("bantworks-standalone-smoke-" + [guid]::NewGuid())
+$TestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("creator-works-standalone-smoke-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $TestRoot | Out-Null
 try {
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $TestRoot

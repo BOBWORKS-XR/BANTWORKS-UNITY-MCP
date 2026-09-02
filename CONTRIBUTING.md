@@ -1,4 +1,4 @@
-# Contributing to BANTWORKS MCP
+# Contributing to Creator Works MCP
 
 ## Feedback Before Code
 
@@ -12,7 +12,7 @@ issue. Keep it in Draft until focused verification is complete.
 
 ## Local Checks
 
-Node.js 18 or later is required. Run these checks before opening a pull request:
+Node.js 20 or later is required. Run these checks before opening a pull request:
 
 ```powershell
 npm ci

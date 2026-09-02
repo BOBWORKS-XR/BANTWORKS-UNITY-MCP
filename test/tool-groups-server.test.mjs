@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
 
-async function startServer(toolGroups) {
+async function startServer(toolGroups, environmentVariable = "CREATOR_WORKS_TOOL_GROUPS") {
+  const env = { ...process.env };
+  delete env.CREATOR_WORKS_TOOL_GROUPS;
+  delete env.BANTWORKS_TOOL_GROUPS;
+  env[environmentVariable] = toolGroups;
   const child = spawn(process.execPath, ["dist/index.js"], {
-    env: { ...process.env, BANTWORKS_TOOL_GROUPS: toolGroups },
+    env,
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stderr = "";
@@ -50,7 +54,7 @@ async function startServer(toolGroups) {
   return { child, request, stop, stderr: () => stderr };
 }
 
-test("stdio tools/list honors BANTWORKS_TOOL_GROUPS", async () => {
+test("stdio tools/list honors CREATOR_WORKS_TOOL_GROUPS", async () => {
   const server = await startServer("read");
   try {
     const initialized = await server.request({
@@ -63,7 +67,7 @@ test("stdio tools/list honors BANTWORKS_TOOL_GROUPS", async () => {
         clientInfo: { name: "tool-group-test", version: "1.0.0" },
       },
     });
-    assert.equal(initialized.result?.serverInfo?.name, "banter-mcp");
+    assert.equal(initialized.result?.serverInfo?.name, "creator-works-mcp");
     server.child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
     const response = await server.request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
     const names = new Set(response.result.tools.map((tool) => tool.name));
@@ -73,6 +77,31 @@ test("stdio tools/list honors BANTWORKS_TOOL_GROUPS", async () => {
     assert.ok(!names.has("create_gameobject"));
     assert.ok(!names.has("run_unity_tests"));
     assert.match(server.stderr(), /tool groups: read/);
+  } finally {
+    await server.stop();
+  }
+});
+
+test("legacy BANTWORKS_TOOL_GROUPS remains an upgrade fallback", async () => {
+  const server = await startServer("none", "BANTWORKS_TOOL_GROUPS");
+  try {
+    const initialized = await server.request({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "legacy-tool-group-test", version: "1.0.0" },
+      },
+    });
+    assert.equal(initialized.result?.serverInfo?.name, "creator-works-mcp");
+    server.child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+    const response = await server.request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
+    assert.deepEqual(
+      response.result.tools.map((tool) => tool.name).sort(),
+      ["get_bridge_status", "get_unity_command_status", "list_unity_projects", "select_unity_project"].sort()
+    );
   } finally {
     await server.stop();
   }
@@ -89,5 +118,5 @@ test("invalid tool groups stop server startup", async () => {
   });
 
   assert.equal(exitCode, 1);
-  assert.match(server.stderr(), /Unknown BANTWORKS_TOOL_GROUPS value/);
+  assert.match(server.stderr(), /Unknown CREATOR_WORKS_TOOL_GROUPS value/);
 });

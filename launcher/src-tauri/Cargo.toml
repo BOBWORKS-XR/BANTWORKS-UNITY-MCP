@@ -1,8 +1,8 @@
 [package]
-name = "bantworks-mcp-launcher"
-version = "2.3.0"
-description = "BANTWORKS MCP Configuration Launcher"
-authors = ["BOBWORKS"]
+name = "creator-works-mcp-launcher"
+version = "2.5.0"
+description = "Creator Works MCP Configuration Launcher"
+authors = ["Creator Works"]
 edition = "2021"
 
 [build-dependencies]

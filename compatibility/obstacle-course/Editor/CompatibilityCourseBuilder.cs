@@ -39,7 +39,7 @@ namespace Bantworks.Compatibility.Editor
             public string error;
         }
 
-        [MenuItem("BANTWORKS MCP/Compatibility/Build Obstacle Course")]
+        [MenuItem("Creator Works MCP/Compatibility/Build Obstacle Course")]
         public static void BuildFromMenu()
         {
             Build(314159);

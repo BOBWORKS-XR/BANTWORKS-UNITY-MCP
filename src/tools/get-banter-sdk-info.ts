@@ -6,7 +6,27 @@ import { BANTER_COMPONENTS } from "../resources/banter-components.js";
 import { BANTER_CUSTOM_VS_NODES } from "../resources/banter-custom-vs-nodes.js";
 import { BANTER_SDK_COMPATIBILITY } from "../resources/banter-sdk-compatibility.js";
 
-const PACKAGE_ID = "com.sidequest.banter";
+const SDK_DEFINITIONS = [
+  {
+    family: "creator",
+    packageId: "com.sidequest.creator-sdk",
+    displayName: "SideQuest Creator SDK",
+    componentNamespace: "BS",
+    visualScriptingNamespace: "BS.VisualScripting",
+    validatorType: "BS.SDKEditor.ValidateVisualScripting",
+  },
+  {
+    family: "banter",
+    packageId: "com.sidequest.banter",
+    displayName: "Banter SDK",
+    componentNamespace: "Banter.SDK",
+    visualScriptingNamespace: "Banter.VisualScripting",
+    validatorType: "Banter.SDKEditor.ValidateVisualScripting",
+  },
+] as const;
+
+type SDKDefinition = typeof SDK_DEFINITIONS[number];
+export type SidequestSDKProfile = SDKDefinition["family"] | "hybrid" | "none" | "unknown";
 
 interface LockedPackage {
   version?: string;
@@ -21,7 +41,59 @@ interface PackageCandidate {
   packageVersion?: string;
 }
 
+interface PackageInspection {
+  definition: SDKDefinition;
+  package: Record<string, unknown>;
+  publicReleaseValidation: Record<string, unknown>;
+  visualScripting: Record<string, unknown>;
+  components: Record<string, unknown>;
+  legacyStubsPresent?: boolean;
+  nextStep?: string;
+}
+
+/**
+ * Backward-compatible entry point. The result now covers both the legacy
+ * Banter SDK and the Creator SDK/BS contract.
+ */
 export function getBanterSDKInfo(config: BanterMCPConfig): Record<string, unknown> {
+  return getSidequestSDKInfo(config);
+}
+
+/**
+ * Lightweight package-family detection for tools that only need to select a
+ * namespace. Full provenance and source coverage remain in getSidequestSDKInfo.
+ */
+export function detectSidequestSDKProfile(config: BanterMCPConfig): SidequestSDKProfile {
+  if (!config.unityProjectPath) return "unknown";
+
+  const manifestPath = path.join(config.unityProjectPath, "Packages", "manifest.json");
+  const lockPath = path.join(config.unityProjectPath, "Packages", "packages-lock.json");
+  if (!fs.existsSync(manifestPath)) return "unknown";
+
+  try {
+    const manifest = readJson(manifestPath) as { dependencies?: Record<string, string> };
+    const lock = fs.existsSync(lockPath)
+      ? readJson(lockPath) as { dependencies?: Record<string, LockedPackage> }
+      : {};
+    const hasCreator = Boolean(
+      manifest.dependencies?.["com.sidequest.creator-sdk"] ||
+      lock.dependencies?.["com.sidequest.creator-sdk"]
+    );
+    const hasBanter = Boolean(
+      manifest.dependencies?.["com.sidequest.banter"] ||
+      lock.dependencies?.["com.sidequest.banter"]
+    );
+
+    if (hasCreator && hasBanter) return "hybrid";
+    if (hasCreator) return "creator";
+    if (hasBanter) return "banter";
+    return "none";
+  } catch {
+    return "unknown";
+  }
+}
+
+export function getSidequestSDKInfo(config: BanterMCPConfig): Record<string, unknown> {
   if (!config.unityProjectPath) {
     return { success: false, error: "UNITY_PROJECT_PATH not set" };
   }
@@ -37,82 +109,171 @@ export function getBanterSDKInfo(config: BanterMCPConfig): Record<string, unknow
     const lock = fs.existsSync(lockPath)
       ? readJson(lockPath) as { dependencies?: Record<string, LockedPackage> }
       : {};
-    const requestedVersion = manifest.dependencies?.[PACKAGE_ID];
-    const locked = lock.dependencies?.[PACKAGE_ID];
     const unityVersion = readUnityVersion(config.unityProjectPath);
+    const installedDefinitions = SDK_DEFINITIONS.filter((definition) =>
+      Boolean(manifest.dependencies?.[definition.packageId] || lock.dependencies?.[definition.packageId])
+    );
 
-    if (!requestedVersion && !locked) {
+    if (installedDefinitions.length === 0) {
       return {
         success: true,
         installed: false,
-        packageId: PACKAGE_ID,
+        sdkProfile: "none",
+        displayName: "No SideQuest SDK detected",
         unityVersion,
+        checkedPackageIds: SDK_DEFINITIONS.map((definition) => definition.packageId),
         catalog: BANTER_SDK_COMPATIBILITY.catalog,
-        nextStep: `Add ${PACKAGE_ID} to Packages/manifest.json, then let Unity resolve packages.`,
+        readiness: {
+          packageDetected: false,
+          sourceResolved: false,
+          editorDomainLoaded: "not-checked",
+          sdkValidatorLoaded: "not-checked",
+          hostedRuntime: "not-checked",
+        },
+        nextStep:
+          "Install either com.sidequest.creator-sdk or com.sidequest.banter, then let Unity resolve packages.",
       };
     }
 
-    const candidates = findPackageCandidates(config.unityProjectPath);
-    const selected = selectPackageCandidate(candidates, requestedVersion, locked);
-    const packageInfo = {
-      requestedVersion,
-      resolvedVersion: locked?.version ?? requestedVersion,
-      packageVersion: selected?.packageVersion,
-      source: locked?.source,
-      url: locked?.url,
-      revision: locked?.hash,
-      packageCacheIdentity: selected?.cacheIdentity,
-      packageRoot: selected?.packageRoot,
-      candidateCount: candidates.length,
-    };
-    const publicReleaseValidation = matchPublicReleaseValidation(
-      selected?.packageVersion,
-      locked?.hash,
+    const inspections = installedDefinitions.map((definition) => inspectPackage(
+      config.unityProjectPath!,
+      definition,
+      manifest.dependencies?.[definition.packageId],
+      lock.dependencies?.[definition.packageId],
       unityVersion
-    );
-
-    if (!selected) {
-      return {
-        success: true,
-        installed: true,
-        packageId: PACKAGE_ID,
-        unityVersion,
-        package: packageInfo,
-        publicReleaseValidation,
-        visualScripting: unknownCoverage("Resolved Banter package source was not found in Library/PackageCache or Packages."),
-        components: unknownCoverage("Resolved Banter package source was not found in Library/PackageCache or Packages."),
-        catalog: BANTER_SDK_COMPATIBILITY.catalog,
-        nextStep: "Open the project in Unity and wait for Package Manager resolution, then run get_banter_sdk_info again.",
-      };
-    }
-
-    const discoveredNodes = scanVisualScriptingClasses(selected.packageRoot);
-    const catalogNodes = new Set(Object.keys(BANTER_CUSTOM_VS_NODES));
-    const discoveredComponents = scanSceneComponents(selected.packageRoot);
-    const catalogComponents = new Set(
-      Object.values(BANTER_COMPONENTS)
-        .filter((component) => component.kind !== "runtime-helper")
-        .map((component) => component.name)
-    );
+    ));
+    const active = inspections.find((inspection) => inspection.definition.family === "creator")
+      ?? inspections[0];
+    const sdkProfile = inspections.length > 1 ? "hybrid" : active.definition.family;
+    const displayName = inspections.length > 1
+      ? "Hybrid Banter + Creator SDK"
+      : active.definition.displayName;
 
     return {
       success: true,
       installed: true,
-      packageId: PACKAGE_ID,
+      sdkProfile,
+      displayName,
       unityVersion,
-      package: packageInfo,
-      publicReleaseValidation,
-      visualScripting: compareCoverage(catalogNodes, discoveredNodes),
-      components: compareCoverage(catalogComponents, discoveredComponents),
+      packageId: active.definition.packageId,
+      package: active.package,
+      packages: inspections.map((inspection) => ({
+        family: inspection.definition.family,
+        displayName: inspection.definition.displayName,
+        packageId: inspection.definition.packageId,
+        package: inspection.package,
+        legacyStubsPresent: inspection.legacyStubsPresent,
+      })),
+      namespaces: {
+        component: active.definition.componentNamespace,
+        visualScripting: active.definition.visualScriptingNamespace,
+      },
+      validatorCandidates: inspections.map((inspection) => inspection.definition.validatorType),
+      publicReleaseValidation: active.publicReleaseValidation,
+      visualScripting: active.visualScripting,
+      components: active.components,
       catalog: BANTER_SDK_COMPATIBILITY.catalog,
-      caveat: "Coverage is based on source class presence. Unity import and Banter build validation remain authoritative for runtime compatibility.",
+      readiness: {
+        packageDetected: true,
+        sourceResolved: typeof active.package.packageRoot === "string",
+        editorDomainLoaded: "not-checked",
+        sdkValidatorLoaded: "call validate_banter_visual_scripting",
+        hostedRuntime: "requires target-client test",
+      },
+      compatibility: {
+        legacyStubsPresent: active.legacyStubsPresent ?? false,
+        authoringPolicy: active.definition.family === "creator"
+          ? "Use concrete BS.* components and BS.VisualScripting nodes for new content. Treat legacy Banter aliases as compatibility inputs only."
+          : "Use Banter.SDK components and Banter.VisualScripting nodes for this legacy project.",
+        conversionPolicy:
+          "Audit first. Convert only explicitly mapped components and graph member targets in duplicated assets; never rename raw .unity YAML blindly.",
+      },
+      caveat:
+        "Source-class coverage and compatibility aliases do not prove hosted runtime support. Unity import, the selected SDK validator, and target-client testing remain authoritative.",
+      ...(active.nextStep ? { nextStep: active.nextStep } : {}),
     };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Could not inspect Banter SDK metadata",
+      error: error instanceof Error ? error.message : "Could not inspect SideQuest SDK metadata",
     };
   }
+}
+
+function inspectPackage(
+  projectRoot: string,
+  definition: SDKDefinition,
+  requestedVersion: string | undefined,
+  locked: LockedPackage | undefined,
+  unityVersion: string | undefined
+): PackageInspection {
+  const candidates = findPackageCandidates(projectRoot, definition.packageId);
+  const selected = selectPackageCandidate(candidates, requestedVersion, locked, definition.packageId);
+  const packageInfo = {
+    requestedVersion,
+    resolvedVersion: locked?.version ?? requestedVersion,
+    packageVersion: selected?.packageVersion,
+    source: locked?.source,
+    url: locked?.url,
+    revision: locked?.hash,
+    packageCacheIdentity: selected?.cacheIdentity,
+    packageRoot: selected?.packageRoot,
+    candidateCount: candidates.length,
+  };
+  const publicReleaseValidation = definition.family === "banter"
+    ? matchPublicReleaseValidation(selected?.packageVersion, locked?.hash, unityVersion)
+    : {
+        status: "creator-sdk-not-in-legacy-matrix",
+        packageVersion: selected?.packageVersion ?? locked?.version ?? requestedVersion,
+        reason:
+          "The embedded public release matrix covers com.sidequest.banter. Creator SDK validation is reported from the selected package and Unity runtime instead.",
+      };
+
+  if (!selected) {
+    const reason = `Resolved ${definition.displayName} source was not found in Library/PackageCache or Packages.`;
+    return {
+      definition,
+      package: packageInfo,
+      publicReleaseValidation,
+      visualScripting: unknownCoverage(reason),
+      components: unknownCoverage(reason),
+      nextStep: "Open the project in Unity and wait for Package Manager resolution, then inspect the SDK again.",
+    };
+  }
+
+  const discoveredNodes = scanVisualScriptingClasses(
+    selected.packageRoot,
+    definition.visualScriptingNamespace
+  );
+  const catalogNodes = new Set(Object.keys(BANTER_CUSTOM_VS_NODES));
+  const discoveredComponents = scanSceneComponents(selected.packageRoot);
+  const catalogComponents = new Set(
+    Object.values(BANTER_COMPONENTS)
+      .filter((component) => component.kind !== "runtime-helper")
+      .map((component) => componentNameForProfile(component.name, definition.family))
+  );
+
+  return {
+    definition,
+    package: packageInfo,
+    publicReleaseValidation,
+    visualScripting: {
+      namespace: definition.visualScriptingNamespace,
+      ...compareCoverage(catalogNodes, discoveredNodes),
+    },
+    components: {
+      namespace: definition.componentNamespace,
+      catalogNameTransform: definition.family === "creator" ? "Banter* -> BS*" : "none",
+      ...compareCoverage(catalogComponents, discoveredComponents),
+    },
+    legacyStubsPresent: fs.existsSync(path.join(selected.packageRoot, "Runtime", "LegacyStubs")),
+  };
+}
+
+function componentNameForProfile(name: string, family: SDKDefinition["family"]): string {
+  return family === "creator" && name.startsWith("Banter")
+    ? `BS${name.slice("Banter".length)}`
+    : name;
 }
 
 function matchPublicReleaseValidation(
@@ -178,9 +339,9 @@ function readJson(filePath: string): unknown {
   return JSON.parse(fs.readFileSync(filePath, "utf-8"));
 }
 
-function findPackageCandidates(projectRoot: string): PackageCandidate[] {
+function findPackageCandidates(projectRoot: string, packageId: string): PackageCandidate[] {
   const roots: string[] = [];
-  const embedded = path.join(projectRoot, "Packages", PACKAGE_ID);
+  const embedded = path.join(projectRoot, "Packages", packageId);
   if (fs.existsSync(path.join(embedded, "package.json"))) {
     roots.push(embedded);
   }
@@ -188,7 +349,7 @@ function findPackageCandidates(projectRoot: string): PackageCandidate[] {
   const cacheRoot = path.join(projectRoot, "Library", "PackageCache");
   if (fs.existsSync(cacheRoot)) {
     for (const entry of fs.readdirSync(cacheRoot, { withFileTypes: true })) {
-      if (entry.isDirectory() && entry.name.startsWith(`${PACKAGE_ID}@`)) {
+      if (entry.isDirectory() && entry.name.startsWith(`${packageId}@`)) {
         roots.push(path.join(cacheRoot, entry.name));
       }
     }
@@ -197,7 +358,7 @@ function findPackageCandidates(projectRoot: string): PackageCandidate[] {
   return roots.flatMap((packageRoot) => {
     try {
       const packageJson = readJson(path.join(packageRoot, "package.json")) as { name?: string; version?: string };
-      if (packageJson.name !== PACKAGE_ID) {
+      if (packageJson.name !== packageId) {
         return [];
       }
       return [{
@@ -214,10 +375,14 @@ function findPackageCandidates(projectRoot: string): PackageCandidate[] {
 function selectPackageCandidate(
   candidates: PackageCandidate[],
   requestedVersion: string | undefined,
-  locked: LockedPackage | undefined
+  locked: LockedPackage | undefined,
+  packageId: string
 ): PackageCandidate | undefined {
   return [...candidates]
-    .map((candidate) => ({ candidate, score: candidateScore(candidate, requestedVersion, locked) }))
+    .map((candidate) => ({
+      candidate,
+      score: candidateScore(candidate, requestedVersion, locked, packageId),
+    }))
     .sort((left, right) => right.score - left.score || left.candidate.packageRoot.localeCompare(right.candidate.packageRoot))[0]
     ?.candidate;
 }
@@ -225,23 +390,26 @@ function selectPackageCandidate(
 function candidateScore(
   candidate: PackageCandidate,
   requestedVersion: string | undefined,
-  locked: LockedPackage | undefined
+  locked: LockedPackage | undefined,
+  packageId: string
 ): number {
   let score = 0;
   const suffix = candidate.cacheIdentity.split("@").at(-1)?.toLowerCase() ?? "";
   if (locked?.hash && locked.hash.toLowerCase().startsWith(suffix)) score += 100;
   if (locked?.version && candidate.packageVersion === locked.version) score += 80;
   if (requestedVersion && candidate.packageVersion === requestedVersion) score += 40;
-  if (candidate.cacheIdentity === PACKAGE_ID) score += 20;
+  if (candidate.cacheIdentity === packageId) score += 20;
   return score;
 }
 
-function scanVisualScriptingClasses(packageRoot: string): Set<string> {
+function scanVisualScriptingClasses(packageRoot: string, expectedNamespace: string): Set<string> {
   const sourceRoot = path.join(packageRoot, "VisualScripting");
   const result = new Set<string>();
+  const escapedNamespace = expectedNamespace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const namespacePattern = new RegExp(`namespace\\s+${escapedNamespace}\\b`);
   for (const filePath of listCSharpFiles(sourceRoot)) {
     const source = stripCSharpComments(fs.readFileSync(filePath, "utf-8"));
-    if (!/namespace\s+Banter\.VisualScripting\b/.test(source)) continue;
+    if (!namespacePattern.test(source)) continue;
     const classPattern = /(?:^|\n)\s*(?:(?:public|internal|private|protected|abstract|sealed|static|partial|new)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)\b/g;
     for (const match of source.matchAll(classPattern)) result.add(match[1]);
   }
@@ -253,7 +421,7 @@ function scanSceneComponents(packageRoot: string): Set<string> {
   const result = new Set<string>();
   for (const filePath of listCSharpFiles(sourceRoot)) {
     const source = stripCSharpComments(fs.readFileSync(filePath, "utf-8"));
-    const classPattern = /(?:^|\n)\s*(?:(?:public|internal|private|protected|abstract|sealed|static|partial|new)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:BanterComponentBase|UnityComponentBase)\b/g;
+    const classPattern = /(?:^|\n)\s*(?:(?:public|internal|private|protected|abstract|sealed|static|partial|new)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:BanterComponentBase|BSComponentBase|UnityComponentBase)\b/g;
     for (const match of source.matchAll(classPattern)) result.add(match[1]);
   }
   return result;

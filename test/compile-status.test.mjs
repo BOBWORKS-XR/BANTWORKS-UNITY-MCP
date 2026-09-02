@@ -139,3 +139,66 @@ test("check_import_status cannot report success over a failed current compilatio
     await rm(fixture.projectPath, { recursive: true, force: true });
   }
 });
+
+test("fresh compiler status can settle while the lightweight Editor heartbeat is stale", async () => {
+  const fixture = await createFixture();
+  try {
+    const now = Date.now();
+    await writeFile(path.join(fixture.config.mcpStatePath, "editor-state.json"), JSON.stringify({
+      timestamp: now - 10000,
+      isCompiling: false,
+      isUpdating: false,
+    }));
+    await writeFile(path.join(fixture.config.mcpStatePath, "compilation-status.json"), JSON.stringify({
+      completed: true,
+      hasErrors: false,
+      timestamp: now,
+      errors: [],
+      warnings: [],
+    }));
+
+    const result = await waitForUnityCompile(1000, fixture.config);
+    assert.equal(result.success, true);
+    assert.equal(result.settled, true);
+    assert.equal(result.heartbeatStale, true);
+    assert.equal(result.compilationStale, false);
+    assert.match(result.message, /heartbeat is stale/i);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});
+
+test("check_import_status rejects a C# asset newer than the last completed compilation", async () => {
+  const fixture = await createFixture();
+  try {
+    const now = Date.now();
+    const assetPath = path.join(fixture.config.assetsPath, "Newer.cs");
+    await writeFile(assetPath, "class Newer {}");
+    await writeFile(`${assetPath}.meta`, "guid: fedcba9876543210fedcba9876543210");
+    await writeFile(path.join(fixture.config.mcpStatePath, "editor-state.json"), JSON.stringify({
+      timestamp: now,
+      isCompiling: false,
+      isUpdating: false,
+    }));
+    await writeFile(path.join(fixture.config.mcpStatePath, "import-status.json"), JSON.stringify({
+      completed: true,
+      hasErrors: false,
+      timestamp: now,
+    }));
+    await writeFile(path.join(fixture.config.mcpStatePath, "compilation-status.json"), JSON.stringify({
+      completed: true,
+      hasErrors: false,
+      timestamp: now - 10000,
+      errors: [],
+      warnings: [],
+    }));
+
+    const result = await checkImportStatus("Assets/Newer.cs", true, 1000, fixture.config);
+    assert.equal(result.imported, true);
+    assert.equal(result.success, false);
+    assert.equal(result.staleAssembly, true);
+    assert.match(result.message ?? "", /assembly state is stale/i);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});

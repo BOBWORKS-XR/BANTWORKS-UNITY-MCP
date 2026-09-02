@@ -1,7 +1,8 @@
 # Tool Groups
 
-BANTWORKS MCP exposes all tools by default. Set `BANTWORKS_TOOL_GROUPS` in the
-MCP server environment to reduce the tool surface for a session.
+Creator Works MCP exposes all tools by default. Set `CREATOR_WORKS_TOOL_GROUPS` in the
+MCP server environment to reduce the tool surface for a session. The legacy
+`BANTWORKS_TOOL_GROUPS` name remains accepted while existing installations migrate.
 
 Accepted values are `all`, `none`, or a comma-separated combination of:
 
@@ -11,6 +12,7 @@ Accepted values are `all`, `none`, or a comma-separated combination of:
 | `author` | Visual Scripting generation/writes, WebRoot writes, asset refresh, guarded custom Editor menu execution, scene lifecycle, GameObject/component changes, and prefab placement/scanning. |
 | `test` | Test discovery/execution/cancellation/status, compile settling, Play Mode control, logs, and screenshots. |
 | `banter` | Banter SDK provenance, Visual Scripting generation/validation/writes, SDK allow-list validation, and WebRoot authoring. |
+| `shadergraph` | Shader Graph capability checks, structural inspection, transactional creation/mutation, and compiler validation. |
 
 `list_unity_projects`, `select_unity_project`, and `get_bridge_status` remain
 available for every selection, including `none`. Groups are unions, so

@@ -188,6 +188,7 @@ test("fresh targeted hierarchy queries use a correlated live result without rewr
         assert.equal(command.type, "query_hierarchy");
         assert.equal(command.rootPath, "Root");
         assert.equal(command.maxResults, 5);
+        assert.deepEqual(command.propertyNames, ["m_Mass"]);
         await writeFile(path.join(resultsPath, `${command.id}.json`), JSON.stringify({
           commandId: command.id,
           success: true,
@@ -214,6 +215,7 @@ test("fresh targeted hierarchy queries use a correlated live result without rewr
       rootPath: "Root",
       maxResults: 5,
       fields: ["path", "localPosition"],
+      propertyNames: ["m_Mass"],
       timeoutMs: 2000,
     });
     await bridge;
@@ -223,6 +225,52 @@ test("fresh targeted hierarchy queries use a correlated live result without rewr
     assert.equal(result.snapshot?.refreshed, true);
     assert.deepEqual(result.data.objects, [{ path: "Root", localPosition: [4, 5, 6] }]);
     assert.equal(await readFile(snapshotPath, "utf8"), snapshotBefore);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});
+
+test("saved hierarchy queries project only requested serialized properties", async () => {
+  const fixture = await createHierarchyFixture();
+  try {
+    const result = await queryProjectState("hierarchy", undefined, fixture.config, {
+      rootPath: "Root",
+      includeDescendants: true,
+      componentType: "Rigidbody",
+      propertyNames: ["m_Mass"],
+      refresh: false,
+    });
+
+    assert.equal(result.success, true);
+    const properties = result.data.objects[0].components[0].properties;
+    assert.deepEqual(properties, [{ name: "m_Mass", value: "1" }]);
+    assert.deepEqual(result.query?.propertyNames, ["m_Mass"]);
+  } finally {
+    await rm(fixture.projectPath, { recursive: true, force: true });
+  }
+});
+
+test("hierarchy response byte budgets truncate oversized snapshot results", async () => {
+  const fixture = await createHierarchyFixture();
+  try {
+    const hierarchyPath = path.join(fixture.config.mcpStatePath, "scene-hierarchy.json");
+    const hierarchy = JSON.parse(await readFile(hierarchyPath, "utf8"));
+    hierarchy.objects = [
+      { name: "LargeA", path: "LargeA", depth: 0, payload: "a".repeat(12000), components: [] },
+      { name: "LargeB", path: "LargeB", depth: 0, payload: "b".repeat(12000), components: [] },
+    ];
+    await writeFile(hierarchyPath, JSON.stringify(hierarchy));
+
+    const result = await queryProjectState("hierarchy", undefined, fixture.config, {
+      refresh: false,
+      maxResults: 10,
+      maxResponseBytes: 16384,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.objects.length, 1);
+    assert.equal(result.query?.truncated, true);
+    assert.ok((result.query?.responseBytes ?? Infinity) <= 16384);
   } finally {
     await rm(fixture.projectPath, { recursive: true, force: true });
   }
