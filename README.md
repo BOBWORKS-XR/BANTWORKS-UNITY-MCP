@@ -126,6 +126,7 @@ These project screenshots show scene hierarchy construction, configured Banter c
 
 ## Documentation
 
+- [Feedback and feasibility process](FEEDBACK.md)
 - [Bridge protocol](docs/bridge-protocol.md)
 - [Compatibility matrix](docs/compatibility.md)
 - [Tool groups](docs/tool-groups.md)
@@ -151,7 +152,7 @@ Set-Location launcher/src-tauri
 cargo test
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements and [SECURITY.md](SECURITY.md) for vulnerability reporting.
+See [FEEDBACK.md](FEEDBACK.md) to report problems or improvements, [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 
