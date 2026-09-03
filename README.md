@@ -2,7 +2,7 @@
 
 Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Download Creator Works MCP 2.5.0](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.0) | [Source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Download Creator Works MCP 2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1) | [Source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
 ![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
@@ -21,7 +21,7 @@ Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients 
 
 ## Quick Start
 
-1. Download `Creator.Works.MCP_2.5.0_x64-setup.exe` from the [2.5.0 release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.0).
+1. Download `Creator.Works.MCP_2.5.1_x64-setup.exe` from the [2.5.1 release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1).
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -30,7 +30,11 @@ Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients 
 
 A ready bridge reports `ready: true` and `stateStatus: "fresh"`. The launcher can import existing project and client settings from an earlier installation; verify the imported projects and update their bridges before removing the previous Windows application.
 
-The Windows installers are currently unsigned, so Microsoft Defender SmartScreen can display an Unknown publisher warning. Verify downloads against the included `SHA256SUMS.txt`.
+During an EXE upgrade, Setup checks whether its private runtime is still active. If prompted, save your work, fully close Codex, Claude Code, and Creator Works MCP, then select **Retry**. Setup never force-closes those applications; an unattended install exits with code `10` while the runtime is locked.
+
+For the one-time move from the v2.5.0 MSI to the v2.5.1 EXE, close MCP clients before starting Setup. The old MSI must be removed before the new guarded EXE update path takes over.
+
+The Windows installer is currently unsigned, so Microsoft Defender SmartScreen can display an Unknown publisher warning. Verify the download against the included `SHA256SUMS.txt`. Stable releases publish the guided EXE rather than a separate MSI.
 
 ## SDK Profiles
 
@@ -82,7 +86,7 @@ UNITY_PROJECT_PATH = "E:/unity/MyProject"
 CREATOR_WORKS_TOOL_GROUPS = "all"
 ```
 
-The standalone ZIP requires Node.js 20 or newer. The Windows setup executable and MSI include the private runtime.
+The standalone ZIP requires Node.js 20 or newer. The Windows setup executable includes the private runtime.
 
 Tool profiles can expose `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated combination, `all`, or `none` for routing and health only.
 
@@ -101,9 +105,9 @@ After Unity compiles, call `get_bridge_status`. Scene-changing tools require an 
 
 ## Release Status
 
-The `2.5.0` release is published only after these gates pass for the tagged revision:
+The `2.5.1` release is published only after these gates pass for the tagged revision:
 
-- 135 Node tests
+- 137 Node tests
 - 13 native launcher tests
 - Node 20, 22, and 24 CI
 - Windows launcher packaging and standalone installation smoke tests

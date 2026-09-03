@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.5.1 - 2026-09-03
+
+### Fixed
+
+- Added a pre-install runtime guard that matches only Creator Works MCP's bundled `server/runtime/node.exe`, preventing opaque locked-file failures during EXE upgrades.
+- Interactive upgrades now explain which applications to close and offer **Retry** or **Cancel** without force-closing user processes; unattended upgrades fail immediately with exit code `10` while locked.
+
+### Changed
+
+- Stable releases now publish one guided NSIS setup executable plus the standalone ZIP and checksums. The unguarded MSI is no longer published.
+- Removed the stale Shader Graph Preview suffix from the Windows application title while retaining the experimental feature label inside the launcher.
+
+### Verified
+
+- All 137 Node tests and all 13 native launcher tests pass, including static checks for exact-path matching, silent failure, and absence of process-killing commands.
+- The unsigned 2.5.1 NSIS installer builds with the private Node.js 24.17.0 runtime.
+- An isolated NSIS harness returns `10` with the exact bundled runtime locked and `0` after it closes; an independent process smoke also confirms unrelated Node paths do not match.
+
 ## 2.5.0 - 2026-09-03
 
 ### Added
