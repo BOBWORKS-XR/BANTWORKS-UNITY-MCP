@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod jsonc;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
@@ -133,6 +135,8 @@ struct SetupResult {
     bridge_installed: bool,
     codex_configured: bool,
     claude_configured: bool,
+    antigravity_configured: bool,
+    opencode_configured: bool,
     runtime_command: String,
 }
 
@@ -231,6 +235,107 @@ fn normalized_existing_path(path: PathBuf) -> PathBuf {
     canonical
 }
 
+fn get_persistent_server_dir() -> Option<PathBuf> {
+    dirs::data_local_dir()
+        .or_else(dirs::data_dir)
+        .map(|dir| dir.join(APP_CONFIG_DIR).join("server"))
+}
+
+fn is_ephemeral_path(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    path_str.contains("/tmp/.mount_")
+        || path_str.contains("/.mount_")
+        || path_str.starts_with("/tmp/")
+        || path_str.starts_with("/var/tmp/")
+}
+
+fn sync_ephemeral_bundle(source_root: &Path) -> Option<PathBuf> {
+    let dest_root = get_persistent_server_dir()?;
+    let _ = fs::create_dir_all(&dest_root);
+    let _ = fs::create_dir_all(dest_root.join("runtime"));
+    let _ = fs::create_dir_all(dest_root.join("unity-extension").join("Editor"));
+
+    let files_to_sync = [
+        "creator-works-mcp.mjs",
+        "banter-mcp.mjs",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "runtime/VERSION",
+        "runtime/LICENSE",
+        "unity-extension/Editor/BanterMCPBridge.cs",
+        "unity-extension/Editor/CreatorWorksMCPLogo.png",
+    ];
+
+    for relative_file in files_to_sync {
+        let src = source_root.join(relative_file);
+        let dst = dest_root.join(relative_file);
+        if src.is_file() {
+            let _ = fs::copy(&src, &dst);
+        }
+    }
+
+    let creator_bundle = dest_root.join("creator-works-mcp.mjs");
+    let banter_bundle = dest_root.join("banter-mcp.mjs");
+    if creator_bundle.is_file() && !banter_bundle.is_file() {
+        let _ = fs::copy(&creator_bundle, &banter_bundle);
+    } else if banter_bundle.is_file() && !creator_bundle.is_file() {
+        let _ = fs::copy(&banter_bundle, &creator_bundle);
+    }
+
+    let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
+    let src_node = source_root.join("runtime").join(binary_name);
+    let dst_node = dest_root.join("runtime").join(binary_name);
+    if src_node.is_file() {
+        let should_copy = if dst_node.is_file() {
+            let src_len = fs::metadata(&src_node).map(|m| m.len()).unwrap_or(0);
+            let dst_len = fs::metadata(&dst_node).map(|m| m.len()).unwrap_or(0);
+            src_len != dst_len || src_len == 0
+        } else {
+            true
+        };
+        if should_copy {
+            let _ = fs::copy(&src_node, &dst_node);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&dst_node, fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    // Also mirror to legacy bantworks-mcp/server so existing configurations
+    // referencing the former directory remain functional.
+    if let Some(base) = dirs::data_local_dir().or_else(dirs::data_dir) {
+        let legacy_dir = base.join("bantworks-mcp").join("server");
+        if legacy_dir.is_dir() {
+            let _ = fs::create_dir_all(legacy_dir.join("runtime"));
+            let _ = fs::create_dir_all(legacy_dir.join("unity-extension").join("Editor"));
+            for relative_file in files_to_sync {
+                let src = dest_root.join(relative_file);
+                let dst = legacy_dir.join(relative_file);
+                if src.is_file() {
+                    let _ = fs::copy(&src, &dst);
+                }
+            }
+            let legacy_node = legacy_dir.join("runtime").join(binary_name);
+            if dst_node.is_file() {
+                let _ = fs::copy(&dst_node, &legacy_node);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&legacy_node, fs::Permissions::from_mode(0o755));
+                }
+            }
+        }
+    }
+
+    if is_valid_mcp_root(&dest_root) {
+        Some(dest_root)
+    } else {
+        None
+    }
+}
+
 fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Some((variable, configured_root)) = std::env::var_os(MCP_ROOT_ENV)
         .map(|value| (MCP_ROOT_ENV, value))
@@ -254,7 +359,13 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         {
             if let Some(root) = resource_server.parent() {
                 if is_valid_mcp_root(root) {
-                    return Ok(normalized_existing_path(root.to_path_buf()));
+                    if is_ephemeral_path(root) {
+                        if let Some(persistent_root) = sync_ephemeral_bundle(root) {
+                            return Ok(normalized_existing_path(persistent_root));
+                        }
+                    } else {
+                        return Ok(normalized_existing_path(root.to_path_buf()));
+                    }
                 }
             }
         }
@@ -269,8 +380,29 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         if let Some(executable_dir) = executable.parent() {
             for candidate in [executable_dir.join("server"), executable_dir.to_path_buf()] {
                 if is_valid_mcp_root(&candidate) {
-                    return Ok(normalized_existing_path(candidate));
+                    if is_ephemeral_path(&candidate) {
+                        if let Some(persistent_root) = sync_ephemeral_bundle(&candidate) {
+                            return Ok(normalized_existing_path(persistent_root));
+                        }
+                    } else {
+                        return Ok(normalized_existing_path(candidate));
+                    }
                 }
+            }
+        }
+    }
+
+    if let Some(persistent_dir) = get_persistent_server_dir() {
+        if is_valid_mcp_root(&persistent_dir) {
+            return Ok(normalized_existing_path(persistent_dir));
+        }
+    }
+
+    if let Some(base) = dirs::data_local_dir().or_else(dirs::data_dir) {
+        for legacy_name in ["bantworks-mcp", "banter-mcp"] {
+            let legacy_dir = base.join(legacy_name).join("server");
+            if is_valid_mcp_root(&legacy_dir) {
+                return Ok(normalized_existing_path(legacy_dir));
             }
         }
     }
@@ -292,7 +424,8 @@ fn default_mcp_server_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn bundled_node_path(root: &Path) -> PathBuf {
-    root.join("runtime").join("node.exe")
+    let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
+    root.join("runtime").join(binary_name)
 }
 
 fn find_command_on_path(command: &str) -> Option<PathBuf> {
@@ -319,7 +452,9 @@ fn resolve_node_command(app: &tauri::AppHandle) -> Result<(PathBuf, bool), Strin
     let root = resolve_mcp_root(app)?;
     let bundled = [
         bundled_node_path(&root),
-        root.join("release").join("runtime").join("node.exe"),
+        root.join("release")
+            .join("runtime")
+            .join(if cfg!(windows) { "node.exe" } else { "node" }),
     ]
     .into_iter()
     .find(|candidate| candidate.is_file());
@@ -342,7 +477,8 @@ fn is_legacy_server_path(value: &str) -> bool {
 }
 
 fn is_legacy_server_bundle_path(value: &str) -> bool {
-    Path::new(value)
+    let normalized = value.replace('\\', "/");
+    Path::new(&normalized)
         .file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.eq_ignore_ascii_case("banter-mcp.mjs"))
@@ -521,7 +657,9 @@ fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
             serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
         let needs_server_migration = config.mcp_server_path.trim().is_empty()
             || is_legacy_server_path(&config.mcp_server_path)
-            || is_legacy_server_bundle_path(&config.mcp_server_path);
+            || is_legacy_server_bundle_path(&config.mcp_server_path)
+            || !Path::new(&config.mcp_server_path).is_file()
+            || is_ephemeral_path(Path::new(&config.mcp_server_path));
         let replacement_server_path = if needs_server_migration {
             Some(default_mcp_server_path(&app)?)
         } else {
@@ -767,6 +905,28 @@ fn get_codex_config_path() -> PathBuf {
         .join("config.toml")
 }
 
+/// Get Antigravity MCP config path (`~/.gemini/config/mcp_config.json`)
+/// Used by Antigravity IDE and Antigravity CLI; the global location lives
+/// under `~/.gemini/config` regardless of the host OS.
+fn get_antigravity_config_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".gemini")
+        .join("config")
+        .join("mcp_config.json")
+}
+
+/// Get OpenCode MCP config path (`~/.config/opencode/opencode.jsonc` on
+/// Linux, `~/Library/Application Support/opencode/opencode.jsonc` on macOS,
+/// `%APPDATA%\opencode\opencode.jsonc` on Windows — `dirs::config_dir()`
+/// resolves those consistently).
+fn get_opencode_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("opencode")
+        .join("opencode.jsonc")
+}
+
 /// Read current Claude Code MCP configuration
 #[tauri::command]
 fn get_claude_mcp_config() -> Result<serde_json::Value, String> {
@@ -986,6 +1146,248 @@ fn remove_codex_mcp_config() -> Result<(), String> {
         LEGACY_MCP_CLIENT_ID,
     );
 
+    atomic_write(&config_path, &content)
+}
+
+/// Read the current Antigravity MCP configuration (returns an empty object if
+/// the file is missing or unreadable, matching the Claude Code handler).
+#[tauri::command]
+fn get_antigravity_mcp_config() -> Result<serde_json::Value, String> {
+    let config_path = get_antigravity_config_path();
+
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read Antigravity config: {}", e))?;
+    if content.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse Antigravity config: {}", e))
+}
+
+fn build_antigravity_mcp_config(
+    mut config: serde_json::Value,
+    channel: &ProjectChannel,
+    node_command: &str,
+    mcp_server_path: &str,
+    tool_groups: &str,
+) -> Result<serde_json::Value, String> {
+    if !config.is_object() {
+        return Err("Antigravity config root must be a JSON object".to_string());
+    }
+    if config.get("mcpServers").is_none() {
+        config["mcpServers"] = serde_json::json!({});
+    } else if !config["mcpServers"].is_object() {
+        return Err("Antigravity config mcpServers must be a JSON object".to_string());
+    }
+
+    let mut env = serde_json::json!({
+        "UNITY_PROJECT_PATH": channel.unity_project_path,
+        TOOL_GROUPS_ENV: normalize_tool_groups(tool_groups)?
+    });
+    if let Some(scene) = &channel.scene_path {
+        env["UNITY_SCENE_PATH"] = serde_json::json!(scene);
+    }
+
+    if let Some(servers) = config["mcpServers"].as_object_mut() {
+        servers.remove(LEGACY_MCP_CLIENT_ID);
+    }
+    config["mcpServers"][MCP_CLIENT_ID] = serde_json::json!({
+        "command": node_command,
+        "args": [mcp_server_path],
+        "env": env
+    });
+    Ok(config)
+}
+
+#[tauri::command]
+fn update_antigravity_mcp_config(
+    app: tauri::AppHandle,
+    channel: ProjectChannel,
+    mcp_server_path: String,
+    tool_groups: String,
+) -> Result<(), String> {
+    let config_path = get_antigravity_config_path();
+    let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
+    let tool_groups = normalize_tool_groups(&tool_groups)?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create Antigravity config directory: {}", e))?;
+    }
+
+    let config: serde_json::Value = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read Antigravity config: {}", e))?;
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&content).map_err(|e| {
+                format!(
+                    "Failed to parse Antigravity config; refusing to overwrite it: {}",
+                    e
+                )
+            })?
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let config = build_antigravity_mcp_config(
+        config,
+        &channel,
+        &node_command,
+        &mcp_server_path,
+        &tool_groups,
+    )?;
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize Antigravity config: {}", e))?;
+
+    atomic_write(&config_path, &content)
+}
+
+#[tauri::command]
+fn remove_antigravity_mcp_config() -> Result<(), String> {
+    let config_path = get_antigravity_config_path();
+
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read Antigravity config: {}", e))?;
+    if content.trim().is_empty() {
+        return Ok(());
+    }
+    let mut config: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse Antigravity config: {}", e))?;
+
+    if let Some(servers) = config.get_mut("mcpServers") {
+        if let Some(obj) = servers.as_object_mut() {
+            obj.remove(MCP_CLIENT_ID);
+            obj.remove(LEGACY_MCP_CLIENT_ID);
+        }
+    }
+
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize Antigravity config: {}", e))?;
+
+    atomic_write(&config_path, &content)
+}
+
+/// Read the current OpenCode MCP configuration. OpenCode stores its config
+/// as JSONC (JSON with comments) at `~/.config/opencode/opencode.jsonc`, so
+/// we strip line comments before parsing.
+#[tauri::command]
+fn get_opencode_mcp_config() -> Result<serde_json::Value, String> {
+    let config_path = get_opencode_config_path();
+    if !config_path.exists() {
+        return Ok(serde_json::json!({}));
+    }
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
+    parse_opencode_config(&content)
+}
+
+fn parse_opencode_config(content: &str) -> Result<serde_json::Value, String> {
+    jsonc::parse(content).map_err(|e| format!("Failed to parse OpenCode config: {}", e))
+}
+fn build_opencode_mcp_config(
+    mut config: serde_json::Value,
+    channel: &ProjectChannel,
+    node_command: &str,
+    mcp_server_path: &str,
+    tool_groups: &str,
+) -> Result<serde_json::Value, String> {
+    if !config.is_object() {
+        return Err("OpenCode config root must be a JSON object".to_string());
+    }
+    if config.get("mcp").is_none() {
+        config["mcp"] = serde_json::json!({});
+    } else if !config["mcp"].is_object() {
+        return Err("OpenCode config 'mcp' must be a JSON object".to_string());
+    }
+
+    let mut environment = serde_json::json!({
+        "UNITY_PROJECT_PATH": channel.unity_project_path,
+        TOOL_GROUPS_ENV: normalize_tool_groups(tool_groups)?
+    });
+    if let Some(scene) = &channel.scene_path {
+        environment["UNITY_SCENE_PATH"] = serde_json::json!(scene);
+    }
+
+    if let Some(mcp) = config["mcp"].as_object_mut() {
+        mcp.remove(LEGACY_MCP_CLIENT_ID);
+    }
+    config["mcp"][MCP_CLIENT_ID] = serde_json::json!({
+        "type": "local",
+        "command": [node_command, mcp_server_path],
+        "enabled": true,
+        "environment": environment,
+    });
+    Ok(config)
+}
+
+#[tauri::command]
+fn update_opencode_mcp_config(
+    app: tauri::AppHandle,
+    channel: ProjectChannel,
+    mcp_server_path: String,
+    tool_groups: String,
+) -> Result<(), String> {
+    let config_path = get_opencode_config_path();
+    let mcp_server_path = validate_mcp_server_path(&mcp_server_path)?
+        .to_string_lossy()
+        .to_string();
+    let tool_groups = normalize_tool_groups(&tool_groups)?;
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create OpenCode config directory: {}", e))?;
+    }
+
+    let content = if config_path.exists() {
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
+        parse_opencode_config(&content)?;
+        content
+    } else {
+        "{}".to_string()
+    };
+
+    let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
+    let config = build_opencode_mcp_config(
+        serde_json::json!({ "mcp": {} }),
+        &channel,
+        &node_command,
+        &mcp_server_path,
+        &tool_groups,
+    )?;
+    let entry = config["mcp"][MCP_CLIENT_ID].clone();
+    let content =
+        jsonc::update_managed_entry(&content, "mcp", MCP_CLIENT_ID, LEGACY_MCP_CLIENT_ID, &entry)
+            .map_err(|e| format!("Failed to update OpenCode config: {}", e))?;
+
+    atomic_write(&config_path, &content)
+}
+
+#[tauri::command]
+fn remove_opencode_mcp_config() -> Result<(), String> {
+    let config_path = get_opencode_config_path();
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let content = fs::read_to_string(&config_path)
+        .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
+    let content =
+        jsonc::remove_managed_entries(&content, "mcp", MCP_CLIENT_ID, LEGACY_MCP_CLIENT_ID)
+            .map_err(|e| format!("Failed to update OpenCode config: {}", e))?;
     atomic_write(&config_path, &content)
 }
 
@@ -1228,6 +1630,39 @@ fn claude_is_configured() -> bool {
         .is_some()
 }
 
+fn antigravity_is_configured() -> bool {
+    fs::read_to_string(get_antigravity_config_path())
+        .ok()
+        .and_then(|content| {
+            if content.trim().is_empty() {
+                return None;
+            }
+            serde_json::from_str::<serde_json::Value>(&content).ok()
+        })
+        .and_then(|config| {
+            let servers = config.get("mcpServers")?;
+            servers
+                .get(MCP_CLIENT_ID)
+                .or_else(|| servers.get(LEGACY_MCP_CLIENT_ID))
+                .cloned()
+        })
+        .is_some()
+}
+
+fn opencode_is_configured() -> bool {
+    fs::read_to_string(get_opencode_config_path())
+        .ok()
+        .and_then(|content| parse_opencode_config(&content).ok())
+        .and_then(|config| {
+            let servers = config.get("mcp")?;
+            servers
+                .get(MCP_CLIENT_ID)
+                .or_else(|| servers.get(LEGACY_MCP_CLIENT_ID))
+                .cloned()
+        })
+        .is_some()
+}
+
 fn client_statuses() -> Vec<ClientStatus> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     vec![
@@ -1246,6 +1681,22 @@ fn client_statuses() -> Vec<ClientStatus> {
                 || command_is_available("claude"),
             configured: claude_is_configured(),
             config_path: get_claude_config_path().to_string_lossy().to_string(),
+        },
+        ClientStatus {
+            id: "antigravity".to_string(),
+            name: "Antigravity".to_string(),
+            detected: home.join(".gemini").is_dir()
+                || get_antigravity_config_path().is_file()
+                || command_is_available("antigravity"),
+            configured: antigravity_is_configured(),
+            config_path: get_antigravity_config_path().to_string_lossy().to_string(),
+        },
+        ClientStatus {
+            id: "opencode".to_string(),
+            name: "OpenCode".to_string(),
+            detected: get_opencode_config_path().is_file() || command_is_available("opencode"),
+            configured: opencode_is_configured(),
+            config_path: get_opencode_config_path().to_string_lossy().to_string(),
         },
     ]
 }
@@ -1492,6 +1943,8 @@ fn one_click_setup(
     unity_project_path: String,
     configure_codex: bool,
     configure_claude: bool,
+    configure_antigravity: bool,
+    configure_opencode: bool,
     tool_groups: String,
     enable_custom_scripts: bool,
 ) -> Result<SetupResult, String> {
@@ -1502,6 +1955,12 @@ fn one_click_setup(
 
     if configure_claude {
         get_claude_mcp_config()?;
+    }
+    if configure_antigravity {
+        get_antigravity_mcp_config()?;
+    }
+    if configure_opencode {
+        get_opencode_mcp_config()?;
     }
 
     let mut config = load_config(app.clone())?;
@@ -1537,7 +1996,23 @@ fn one_click_setup(
         )?;
     }
     if configure_claude {
-        update_claude_mcp_config(app, channel.clone(), mcp_server_path, tool_groups)?;
+        update_claude_mcp_config(
+            app.clone(),
+            channel.clone(),
+            mcp_server_path.clone(),
+            tool_groups.clone(),
+        )?;
+    }
+    if configure_antigravity {
+        update_antigravity_mcp_config(
+            app.clone(),
+            channel.clone(),
+            mcp_server_path.clone(),
+            tool_groups.clone(),
+        )?;
+    }
+    if configure_opencode {
+        update_opencode_mcp_config(app, channel.clone(), mcp_server_path, tool_groups)?;
     }
 
     Ok(SetupResult {
@@ -1545,11 +2020,29 @@ fn one_click_setup(
         bridge_installed: true,
         codex_configured: configure_codex,
         claude_configured: configure_claude,
+        antigravity_configured: configure_antigravity,
+        opencode_configured: configure_opencode,
         runtime_command,
     })
 }
 
 fn main() {
+    // Linux-only: work around WebKitGTK failures on Wayland sessions and
+    // certain GPU drivers where the DMA-BUF renderer can't allocate a
+    // backing buffer for the WebView ("Failed to create GBM buffer of size
+    // 900x700: Invalid argument"). Falling back to the CPU renderer keeps
+    // the launcher functional on CachyOS / Arch and similar hosts without
+    // hurting visual quality on systems where DMA-BUF works correctly.
+    #[cfg(target_os = "linux")]
+    {
+        if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+        // Honour an explicit GDK_BACKEND override (e.g. GDK_BACKEND=x11) but
+        // do not force one — Wayland is the default on modern distros and
+        // works on most systems once DMA-BUF is disabled.
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1566,6 +2059,12 @@ fn main() {
             remove_claude_mcp_config,
             update_codex_mcp_config,
             remove_codex_mcp_config,
+            get_antigravity_mcp_config,
+            update_antigravity_mcp_config,
+            remove_antigravity_mcp_config,
+            get_opencode_mcp_config,
+            update_opencode_mcp_config,
+            remove_opencode_mcp_config,
             check_unity_extension,
             get_unity_extension_status,
             get_project_sdk_profile,
@@ -1936,5 +2435,144 @@ mod tests {
         assert_eq!(projects[0].unity_version.as_deref(), Some("6000.3.10f1"));
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn antigravity_and_opencode_configs_include_tool_groups_and_paths() {
+        let channel = ProjectChannel {
+            id: "channel-1".to_string(),
+            name: "Project".to_string(),
+            unity_project_path: "/home/user/Unity/Project".to_string(),
+            scene_path: Some("/home/user/Unity/Project/Assets/Main.unity".to_string()),
+            enabled: true,
+        };
+
+        let antigravity = build_antigravity_mcp_config(
+            serde_json::json!({ "mcpServers": {} }),
+            &channel,
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node",
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs",
+            "all",
+        )
+        .unwrap();
+
+        assert_eq!(
+            antigravity["mcpServers"][MCP_CLIENT_ID]["command"],
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node"
+        );
+        assert_eq!(
+            antigravity["mcpServers"][MCP_CLIENT_ID]["args"][0],
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
+        );
+        assert_eq!(
+            antigravity["mcpServers"][MCP_CLIENT_ID]["env"]["UNITY_PROJECT_PATH"],
+            "/home/user/Unity/Project"
+        );
+        assert_eq!(
+            antigravity["mcpServers"][MCP_CLIENT_ID]["env"][TOOL_GROUPS_ENV],
+            "all"
+        );
+        assert_eq!(
+            antigravity["mcpServers"][MCP_CLIENT_ID]["env"]["UNITY_SCENE_PATH"],
+            "/home/user/Unity/Project/Assets/Main.unity"
+        );
+
+        let opencode = build_opencode_mcp_config(
+            serde_json::json!({ "mcp": {} }),
+            &channel,
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node",
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs",
+            "read,banter",
+        )
+        .unwrap();
+
+        assert_eq!(opencode["mcp"][MCP_CLIENT_ID]["type"], "local");
+        assert_eq!(opencode["mcp"][MCP_CLIENT_ID]["enabled"], true);
+        assert_eq!(
+            opencode["mcp"][MCP_CLIENT_ID]["command"][0],
+            "/home/user/.local/share/bantworks-mcp/server/runtime/node"
+        );
+        assert_eq!(
+            opencode["mcp"][MCP_CLIENT_ID]["command"][1],
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
+        );
+        assert_eq!(
+            opencode["mcp"][MCP_CLIENT_ID]["environment"][TOOL_GROUPS_ENV],
+            "read,banter"
+        );
+    }
+
+    #[test]
+    fn ephemeral_path_detection_identifies_appimage_mounts() {
+        assert!(is_ephemeral_path(Path::new(
+            "/tmp/.mount_BANTWOHGiine/usr/lib/BANTWORKS-MCP/server/banter-mcp.mjs"
+        )));
+        assert!(is_ephemeral_path(Path::new(
+            "/tmp/.mount_abc123/server/runtime/node"
+        )));
+        assert!(is_ephemeral_path(Path::new(
+            "/var/tmp/something/banter-mcp.mjs"
+        )));
+        assert!(!is_ephemeral_path(Path::new(
+            "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
+        )));
+        assert!(!is_ephemeral_path(Path::new(
+            "/usr/lib/BANTWORKS-MCP/server/banter-mcp.mjs"
+        )));
+    }
+
+    #[test]
+    fn sync_ephemeral_bundle_extracts_all_required_mcp_artifacts() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test-ephemeral-{}", uuid::Uuid::new_v4()));
+        let source_root = temp_dir.join("mount/server");
+        fs::create_dir_all(source_root.join("runtime")).unwrap();
+        fs::create_dir_all(source_root.join("unity-extension").join("Editor")).unwrap();
+
+        fs::write(source_root.join("creator-works-mcp.mjs"), "// server").unwrap();
+        fs::write(source_root.join("LICENSE"), "MIT").unwrap();
+        fs::write(source_root.join("THIRD_PARTY_NOTICES.md"), "Notices").unwrap();
+        fs::write(source_root.join("runtime").join("VERSION"), "v24.0.0").unwrap();
+        fs::write(source_root.join("runtime").join("LICENSE"), "Node").unwrap();
+        let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
+        fs::write(source_root.join("runtime").join(binary_name), "#!/bin/sh").unwrap();
+        fs::write(
+            source_root
+                .join("unity-extension")
+                .join("Editor")
+                .join("BanterMCPBridge.cs"),
+            "// bridge",
+        )
+        .unwrap();
+        fs::write(
+            source_root
+                .join("unity-extension")
+                .join("Editor")
+                .join(UNITY_BRIDGE_LOGO_FILE_NAME),
+            "PNG",
+        )
+        .unwrap();
+
+        assert!(is_valid_mcp_root(&source_root));
+
+        let synced = sync_ephemeral_bundle(&source_root);
+        assert!(synced.is_some(), "sync_ephemeral_bundle should succeed");
+        let dest_root = synced.unwrap();
+        assert!(is_valid_mcp_root(&dest_root));
+        assert!(dest_root.join("creator-works-mcp.mjs").is_file());
+        assert!(dest_root.join("banter-mcp.mjs").is_file());
+        assert!(dest_root.join("runtime").join(binary_name).is_file());
+        assert!(dest_root
+            .join("unity-extension")
+            .join("Editor")
+            .join("BanterMCPBridge.cs")
+            .is_file());
+        assert!(dest_root
+            .join("unity-extension")
+            .join("Editor")
+            .join(UNITY_BRIDGE_LOGO_FILE_NAME)
+            .is_file());
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }

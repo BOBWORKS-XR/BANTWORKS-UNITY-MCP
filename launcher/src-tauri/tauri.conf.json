@@ -5,7 +5,7 @@
   "identifier": "com.creatorworks.unitymcp.preview",
   "build": {
     "beforeDevCommand": "",
-    "beforeBuildCommand": "npm --prefix .. run release:launcher",
+    "beforeBuildCommand": "",
     "frontendDist": "../src"
   },
   "app": {
@@ -39,6 +39,7 @@
     ],
     "resources": {
       "../../release/creator-works-mcp.mjs": "server/creator-works-mcp.mjs",
+      "../../release/runtime/node": "server/runtime/node",
       "../../release/runtime/node.exe": "server/runtime/node.exe",
       "../../release/runtime/LICENSE": "server/runtime/LICENSE",
       "../../release/runtime/VERSION": "server/runtime/VERSION",

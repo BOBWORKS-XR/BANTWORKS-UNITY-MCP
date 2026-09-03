@@ -1,6 +1,6 @@
 # Creator Works MCP
 
-Creator Works MCP connects Codex, Claude Code, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
+Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
 [Download Creator Works MCP 2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1) | [Source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
@@ -154,6 +154,17 @@ npm test
 Set-Location launcher/src-tauri
 cargo test
 ```
+
+```bash
+# Linux / macOS
+git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
+cd CREATOR-WORKS-UNITY-MCP
+npm ci
+npm test
+(cd launcher/src-tauri && cargo test)
+```
+
+The Tauri launcher can be built locally on Windows (NSIS/MSI), Linux (`.deb`/`.rpm`/`.AppImage`), and macOS (DMG). Tagged GitHub releases currently publish the Windows NSIS installer and standalone ZIP only. See [BUILD_TAURI.md](BUILD_TAURI.md) for host-specific toolchain setup. The cross-platform Node setup CLI configures Codex, Claude Code, Antigravity, and OpenCode; `./setup.sh` wraps it on Linux/macOS.
 
 See [FEEDBACK.md](FEEDBACK.md) to report problems or improvements, [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 

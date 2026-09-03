@@ -1,18 +1,21 @@
 {
   "name": "creator-works-mcp",
   "version": "2.5.1",
-  "description": "Codex, Claude Code, and MCP-compatible Unity integration with first-class Creator SDK and Banter knowledge",
+  "description": "Codex, Claude Code, Antigravity, OpenCode, and MCP-compatible Unity integration with first-class Creator SDK and Banter knowledge",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "bundle:server": "npm run build && esbuild dist/index.js --bundle --platform=node --format=esm --target=node20 --outfile=release/creator-works-mcp.mjs",
-    "stage:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stage-node-runtime.ps1",
+    "stage:runtime": "node scripts/stage-node-runtime.mjs",
     "check:version": "node scripts/check-version-sync.mjs",
     "test:bundle": "node scripts/smoke-release-bundle.mjs",
+    "build:standalone": "node scripts/build-standalone.mjs",
     "release:server": "npm run bundle:server && npm run test:bundle",
     "release:launcher": "npm run release:server && npm run stage:runtime",
     "test": "npm run build && node --test test/*.test.mjs",
+    "smoke:unity:banter:vs": "node scripts/smoke-unity-banter-vs.mjs",
+    "smoke:unity:banter:matrix": "node scripts/smoke-unity-banter-matrix.mjs",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "npm run build && node --watch dist/index.js"
