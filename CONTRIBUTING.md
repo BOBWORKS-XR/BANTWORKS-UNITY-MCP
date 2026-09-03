@@ -31,10 +31,9 @@ fixture while iterating and the full expectation-based matrix before release:
 ```
 
 ```bash
-# Linux / macOS (these scripts still require PowerShell at the moment
-# and currently run only on Windows; a future port will replace them)
-pwsh ./scripts/smoke-unity-banter-vs.ps1
-pwsh ./scripts/smoke-unity-banter-matrix.ps1
+# Linux / macOS
+./scripts/smoke-unity-banter-vs.sh
+./scripts/smoke-unity-banter-matrix.sh
 ```
 
 The matrix passes when every pinned release matches its documented outcome;
