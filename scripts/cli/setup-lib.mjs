@@ -20,10 +20,14 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { updateJsoncManagedEntry } from "./jsonc-edit.mjs";
 
 export const LEGACY_SERVER_PATH = "C:/tools/banter-mcp/dist/index.js";
 
 export const KNOWN_TOOL_GROUPS = ["read", "author", "test", "banter"];
+const MCP_CLIENT_ID = "creator-works";
+const LEGACY_MCP_CLIENT_ID = "banter";
+const TOOL_GROUPS_ENV = "CREATOR_WORKS_TOOL_GROUPS";
 
 export function detectPlatformPaths(env = process.env) {
   if (process.platform === "win32") {
@@ -50,6 +54,8 @@ export function detectPlatformPaths(env = process.env) {
 
 export function defaultServerPath(mcpRoot) {
   const candidates = [
+    path.join(mcpRoot, "creator-works-mcp.mjs"),
+    path.join(mcpRoot, "release", "creator-works-mcp.mjs"),
     path.join(mcpRoot, "banter-mcp.mjs"),
     path.join(mcpRoot, "release", "banter-mcp.mjs"),
     path.join(mcpRoot, "dist", "index.js"),
@@ -324,12 +330,13 @@ export function applyToClaudeCode({ configRoot, mcpRoot, codexConfigPath, claude
   }
   const envVars = {
     UNITY_PROJECT_PATH: channel.unity_project_path,
-    BANTWORKS_TOOL_GROUPS: normalizeToolGroups(config.tool_groups),
+    [TOOL_GROUPS_ENV]: normalizeToolGroups(config.tool_groups),
   };
   if (channel.scene_path) {
     envVars.UNITY_SCENE_PATH = channel.scene_path;
   }
-  existing.mcpServers.banter = {
+  delete existing.mcpServers[LEGACY_MCP_CLIENT_ID];
+  existing.mcpServers[MCP_CLIENT_ID] = {
     command: "node",
     args: [config.mcp_server_path],
     env: envVars,
@@ -371,8 +378,10 @@ export function applyToCodex({ configRoot, mcpRoot, codexConfigPath, claudeConfi
   if (existsSync(codexPath)) {
     content = readFileSync(codexPath, "utf8");
   }
-  content = removeTomlTableBlock(content, "mcp_servers.banter");
-  content = removeTomlTableBlock(content, "mcp_servers.banter.env");
+  content = removeTomlTableBlock(content, "mcp_servers." + MCP_CLIENT_ID);
+  content = removeTomlTableBlock(content, "mcp_servers." + MCP_CLIENT_ID + ".env");
+  content = removeTomlTableBlock(content, "mcp_servers." + LEGACY_MCP_CLIENT_ID);
+  content = removeTomlTableBlock(content, "mcp_servers." + LEGACY_MCP_CLIENT_ID + ".env");
 
   if (content.trim().length > 0) {
     content = `${content.trimEnd()}\n\n`;
@@ -382,14 +391,14 @@ export function applyToCodex({ configRoot, mcpRoot, codexConfigPath, claudeConfi
   const projectPath = escapeTomlString(channel.unity_project_path.replace(/\\/g, "/"));
   const toolGroups = escapeTomlString(normalizeToolGroups(config.tool_groups));
 
-  let block = `[mcp_servers.banter]\n`;
+  let block = `[mcp_servers.${MCP_CLIENT_ID}]\n`;
   block += `command = "node"\n`;
   block += `args = ["${serverPath}"]\n`;
   block += `startup_timeout_sec = 20\n`;
   block += `tool_timeout_sec = 600\n\n`;
-  block += `[mcp_servers.banter.env]\n`;
+  block += `[mcp_servers.${MCP_CLIENT_ID}.env]\n`;
   block += `UNITY_PROJECT_PATH = "${projectPath}"\n`;
-  block += `BANTWORKS_TOOL_GROUPS = "${toolGroups}"\n`;
+  block += `${TOOL_GROUPS_ENV} = "${toolGroups}"\n`;
   if (channel.scene_path) {
     const scenePath = escapeTomlString(channel.scene_path.replace(/\\/g, "/"));
     block += `UNITY_SCENE_PATH = "${scenePath}"\n`;
@@ -397,58 +406,6 @@ export function applyToCodex({ configRoot, mcpRoot, codexConfigPath, claudeConfi
   content = `${content}${block}`;
   atomicWriteText(codexPath, content);
   return { channel, path: codexPath };
-}
-
-function stripJsoncComments(input) {
-  // Strip // line comments and /* block comments */ from a JSONC document
-  // while leaving strings untouched. Sufficient for the OpenCode config
-  // files we generate / consume; no new dependency required.
-  let out = "";
-  let inString = false;
-  let escape = false;
-  const chars = [...input];
-  for (let i = 0; i < chars.length; i++) {
-    const c = chars[i];
-    if (escape) {
-      out += c;
-      escape = false;
-      continue;
-    }
-    if (c === "\\" && inString) {
-      out += c;
-      escape = true;
-      continue;
-    }
-    if (c === '"') {
-      inString = !inString;
-      out += c;
-      continue;
-    }
-    if (!inString && c === "/") {
-      const next = chars[i + 1];
-      if (next === "/") {
-        i++;
-        while (i + 1 < chars.length && chars[i + 1] !== "\n") i++;
-        continue;
-      }
-      if (next === "*") {
-        i++;
-        while (i + 1 < chars.length && !(chars[i] === "*" && chars[i + 1] === "/")) {
-          if (chars[i] === "\n") out += "\n";
-          i++;
-        }
-        i++;
-        continue;
-      }
-    }
-    out += c;
-  }
-  return out;
-}
-
-function readJsonc(filePath) {
-  const raw = readFileSync(filePath, "utf8");
-  return JSON.parse(stripJsoncComments(raw));
 }
 
 export function applyToAntigravity({ configRoot, mcpRoot, antigravityConfigPath }) {
@@ -467,12 +424,13 @@ export function applyToAntigravity({ configRoot, mcpRoot, antigravityConfigPath 
   }
   const envVars = {
     UNITY_PROJECT_PATH: channel.unity_project_path,
-    BANTWORKS_TOOL_GROUPS: normalizeToolGroups(config.tool_groups),
+    [TOOL_GROUPS_ENV]: normalizeToolGroups(config.tool_groups),
   };
   if (channel.scene_path) {
     envVars.UNITY_SCENE_PATH = channel.scene_path;
   }
-  existing.mcpServers.banter = {
+  delete existing.mcpServers[LEGACY_MCP_CLIENT_ID];
+  existing.mcpServers[MCP_CLIENT_ID] = {
     command: "node",
     args: [config.mcp_server_path],
     env: envVars,
@@ -485,30 +443,30 @@ export function applyToOpenCode({ configRoot, mcpRoot, opencodeConfigPath }) {
   const config = loadConfig({ configRoot, mcpRoot });
   const channel = activeChannel(config);
   const targetPath = opencodeConfigPath || detectPlatformPaths().opencodeConfigPath;
-  let existing = {};
-  if (existsSync(targetPath)) {
-    existing = readJsonc(targetPath);
-  }
-  if (!existing.mcp || typeof existing.mcp !== "object") {
-    existing.mcp = {};
-  }
+  const existing = existsSync(targetPath) ? readFileSync(targetPath, "utf8") : "{}";
   const environment = {
     UNITY_PROJECT_PATH: channel.unity_project_path,
-    BANTWORKS_TOOL_GROUPS: normalizeToolGroups(config.tool_groups),
+    [TOOL_GROUPS_ENV]: normalizeToolGroups(config.tool_groups),
   };
   if (channel.scene_path) {
     environment.UNITY_SCENE_PATH = channel.scene_path;
   }
-  existing.mcp.banter = {
+  const entry = {
     type: "local",
     command: ["node", config.mcp_server_path],
     enabled: true,
     environment,
   };
-  atomicWriteText(targetPath, `${JSON.stringify(existing, null, 2)}\n`);
+  const updated = updateJsoncManagedEntry(
+    existing,
+    "mcp",
+    MCP_CLIENT_ID,
+    LEGACY_MCP_CLIENT_ID,
+    entry,
+  );
+  atomicWriteText(targetPath, updated);
   return { channel, path: targetPath };
 }
-
 export function installUnityExtension({ configRoot, mcpRoot }) {
   const config = loadConfig({ configRoot, mcpRoot });
   const channel = activeChannel(config);

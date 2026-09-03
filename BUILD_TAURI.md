@@ -66,12 +66,12 @@ The built executable will be at:
 launcher\src-tauri\target\release\creator-works-mcp-launcher.exe
 ```
 
-The Windows build produces NSIS and MSI installers under `launcher\src-tauri\target\release\bundle\`.
+A local Windows `cargo tauri build` produces the configured NSIS and MSI bundles under `launcher\src-tauri\target\release\bundle\`. The tagged GitHub release workflow intentionally requests NSIS only.
 
 ### Linux
 
 ```bash
-cd <path-to-bantworks-mcp>
+cd <path-to-creator-works-mcp>
 npm ci
 npm run release:launcher
 
@@ -92,20 +92,20 @@ NO_STRIP=1 cargo tauri build
 
 The bare release binary will be at:
 ```
-launcher/src-tauri/target/release/bantworks-mcp-launcher
+launcher/src-tauri/target/release/creator-works-mcp-launcher
 ```
 
-The Linux build produces `.deb` and `.rpm` packages (and an `.AppImage`) under `launcher/src-tauri/target/release/bundle/`. Bundle filenames use `BANTWORKS-MCP` (kebab-case) so they remain compatible with linuxdeploy and other downstream tooling that does not handle spaces in package names.
+A local Linux build can produce `.deb`, `.rpm`, and `.AppImage` bundles under `launcher/src-tauri/target/release/bundle/`. Exact filenames follow the Tauri `productName` (`Creator Works MCP`) and target packaging conventions.
 
-The build runs the standalone server bundle and smoke test, downloads the pinned official Node.js 24.17.0 archive for the host platform (Windows zip / Linux tar.xz / macOS tar.xz), verifies the archive and extracted binary hashes, and packages the private runtime with the server, Unity bridge, `LICENSE`, and `THIRD_PARTY_NOTICES.md`. The launcher resolves those installed resources dynamically and does not require a `C:/tools/banter-mcp` checkout or system Node.js installation.
+The build runs the standalone server bundle and smoke test, downloads the pinned official Node.js 24.17.0 archive for the host platform, verifies both the archive and extracted binary hashes, and packages the private runtime with the server, Unity bridge, `LICENSE`, and `THIRD_PARTY_NOTICES.md`. Archive pins match the official [Node.js v24.17.0 SHASUMS256.txt](https://nodejs.org/download/release/v24.17.0/SHASUMS256.txt); Unix binary pins were derived from `bin/node` inside those verified archives. The launcher resolves installed resources dynamically and does not require a `C:/tools/banter-mcp` checkout or system Node.js installation.
 
 Run `cargo fmt --check` and `cargo test` in `launcher/src-tauri` before creating a release build. Building the launcher does not update an already installed copy under `%LOCALAPPDATA%` / `~/.local/share`; distribute or install the newly built artifact deliberately.
 
-Version tags matching `v<package version>` run the release workflow. It creates draft installers (NSIS/MSI on Windows, `.deb` / `.rpm` on Linux) and a standalone Node 20+ ZIP. Version metadata must agree across `package.json`, the MCP handshake, Cargo, and Tauri configuration; verify it with `npm run check:version`.
+Version tags matching `v<package version>` run the current Windows release workflow. It creates a draft NSIS installer, standalone Node 20+ ZIP, and `SHA256SUMS.txt`; MSI, Linux, and macOS bundles are local-build capabilities and are not currently published by that workflow. Version metadata must agree across `package.json`, the MCP handshake, Cargo, and Tauri configuration; verify it with `npm run check:version`.
 
 ## Code Signing
 
-The repository does not contain code-signing certificates or signing secrets. Local builds and the default release workflow are therefore unsigned and may trigger **Unknown publisher** or platform equivalent warnings (Microsoft Defender SmartScreen on Windows, browser warnings on Linux when installing `.deb`/`.AppImage` from an unknown publisher). Before broad public distribution, sign the launcher and installer artifacts with the publisher's code-signing certificate and a trusted timestamp, then verify them with `Get-AuthenticodeSignature` (Windows) or `gpg --verify` / `cosign` (Linux). Continue publishing `SHA256SUMS.txt`; checksums verify artifact integrity but do not establish publisher identity.
+The repository does not contain code-signing certificates or signing secrets. Local builds and the default Windows release workflow are therefore unsigned and may trigger **Unknown publisher** or Microsoft Defender SmartScreen warnings. Before broad public distribution, sign the launcher and installer artifacts with the publisher's code-signing certificate and a trusted timestamp, then verify them with `Get-AuthenticodeSignature`. Continue publishing `SHA256SUMS.txt`; checksums verify artifact integrity but do not establish publisher identity.
 
 ## Development Mode
 
@@ -125,7 +125,7 @@ cargo tauri dev
 
 ## Alternative: Setup Scripts
 
-The launcher is optional. The same configuration can be applied via the platform setup scripts, which are useful for headless environments and CI.
+The launcher is optional. The cross-platform Node CLI in `scripts/cli/setup.mjs` is the shared headless implementation. `setup.sh` wraps it on Linux/macOS; the existing Windows PowerShell flow remains supported and points to the Node CLI commands for Antigravity and OpenCode.
 
 ### Windows
 
@@ -138,7 +138,7 @@ powershell -ExecutionPolicy Bypass -File setup.ps1
 ### Linux / macOS
 
 ```bash
-./setup.sh                 # interactive (TODO: future)
+./setup.sh                 # show command help
 ./setup.sh install         # build/validate the MCP server bundle
 ./setup.sh add-project "My Project" /path/to/UnityProject
 ./setup.sh list-projects

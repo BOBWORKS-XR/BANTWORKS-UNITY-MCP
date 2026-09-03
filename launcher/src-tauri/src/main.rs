@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod jsonc;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
@@ -1183,13 +1185,16 @@ fn build_antigravity_mcp_config(
 
     let mut env = serde_json::json!({
         "UNITY_PROJECT_PATH": channel.unity_project_path,
-        "BANTWORKS_TOOL_GROUPS": normalize_tool_groups(tool_groups)?
+        TOOL_GROUPS_ENV: normalize_tool_groups(tool_groups)?
     });
     if let Some(scene) = &channel.scene_path {
         env["UNITY_SCENE_PATH"] = serde_json::json!(scene);
     }
 
-    config["mcpServers"]["banter"] = serde_json::json!({
+    if let Some(servers) = config["mcpServers"].as_object_mut() {
+        servers.remove(LEGACY_MCP_CLIENT_ID);
+    }
+    config["mcpServers"][MCP_CLIENT_ID] = serde_json::json!({
         "command": node_command,
         "args": [mcp_server_path],
         "env": env
@@ -1265,7 +1270,8 @@ fn remove_antigravity_mcp_config() -> Result<(), String> {
 
     if let Some(servers) = config.get_mut("mcpServers") {
         if let Some(obj) = servers.as_object_mut() {
-            obj.remove("banter");
+            obj.remove(MCP_CLIENT_ID);
+            obj.remove(LEGACY_MCP_CLIENT_ID);
         }
     }
 
@@ -1290,73 +1296,8 @@ fn get_opencode_mcp_config() -> Result<serde_json::Value, String> {
 }
 
 fn parse_opencode_config(content: &str) -> Result<serde_json::Value, String> {
-    let stripped = strip_jsonc_comments(content);
-    if stripped.trim().is_empty() {
-        return Ok(serde_json::json!({}));
-    }
-    serde_json::from_str(&stripped).map_err(|e| format!("Failed to parse OpenCode config: {}", e))
+    jsonc::parse(content).map_err(|e| format!("Failed to parse OpenCode config: {}", e))
 }
-
-/// Naive JSONC comment stripper: drops lines that begin (after optional
-/// whitespace) with `//`, plus any inline `// …` to end of line that lives
-/// outside of a string literal. Good enough for the OpenCode config files
-/// we encounter — `json5`/`jsonc` crates aren't worth a new dependency.
-fn strip_jsonc_comments(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut in_string = false;
-    let mut escape = false;
-    let mut iter = input.chars().peekable();
-    while let Some(c) = iter.next() {
-        if escape {
-            output.push(c);
-            escape = false;
-            continue;
-        }
-        if c == '\\' && in_string {
-            output.push(c);
-            escape = true;
-            continue;
-        }
-        if c == '"' {
-            in_string = !in_string;
-            output.push(c);
-            continue;
-        }
-        if !in_string && c == '/' {
-            if let Some(&next) = iter.peek() {
-                if next == '/' {
-                    // Line comment — drop the rest of the line.
-                    iter.next();
-                    for ch in iter.by_ref() {
-                        if ch == '\n' {
-                            output.push('\n');
-                            break;
-                        }
-                    }
-                    continue;
-                }
-                if next == '*' {
-                    // Block comment — drop until matching `*/`.
-                    iter.next();
-                    while let Some(ch) = iter.next() {
-                        if ch == '*' {
-                            if let Some(&'/') = iter.peek() {
-                                iter.next();
-                                break;
-                            }
-                        } else if ch == '\n' {
-                            output.push('\n');
-                        }
-                    }
-                    continue;
-                }
-            }
-        }
-        output.push(c);
-    }
-    output
-}
-
 fn build_opencode_mcp_config(
     mut config: serde_json::Value,
     channel: &ProjectChannel,
@@ -1375,13 +1316,16 @@ fn build_opencode_mcp_config(
 
     let mut environment = serde_json::json!({
         "UNITY_PROJECT_PATH": channel.unity_project_path,
-        "BANTWORKS_TOOL_GROUPS": normalize_tool_groups(tool_groups)?
+        TOOL_GROUPS_ENV: normalize_tool_groups(tool_groups)?
     });
     if let Some(scene) = &channel.scene_path {
         environment["UNITY_SCENE_PATH"] = serde_json::json!(scene);
     }
 
-    config["mcp"]["banter"] = serde_json::json!({
+    if let Some(mcp) = config["mcp"].as_object_mut() {
+        mcp.remove(LEGACY_MCP_CLIENT_ID);
+    }
+    config["mcp"][MCP_CLIENT_ID] = serde_json::json!({
         "type": "local",
         "command": [node_command, mcp_server_path],
         "enabled": true,
@@ -1408,30 +1352,27 @@ fn update_opencode_mcp_config(
             .map_err(|e| format!("Failed to create OpenCode config directory: {}", e))?;
     }
 
-    let config: serde_json::Value = if config_path.exists() {
+    let content = if config_path.exists() {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
-        parse_opencode_config(&content)?
+        parse_opencode_config(&content)?;
+        content
     } else {
-        serde_json::json!({})
+        "{}".to_string()
     };
 
     let node_command = resolve_node_command(&app)?.0.to_string_lossy().to_string();
     let config = build_opencode_mcp_config(
-        config,
+        serde_json::json!({ "mcp": {} }),
         &channel,
         &node_command,
         &mcp_server_path,
         &tool_groups,
     )?;
-
-    // OpenCode preserves human-authored comments in the config file. Emit
-    // the result without stripping comments so any custom notes stay intact.
-    let serialized = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize OpenCode config: {}", e))?;
-    let mut content = String::with_capacity(serialized.len() + 2);
-    content.push_str(&serialized);
-    content.push('\n');
+    let entry = config["mcp"][MCP_CLIENT_ID].clone();
+    let content =
+        jsonc::update_managed_entry(&content, "mcp", MCP_CLIENT_ID, LEGACY_MCP_CLIENT_ID, &entry)
+            .map_err(|e| format!("Failed to update OpenCode config: {}", e))?;
 
     atomic_write(&config_path, &content)
 }
@@ -1444,17 +1385,9 @@ fn remove_opencode_mcp_config() -> Result<(), String> {
     }
     let content = fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read OpenCode config: {}", e))?;
-    let mut config = parse_opencode_config(&content)?;
-    if let Some(mcp) = config.get_mut("mcp") {
-        if let Some(obj) = mcp.as_object_mut() {
-            obj.remove("banter");
-        }
-    }
-    let serialized = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize OpenCode config: {}", e))?;
-    let mut content = String::with_capacity(serialized.len() + 2);
-    content.push_str(&serialized);
-    content.push('\n');
+    let content =
+        jsonc::remove_managed_entries(&content, "mcp", MCP_CLIENT_ID, LEGACY_MCP_CLIENT_ID)
+            .map_err(|e| format!("Failed to update OpenCode config: {}", e))?;
     atomic_write(&config_path, &content)
 }
 
@@ -1706,7 +1639,13 @@ fn antigravity_is_configured() -> bool {
             }
             serde_json::from_str::<serde_json::Value>(&content).ok()
         })
-        .and_then(|config| config.get("mcpServers")?.get("banter").cloned())
+        .and_then(|config| {
+            let servers = config.get("mcpServers")?;
+            servers
+                .get(MCP_CLIENT_ID)
+                .or_else(|| servers.get(LEGACY_MCP_CLIENT_ID))
+                .cloned()
+        })
         .is_some()
 }
 
@@ -1714,7 +1653,13 @@ fn opencode_is_configured() -> bool {
     fs::read_to_string(get_opencode_config_path())
         .ok()
         .and_then(|content| parse_opencode_config(&content).ok())
-        .and_then(|config| config.get("mcp")?.get("banter").cloned())
+        .and_then(|config| {
+            let servers = config.get("mcp")?;
+            servers
+                .get(MCP_CLIENT_ID)
+                .or_else(|| servers.get(LEGACY_MCP_CLIENT_ID))
+                .cloned()
+        })
         .is_some()
 }
 
@@ -2512,23 +2457,23 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            antigravity["mcpServers"]["banter"]["command"],
+            antigravity["mcpServers"][MCP_CLIENT_ID]["command"],
             "/home/user/.local/share/bantworks-mcp/server/runtime/node"
         );
         assert_eq!(
-            antigravity["mcpServers"]["banter"]["args"][0],
+            antigravity["mcpServers"][MCP_CLIENT_ID]["args"][0],
             "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
         );
         assert_eq!(
-            antigravity["mcpServers"]["banter"]["env"]["UNITY_PROJECT_PATH"],
+            antigravity["mcpServers"][MCP_CLIENT_ID]["env"]["UNITY_PROJECT_PATH"],
             "/home/user/Unity/Project"
         );
         assert_eq!(
-            antigravity["mcpServers"]["banter"]["env"]["BANTWORKS_TOOL_GROUPS"],
+            antigravity["mcpServers"][MCP_CLIENT_ID]["env"][TOOL_GROUPS_ENV],
             "all"
         );
         assert_eq!(
-            antigravity["mcpServers"]["banter"]["env"]["UNITY_SCENE_PATH"],
+            antigravity["mcpServers"][MCP_CLIENT_ID]["env"]["UNITY_SCENE_PATH"],
             "/home/user/Unity/Project/Assets/Main.unity"
         );
 
@@ -2541,18 +2486,18 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(opencode["mcp"]["banter"]["type"], "local");
-        assert_eq!(opencode["mcp"]["banter"]["enabled"], true);
+        assert_eq!(opencode["mcp"][MCP_CLIENT_ID]["type"], "local");
+        assert_eq!(opencode["mcp"][MCP_CLIENT_ID]["enabled"], true);
         assert_eq!(
-            opencode["mcp"]["banter"]["command"][0],
+            opencode["mcp"][MCP_CLIENT_ID]["command"][0],
             "/home/user/.local/share/bantworks-mcp/server/runtime/node"
         );
         assert_eq!(
-            opencode["mcp"]["banter"]["command"][1],
+            opencode["mcp"][MCP_CLIENT_ID]["command"][1],
             "/home/user/.local/share/bantworks-mcp/server/banter-mcp.mjs"
         );
         assert_eq!(
-            opencode["mcp"]["banter"]["environment"]["BANTWORKS_TOOL_GROUPS"],
+            opencode["mcp"][MCP_CLIENT_ID]["environment"][TOOL_GROUPS_ENV],
             "read,banter"
         );
     }
@@ -2578,7 +2523,8 @@ mod tests {
 
     #[test]
     fn sync_ephemeral_bundle_extracts_all_required_mcp_artifacts() {
-        let temp_dir = std::env::temp_dir().join(format!("test-ephemeral-{}", uuid::Uuid::new_v4()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("test-ephemeral-{}", uuid::Uuid::new_v4()));
         let source_root = temp_dir.join("mount/server");
         fs::create_dir_all(source_root.join("runtime")).unwrap();
         fs::create_dir_all(source_root.join("unity-extension").join("Editor")).unwrap();
@@ -2591,12 +2537,18 @@ mod tests {
         let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
         fs::write(source_root.join("runtime").join(binary_name), "#!/bin/sh").unwrap();
         fs::write(
-            source_root.join("unity-extension").join("Editor").join("BanterMCPBridge.cs"),
+            source_root
+                .join("unity-extension")
+                .join("Editor")
+                .join("BanterMCPBridge.cs"),
             "// bridge",
         )
         .unwrap();
         fs::write(
-            source_root.join("unity-extension").join("Editor").join(UNITY_BRIDGE_LOGO_FILE_NAME),
+            source_root
+                .join("unity-extension")
+                .join("Editor")
+                .join(UNITY_BRIDGE_LOGO_FILE_NAME),
             "PNG",
         )
         .unwrap();
@@ -2610,8 +2562,16 @@ mod tests {
         assert!(dest_root.join("creator-works-mcp.mjs").is_file());
         assert!(dest_root.join("banter-mcp.mjs").is_file());
         assert!(dest_root.join("runtime").join(binary_name).is_file());
-        assert!(dest_root.join("unity-extension").join("Editor").join("BanterMCPBridge.cs").is_file());
-        assert!(dest_root.join("unity-extension").join("Editor").join(UNITY_BRIDGE_LOGO_FILE_NAME).is_file());
+        assert!(dest_root
+            .join("unity-extension")
+            .join("Editor")
+            .join("BanterMCPBridge.cs")
+            .is_file());
+        assert!(dest_root
+            .join("unity-extension")
+            .join("Editor")
+            .join(UNITY_BRIDGE_LOGO_FILE_NAME)
+            .is_file());
 
         let _ = fs::remove_dir_all(temp_dir);
     }

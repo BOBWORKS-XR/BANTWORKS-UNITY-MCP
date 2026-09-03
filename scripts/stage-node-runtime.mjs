@@ -14,8 +14,7 @@
 // Usage:
 //   node scripts/stage-node-runtime.mjs [--version 24.17.0] [--force]
 //
-// Checksum overrides (optional, primarily for CI pinning the Linux/macOS
-// archives without editing this file):
+// Checksum overrides (required together when staging an unpinned version):
 //   STAGE_NODE_ARCHIVE_SHA256_<PLATFORM>  -- sha256 of the downloaded archive
 //   STAGE_NODE_BINARY_SHA256_<PLATFORM>  -- sha256 of the extracted binary
 // where <PLATFORM> is one of WIN_X64, LINUX_X64, LINUX_ARM64, DARWIN_X64,
@@ -46,12 +45,31 @@ const outputDirectory = path.join(repoRoot, "release", "runtime");
 
 const DEFAULT_VERSION = "24.17.0";
 
-// Known-good checksums for the Windows x64 archive + extracted node.exe at
-// v24.17.0, matching the values previously hard-coded in stage-node-runtime.ps1.
-// Other platforms fall back to env-var overrides (see module header).
-const WINDOWS_DEFAULTS = {
-  archiveSha256: "f2aa33b35b75aca5f3f7b85675a6f6423201053e9381911e64961f3bda2528ab",
-  binarySha256: "c6335d08331c23d68b9f2b18adb102002d76ef150b47248e954c507e0d033664",
+// Archive values are published in Node.js v24.17.0 SHASUMS256.txt. Unix
+// binary values are derived from bin/node inside those exact verified archives.
+const PINNED_CHECKSUMS = {
+  "24.17.0": {
+    "win-x64": {
+      archiveSha256: "f2aa33b35b75aca5f3f7b85675a6f6423201053e9381911e64961f3bda2528ab",
+      binarySha256: "c6335d08331c23d68b9f2b18adb102002d76ef150b47248e954c507e0d033664",
+    },
+    "linux-x64": {
+      archiveSha256: "ab343a1b747c7cbf3630dfd7dbf818c5423fab2eb4f5ad1afc896f6bd121a917",
+      binarySha256: "62d66443847de1f527f74afe715900b12884ace52136dc9cd8e91e61acc2f527",
+    },
+    "linux-arm64": {
+      archiveSha256: "67324b9e515e7d13da72571a5dd522bb23145a820f7dde15497897e466759ab3",
+      binarySha256: "4adeeca28663521e926659041cf26dbe5bded9d104316373c364a8b65ed17f03",
+    },
+    "darwin-x64": {
+      archiveSha256: "fe50e386f6a5e0b29ce44b989e543da9fb9a80aed0b91a2f0cb19c55106921fc",
+      binarySha256: "bd6cd97b046bd816399fea7893bcf6867e9ec55fd02aef3284875dd32b31e060",
+    },
+    "darwin-arm64": {
+      archiveSha256: "cf7e9152d7bd86c140f6eccf3577abfbaf8960be1ca49d9d900e8484984dcb9a",
+      binarySha256: "f5f9b9db4d95f5e0340982685f083de654c21eef9d9122cab5321081ccaa2601",
+    },
+  },
 };
 
 function parseArgs(argv) {
@@ -93,21 +111,37 @@ function checksumEnvKey(platformKey, kind) {
   return `STAGE_NODE_${kind}_SHA256_${platformKey.replace(/-/g, "_").toUpperCase()}`;
 }
 
-function resolveChecksums(platformKey) {
-  if (platformKey === "win-x64") {
-    return { ...WINDOWS_DEFAULTS, source: "embedded defaults" };
-  }
+export function resolveChecksums(version, platformKey, environment = process.env) {
   const archiveEnv = checksumEnvKey(platformKey, "ARCHIVE");
   const binaryEnv = checksumEnvKey(platformKey, "BINARY");
-  const archiveSha256 = process.env[archiveEnv];
-  const binarySha256 = process.env[binaryEnv];
+  const pinned = PINNED_CHECKSUMS[version]?.[platformKey];
+  const archiveSha256 = environment[archiveEnv] || pinned?.archiveSha256;
+  const binarySha256 = environment[binaryEnv] || pinned?.binarySha256;
+  if (!archiveSha256 || !binarySha256) {
+    throw new Error(
+      "No complete checksum pin exists for Node.js " + version + " on " + platformKey +
+      ". Set both " + archiveEnv + " and " + binaryEnv + " to stage an alternate version.",
+    );
+  }
   return {
-    archiveSha256: archiveSha256 || null,
-    binarySha256: binarySha256 || null,
-    source: archiveSha256 || binarySha256 ? `${archiveEnv}/${binaryEnv}` : "none",
+    archiveSha256,
+    binarySha256,
+    source: environment[archiveEnv] || environment[binaryEnv]
+      ? archiveEnv + "/" + binaryEnv
+      : "embedded pinned checksums",
   };
 }
 
+export function verifyExpectedChecksum(label, expected, actual) {
+  if (!expected) {
+    throw new Error("Missing expected checksum for " + label + ".");
+  }
+  if (actual !== expected) {
+    throw new Error(
+      label + " checksum mismatch. Expected " + expected + ", got " + actual + ".",
+    );
+  }
+}
 async function sha256OfFile(filePath) {
   const hash = createHash("sha256");
   const { open } = await import("node:fs/promises");
@@ -177,13 +211,21 @@ async function main() {
   }
 
   const platform = selectPlatform();
-  const checksums = resolveChecksums(platform.key);
+  const checksums = resolveChecksums(args.version, platform.key);
 
   const versionFile = path.join(outputDirectory, "VERSION");
   const licenseFile = path.join(outputDirectory, "LICENSE");
   const binaryFile = path.join(outputDirectory, platform.binaryName);
+  const alternateName = platform.binaryName === "node.exe" ? "node" : "node.exe";
+  const alternateFile = path.join(outputDirectory, alternateName);
 
-  if (!args.force && existsSync(binaryFile) && existsSync(licenseFile) && existsSync(versionFile)) {
+  if (
+    !args.force &&
+    existsSync(binaryFile) &&
+    existsSync(alternateFile) &&
+    existsSync(licenseFile) &&
+    existsSync(versionFile)
+  ) {
     const recordedVersion = readFileSync(versionFile, "utf8").trim();
     if (recordedVersion === args.version) {
       const actualBinaryHash = await sha256OfFile(binaryFile);
@@ -210,14 +252,8 @@ async function main() {
     console.log(`Downloading ${downloadUrl}`);
     await downloadToFile(downloadUrl, archivePath);
 
-    if (checksums.archiveSha256) {
-      const actualArchiveHash = await sha256OfFile(archivePath);
-      if (actualArchiveHash !== checksums.archiveSha256) {
-        throw new Error(`Node.js archive checksum mismatch. Expected ${checksums.archiveSha256}, got ${actualArchiveHash}.`);
-      }
-    } else {
-      console.warn(`No archive checksum configured for ${platform.key} (source: ${checksums.source}). Set ${checksumEnvKey(platform.key, "ARCHIVE")} to enable verification.`);
-    }
+    const actualArchiveHash = await sha256OfFile(archivePath);
+    verifyExpectedChecksum("Node.js archive", checksums.archiveSha256, actualArchiveHash);
 
     extractArchive(archivePath, extractPath, platform);
 
@@ -239,13 +275,7 @@ async function main() {
     }
 
     const actualBinaryHash = await sha256OfFile(sourceBinary);
-    if (checksums.binarySha256) {
-      if (actualBinaryHash !== checksums.binarySha256) {
-        throw new Error(`Extracted binary checksum mismatch. Expected ${checksums.binarySha256}, got ${actualBinaryHash}.`);
-      }
-    } else {
-      console.warn(`No binary checksum configured for ${platform.key} (source: ${checksums.source}). Set ${checksumEnvKey(platform.key, "BINARY")} to enable verification.`);
-    }
+    verifyExpectedChecksum("Extracted Node.js binary", checksums.binarySha256, actualBinaryHash);
 
     mkdirSync(outputDirectory, { recursive: true });
     copyFileSync(sourceBinary, binaryFile);
@@ -253,8 +283,7 @@ async function main() {
     // the launcher can be built for either host. Write the alternate name as
     // a symlink where supported and as a copy on Windows (where symlinks need
     // developer mode or admin), so the bundle config can reference both.
-    const alternateName = platform.binaryName === "node.exe" ? "node" : "node.exe";
-    const alternateFile = path.join(outputDirectory, alternateName);
+
     try {
       rmSync(alternateFile, { force: true });
     } catch {
@@ -264,7 +293,7 @@ async function main() {
       copyFileSync(binaryFile, alternateFile);
     } else {
       try {
-        symlinkSync(binaryFile, alternateFile);
+        symlinkSync(platform.binaryName, alternateFile);
       } catch {
         copyFileSync(binaryFile, alternateFile);
       }
@@ -295,7 +324,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exit(1);
-});
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+const modulePath = path.resolve(fileURLToPath(import.meta.url));
+if (invokedPath.toLowerCase() === modulePath.toLowerCase()) {
+  main().catch((error) => {
+    console.error(error.message || error);
+    process.exit(1);
+  });
+}

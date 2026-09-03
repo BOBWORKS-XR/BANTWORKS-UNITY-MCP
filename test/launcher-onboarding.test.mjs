@@ -30,7 +30,7 @@ test("launcher-managed clients use a pinned private Node runtime", () => {
   assert.match(launcherSource, /command = \\\"\{\}\\\"/);
   assert.match(tauriConfig, /release\/runtime\/node\.exe/);
   assert.match(runtimeStage, /24\.17\.0/);
-  assert.match(runtimeStage, /WINDOWS_DEFAULTS/);
+  assert.match(runtimeStage, /PINNED_CHECKSUMS/);
   assert.match(runtimeStage, /archiveSha256/);
   assert.match(runtimeStage, /binarySha256/);
 });
