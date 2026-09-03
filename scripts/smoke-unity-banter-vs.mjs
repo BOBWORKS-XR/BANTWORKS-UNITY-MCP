@@ -155,6 +155,7 @@ function invokeUnity(unityEditorPath, args, logPath) {
     encoding: "utf8",
   });
   if (result.status !== 0) {
+    const exitDesc = result.signal ? `signal ${result.signal}` : `code ${result.status}`;
     let tail = "Unity did not create a log file.";
     if (existsSync(logPath)) {
       try {
@@ -165,7 +166,13 @@ function invokeUnity(unityEditorPath, args, logPath) {
         // ignore
       }
     }
-    throw new Error(`Unity exited with code ${result.status}.\n${tail}`);
+    if (tail.includes("ToFileDescriptor") || tail.includes("sysconf(_SC_OPEN_MAX)")) {
+      throw new Error(
+        `Unity exited with ${exitDesc} due to Mono's open file limit assertion (fd < sysconf(_SC_OPEN_MAX)).\n` +
+        `This is a known Unity Linux issue when ulimit -n is very high. Run with 'ulimit -n 8192' or use the .sh wrapper.\n${tail}`
+      );
+    }
+    throw new Error(`Unity exited with ${exitDesc}.\n${tail}`);
   }
 }
 

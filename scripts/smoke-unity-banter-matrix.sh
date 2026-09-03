@@ -27,4 +27,12 @@ if [ "${NODE_MAJOR}" -lt 18 ] 2>/dev/null; then
   exit 1
 fi
 
+# Unity's embedded Mono runtime on Linux intermittently crashes with:
+#   Assertion `fd < sysconf(_SC_OPEN_MAX)` in ToFileDescriptor()
+# when ulimit -n is set to high systemd defaults (e.g. 1048576).
+# Clamping the file descriptor limit to 8192 prevents this crash.
+if [ "$(ulimit -n 2>/dev/null || echo 0)" -gt 8192 ] 2>/dev/null; then
+  ulimit -n 8192 2>/dev/null || true
+fi
+
 exec node "${NODE_SCRIPT}" "$@"
