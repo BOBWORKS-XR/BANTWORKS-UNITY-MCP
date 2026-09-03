@@ -113,6 +113,9 @@ test("screenshot tool exposes bounded Game and Scene capture", () => {
   assert.equal(schema?.properties.width.maximum, 2048);
   assert.equal(schema?.properties.height.maximum, 2048);
   assert.ok(schema?.properties.cameraId);
+  assert.equal(schema?.properties.includeImage.default, true);
+  assert.equal(schema?.properties.maxImageBytes.default, 2097152);
+  assert.equal(schema?.properties.maxImageBytes.maximum, 16777216);
 });
 
 test("project discovery exposes packages and bounded AssetDatabase search", () => {
@@ -133,6 +136,9 @@ test("project state queries expose bounded exact hierarchy inspection", () => {
   assert.equal(schema?.properties.maxDepth.maximum, 100);
   assert.equal(schema?.properties.maxResults.default, 200);
   assert.equal(schema?.properties.maxResults.maximum, 5000);
+  assert.equal(schema?.properties.propertyNames.maxItems, 50);
+  assert.equal(schema?.properties.maxResponseBytes.default, 524288);
+  assert.equal(schema?.properties.maxResponseBytes.maximum, 4194304);
   assert.equal(schema?.properties.refresh.default, true);
   assert.equal(schema?.properties.timeoutMs.maximum, 120000);
 });
@@ -256,4 +262,11 @@ test("Editor menu execution remains successful when settling is unverified", () 
   assert.equal(compileFailure.executionSucceeded, true);
   assert.equal(compileFailure.settleVerified, true);
   assert.equal(compileFailure.settleError, "Compilation failed.");
+});
+
+test("Unity command status requires both correlation and project identity", () => {
+  const schema = tools.get("get_unity_command_status")?.inputSchema;
+  assert.deepEqual(schema?.required, ["commandId", "projectId"]);
+  assert.equal(schema?.properties.commandId.format, "uuid");
+  assert.equal(schema?.properties.projectId.pattern, "^unity-[a-f0-9]{20}$");
 });

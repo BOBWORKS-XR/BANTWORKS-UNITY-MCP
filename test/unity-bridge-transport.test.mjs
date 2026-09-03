@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -11,10 +11,12 @@ import {
   BRIDGE_PROTOCOL_VERSION,
   dispatchUnityBridgeCommand,
 } from "../dist/lib/unity-bridge-transport.js";
+import { getUnityCommandStatus } from "../dist/tools/get-unity-command-status.js";
 
 function createConfig(projectPath) {
   const root = path.join(projectPath, ".bantworks-mcp");
   return {
+    projectId: "unity-fixture",
     unityProjectPath: projectPath,
     assetsPath: path.join(projectPath, "Assets"),
     mcpStatePath: path.join(root, "state"),
@@ -40,6 +42,9 @@ async function writePipeDescriptor(config, pipeName) {
     capabilities: ["named_pipe_commands", "file_commands"],
     preferredTransport: "named_pipe",
     pipeName,
+    editorInstanceId: "editor-fixture",
+    projectPath: config.unityProjectPath,
+    projectName: path.basename(config.unityProjectPath),
     updatedAt: Date.now(),
   }));
 }
@@ -76,6 +81,8 @@ test("command transport falls back to an atomic file for a legacy bridge", async
     assert.equal(command.id, result.commandId);
     assert.equal(command.protocolVersion, BRIDGE_PROTOCOL_VERSION);
     assert.equal(command.type, "refresh");
+    assert.equal(command.expectedProjectId, config.projectId);
+    assert.equal(command.expectedProjectPath, config.unityProjectPath);
   } finally {
     await rm(projectPath, { recursive: true, force: true });
   }
@@ -100,6 +107,8 @@ test("command transport uses the advertised named pipe", {
         success: true,
         message: "processed",
         timestamp: Date.now(),
+        projectPath: config.unityProjectPath,
+        editorInstanceId: "editor-fixture",
       })}\n`);
     });
   });
@@ -118,6 +127,9 @@ test("command transport uses the advertised named pipe", {
     assert.equal(result.acknowledgement?.success, true);
     assert.equal(received.length, 1);
     assert.equal(received[0].protocolVersion, BRIDGE_PROTOCOL_VERSION);
+    assert.equal(received[0].expectedProjectId, config.projectId);
+    assert.equal(received[0].expectedProjectPath, config.unityProjectPath);
+    assert.equal(received[0].expectedEditorInstanceId, "editor-fixture");
     assert.equal(fs.existsSync(path.join(config.mcpCommandsPath, `${result.commandId}.json`)), false);
   } finally {
     await close(server);
@@ -167,6 +179,91 @@ test("a sent pipe command is not duplicated through the file fallback", {
     assert.equal(fs.existsSync(path.join(config.mcpCommandsPath, `${result.commandId}.json`)), false);
   } finally {
     await close(server);
+    await rm(projectPath, { recursive: true, force: true });
+  }
+});
+
+test("command transport refuses a descriptor from another Unity project", async () => {
+  const { projectPath, config } = await createFixture();
+  try {
+    await writePipeDescriptor(config, "bantworks-unity-wrong-project");
+    const descriptorPath = path.join(config.mcpStatePath, "project-instance.json");
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.projectPath = path.join(projectPath, "OtherProject");
+    await writeFile(descriptorPath, JSON.stringify(descriptor));
+
+    await assert.rejects(
+      dispatchUnityBridgeCommand({ type: "refresh" }, config, 100),
+      /bridge project mismatch/i
+    );
+    assert.deepEqual(await readdir(config.mcpCommandsPath), []);
+  } finally {
+    await rm(projectPath, { recursive: true, force: true });
+  }
+});
+
+test("file transport rejects an acknowledgement from another project", async () => {
+  const { projectPath, config } = await createFixture();
+  const commandResultsPath = path.join(config.mcpStatePath, "command-results");
+  await mkdir(commandResultsPath, { recursive: true });
+
+  const bridge = (async () => {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline) {
+      const commands = (await readdir(config.mcpCommandsPath)).filter((name) => name.endsWith(".json"));
+      if (commands.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        continue;
+      }
+      const command = JSON.parse(await readFile(path.join(config.mcpCommandsPath, commands[0]), "utf8"));
+      await writeFile(path.join(commandResultsPath, `${command.id}.json`), JSON.stringify({
+        commandId: command.id,
+        success: true,
+        projectPath: path.join(projectPath, "OtherProject"),
+      }));
+      return;
+    }
+    throw new Error("Timed out waiting for file command");
+  })();
+
+  try {
+    await assert.rejects(
+      dispatchUnityBridgeCommand({ type: "refresh" }, config, 1000),
+      /acknowledgement project mismatch/i
+    );
+    await bridge;
+  } finally {
+    await rm(projectPath, { recursive: true, force: true });
+  }
+});
+
+test("command status stays scoped to its project and active Editor instance", async () => {
+  const { projectPath, config } = await createFixture();
+  const commandId = crypto.randomUUID();
+  const resultFolder = path.join(config.mcpStatePath, "command-results");
+  await mkdir(resultFolder, { recursive: true });
+
+  try {
+    await writePipeDescriptor(config, "bantworks-unity-status-test");
+    await writeFile(path.join(config.mcpCommandsPath, `${commandId}.json`), "{}");
+    const pending = getUnityCommandStatus(commandId, config.projectId, config);
+    assert.equal(pending.status, "pending");
+    assert.equal(pending.accepted, true);
+
+    const wrongProject = getUnityCommandStatus(commandId, "unity-other", config);
+    assert.equal(wrongProject.status, "unknown");
+    assert.match(wrongProject.error ?? "", /Project mismatch/);
+
+    await writeFile(path.join(resultFolder, `${commandId}.json`), JSON.stringify({
+      commandId,
+      success: true,
+      projectPath: config.unityProjectPath,
+      editorInstanceId: "different-editor",
+    }));
+    const wrongEditor = getUnityCommandStatus(commandId, config.projectId, config);
+    assert.equal(wrongEditor.status, "unknown");
+    assert.match(wrongEditor.error ?? "", /different-editor/);
+  } finally {
     await rm(projectPath, { recursive: true, force: true });
   }
 });

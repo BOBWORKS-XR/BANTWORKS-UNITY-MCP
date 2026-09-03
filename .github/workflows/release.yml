@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   windows:
-    name: Windows installers and standalone bundle
+    name: Windows installer and standalone bundle
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -38,11 +38,11 @@ jobs:
         with:
           projectPath: launcher
           tagName: ${{ github.ref_name }}
-          releaseName: "BANTWORKS MCP __VERSION__"
-          releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. The standalone ZIP remains available for manual Node.js 20+ deployments."
+          releaseName: "Creator Works MCP __VERSION__"
+          releaseBody: "The guided Windows installer includes the MCP server, Unity bridge, and a private Node.js 24 LTS runtime. Save your work and close MCP clients if Setup asks. The standalone ZIP remains available for manual Node.js 20+ deployments."
           releaseDraft: true
           prerelease: false
-          args: "--bundles nsis,msi"
+          args: "--bundles nsis"
 
       - name: Attach standalone ZIP and checksums
         env:
@@ -50,8 +50,8 @@ jobs:
         shell: powershell
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $standalone = Get-Item "release\BANTWORKS-MCP-$version-standalone.zip"
-          $installers = @(Get-ChildItem "launcher\src-tauri\target\release\bundle" -Recurse -File | Where-Object { $_.Extension -in ".exe", ".msi" })
+          $standalone = Get-Item "release\Creator-Works-MCP-$version-standalone.zip"
+          $installers = @(Get-ChildItem "launcher\src-tauri\target\release\bundle" -Recurse -File | Where-Object { $_.Extension -eq ".exe" })
           $artifacts = @($standalone) + $installers
           $checksums = foreach ($artifact in $artifacts) {
             $hash = (Get-FileHash $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()

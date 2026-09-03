@@ -2,7 +2,7 @@
 
 Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other compatible MCP clients directly to Unity Editor. It provides guarded project awareness and tools for scenes, prefabs, components, assets, tests, native Unity Visual Scripting, SideQuest SDK workflows, and experimental Shader Graph authoring.
 
-[Download Creator Works MCP 2.4.0-3](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-3) | [Preview source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/tree/feature/dual-sidequest-sdk) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
+[Download Creator Works MCP 2.5.1](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1) | [Source](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP) | [All releases](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases)
 
 ![Creator Works MCP configured Windows launcher](docs/images/creator-works-mcp-guided-launcher.png)
 
@@ -21,7 +21,7 @@ Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other 
 
 ## Quick Start
 
-1. Download `Creator.Works.MCP_2.4.0-3_x64-setup.exe` from the [2.4.0-3 preview release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.4.0-3).
+1. Download `Creator.Works.MCP_2.5.1_x64-setup.exe` from the [2.5.1 release](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/releases/tag/v2.5.1).
 2. Open **Creator Works MCP** and choose a Unity project.
 3. Select the MCP clients you want to configure.
 4. Press **Set Up Creator Works MCP**.
@@ -30,7 +30,11 @@ Creator Works MCP connects Codex, Claude Code, Antigravity, OpenCode, and other 
 
 A ready bridge reports `ready: true` and `stateStatus: "fresh"`. The launcher can import existing project and client settings from an earlier installation; verify the imported projects and update their bridges before removing the previous Windows application.
 
-The Windows installers are currently unsigned, so Microsoft Defender SmartScreen can display an Unknown publisher warning. Verify downloads against the included `SHA256SUMS.txt`.
+During an EXE upgrade, Setup checks whether its private runtime is still active. If prompted, save your work, fully close Codex, Claude Code, and Creator Works MCP, then select **Retry**. Setup never force-closes those applications; an unattended install exits with code `10` while the runtime is locked.
+
+For the one-time move from the v2.5.0 MSI to the v2.5.1 EXE, close MCP clients before starting Setup. The old MSI must be removed before the new guarded EXE update path takes over.
+
+The Windows installer is currently unsigned, so Microsoft Defender SmartScreen can display an Unknown publisher warning. Verify the download against the included `SHA256SUMS.txt`. Stable releases publish the guided EXE rather than a separate MSI.
 
 ## SDK Profiles
 
@@ -82,28 +86,28 @@ UNITY_PROJECT_PATH = "E:/unity/MyProject"
 CREATOR_WORKS_TOOL_GROUPS = "all"
 ```
 
-The standalone ZIP requires Node.js 20 or newer. The Windows setup executable and MSI include the private runtime.
+The standalone ZIP requires Node.js 20 or newer. The Windows setup executable includes the private runtime.
 
 Tool profiles can expose `read`, `author`, `test`, `banter`, `shadergraph`, a comma-separated combination, `all`, or `none` for routing and health only.
 
 ## Manual Bridge Installation
 
-The launcher installs the bridge automatically. For a manual setup, download the [2.4.0-3 bridge script](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/v2.4.0-3/unity-extension/Editor/BanterMCPBridge.cs) and [matching logo asset](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/v2.4.0-3/unity-extension/Editor/CreatorWorksMCPLogo.png), then copy both files:
+The launcher installs the bridge automatically. For a manual setup, copy both files:
 
 ```text
-BanterMCPBridge.cs
+unity-extension/Editor/BanterMCPBridge.cs
   -> YourProject/Assets/Editor/BanterMCPBridge.cs
-CreatorWorksMCPLogo.png
+unity-extension/Editor/CreatorWorksMCPLogo.png
   -> YourProject/Assets/Editor/CreatorWorksMCPLogo.png
 ```
 
 After Unity compiles, call `get_bridge_status`. Scene-changing tools require an explicit acknowledgement from the selected Unity Editor and fail closed on stale or ambiguous object selectors.
 
-## Preview Status
+## Release Status
 
-The `2.4.0-3` release gate passed:
+The `2.5.1` release is published only after these gates pass for the tagged revision:
 
-- 119 Node tests
+- 137 Node tests
 - 13 native launcher tests
 - Node 20, 22, and 24 CI
 - Windows launcher packaging and standalone installation smoke tests
@@ -126,14 +130,15 @@ These project screenshots show scene hierarchy construction, configured Banter c
 
 ## Documentation
 
+- [Feedback and feasibility process](FEEDBACK.md)
 - [Bridge protocol](docs/bridge-protocol.md)
 - [Compatibility matrix](docs/compatibility.md)
 - [Tool groups](docs/tool-groups.md)
 - [Banter custom Visual Scripting nodes](docs/banter-custom-visual-scripting-nodes.md)
 - [SideQuest workflows](docs/banter-workflows.md)
 - [Unity MCP benchmark](docs/unity-mcp-benchmark.md)
-- [Creator/Banter SDK transition](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/feature/dual-sidequest-sdk/docs/sidequest-sdk-transition.md)
-- [Shader Graph experiment](https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP/blob/feature/dual-sidequest-sdk/docs/shader-graph-experiment.md)
+- [Creator/Banter SDK transition](docs/sidequest-sdk-transition.md)
+- [Shader Graph experiment](docs/shader-graph-experiment.md)
 
 ## Legacy Release
 
@@ -144,7 +149,6 @@ Looking for the former **BANTWORKS MCP** name or old launcher layout? [Open the 
 ```powershell
 git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
 Set-Location CREATOR-WORKS-UNITY-MCP
-git switch feature/dual-sidequest-sdk
 npm ci
 npm test
 Set-Location launcher/src-tauri
@@ -155,7 +159,6 @@ cargo test
 # Linux / macOS
 git clone https://github.com/BOBWORKS-XR/CREATOR-WORKS-UNITY-MCP.git
 cd CREATOR-WORKS-UNITY-MCP
-git switch feature/dual-sidequest-sdk
 npm ci
 npm test
 (cd launcher/src-tauri && cargo test)
@@ -163,7 +166,7 @@ npm test
 
 The Tauri launcher builds on Windows (NSIS/MSI), Linux (`.deb`/`.rpm`), and macOS (DMG). See [BUILD_TAURI.md](BUILD_TAURI.md) for host-specific toolchain setup. The setup CLI (`./setup.sh` on Linux/macOS, `setup.ps1` on Windows) configures Codex and Claude Code without the GUI.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements and [SECURITY.md](SECURITY.md) for vulnerability reporting.
+See [FEEDBACK.md](FEEDBACK.md) to report problems or improvements, [CONTRIBUTING.md](CONTRIBUTING.md) for change requirements, and [SECURITY.md](SECURITY.md) for vulnerability reporting.
 
 ## License
 

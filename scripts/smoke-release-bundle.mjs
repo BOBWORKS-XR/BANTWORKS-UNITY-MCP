@@ -4,15 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 
-const sourceBundle = path.resolve("release", "banter-mcp.mjs");
+const sourceBundle = path.resolve("release", "creator-works-mcp.mjs");
 const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
 assert.ok(statSync(sourceBundle).size > 100_000, "Release bundle is unexpectedly small");
 
 const source = readFileSync(sourceBundle, "utf8");
-assert.match(source, /Banter MCP running on stdio/);
+assert.match(source, /Creator Works MCP running on stdio/);
 
-const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "bantworks-bundle-smoke-"));
-const isolatedBundle = path.join(temporaryDirectory, "banter-mcp.mjs");
+const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "creator-works-bundle-smoke-"));
+const isolatedBundle = path.join(temporaryDirectory, "creator-works-mcp.mjs");
 let serverProcess;
 
 try {
@@ -79,10 +79,10 @@ try {
     params: {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "bantworks-release-smoke", version: "1.0.0" },
+      clientInfo: { name: "creator-works-release-smoke", version: "1.0.0" },
     },
   });
-  assert.equal(initialize.result?.serverInfo?.name, "banter-mcp");
+  assert.equal(initialize.result?.serverInfo?.name, "creator-works-mcp");
   assert.equal(initialize.result?.serverInfo?.version, packageVersion);
 
   serverProcess.stdin.write(`${JSON.stringify({
@@ -90,9 +90,10 @@ try {
     method: "notifications/initialized",
   })}\n`);
   const tools = await request({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
-  assert.equal(tools.result?.tools?.length, 42);
+  assert.equal(tools.result?.tools?.length, 50);
   assert.ok(tools.result.tools.some((tool) => tool.name === "validate_vs_graph_in_unity"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "validate_banter_visual_scripting"));
+  assert.ok(tools.result.tools.some((tool) => tool.name === "get_unity_command_status"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "wait_for_unity_compile"));
   assert.ok(tools.result.tools.some((tool) => tool.name === "execute_editor_menu_item"));
 

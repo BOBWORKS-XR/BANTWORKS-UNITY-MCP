@@ -295,14 +295,19 @@ export const BANTER_VS_NODES: Record<string, VSNode> = {
     name: "GetLocalUserState",
     fullType: "Banter.VisualScripting.GetLocalUserState",
     category: "User",
-    description: "Get the local user's current position and rotation.",
-    inputs: [{ name: "enter", type: "control" }],
+    description: "Read the local user's tracked head position and rotation. This is a pure value unit with no control-flow ports.",
+    inputs: [],
     outputs: [
-      { name: "exit", type: "control" },
       { name: "Position", type: "value", valueType: "Vector3", description: "User head position (capitalized!)" },
       { name: "Rotation", type: "value", valueType: "Quaternion", description: "User head rotation (capitalized!)" },
     ],
-    notes: ["Output port names are capitalized: 'Position' and 'Rotation', not lowercase"],
+    notes: [
+      "Output port names are capitalized: 'Position' and 'Rotation', not lowercase",
+      "Do not connect enter/exit flow: the SDK unit defines only value outputs",
+      "Position is the tracked head pose, not a player body/root transform",
+      "For a local-user follower, connect Position directly to the destination or target-position calculation; do not invent a Scene variable named 'player' unless that project explicitly publishes one",
+      "Before Banter has registered the local user, Position is Vector3.zero and Rotation is Quaternion.identity",
+    ],
   },
 
   // ============================================

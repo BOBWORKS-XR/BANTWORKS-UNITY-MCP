@@ -1,6 +1,6 @@
 # Compatibility Matrix
 
-Reviewed: 2026-08-05
+Reviewed: 2026-08-26
 
 This matrix records exercised combinations, not assumptions based only on
 package metadata. A row marked "manual" was run in a disposable local project,
@@ -18,12 +18,12 @@ enforced by the repository workflow.
 | Other MCP clients | Protocol-compatible | Requires stdio MCP support and a way to set `UNITY_PROJECT_PATH`; no client-specific integration is assumed |
 
 The server intentionally rejects `--http`. It does not open a network listener.
-Tool-surface restriction is client-independent through `BANTWORKS_TOOL_GROUPS`;
+Tool-surface restriction is client-independent through `CREATOR_WORKS_TOOL_GROUPS`;
 the default remains `all` for backward compatibility.
 
-## Unity and Banter
+## Unity and SideQuest SDKs
 
-| Unity | Visual Scripting | Banter SDK | Result |
+| Unity | Visual Scripting | SideQuest SDK | Result |
 |-------|------------------|------------|--------|
 | 2022.3.39f1 | 1.9.4 | None | Manual: bridge compiled; canonical Start graph imported and deserialized with no missing elements |
 | 2022.3.39f1 | None | None | Automated local disposable fixture: 2.3.0 bridge compiled; a live correlated root/subtree query returned local transforms without rewriting the full hierarchy snapshot |
@@ -38,7 +38,19 @@ the default remains `all` for backward compatibility.
 | 6000.3.10f1 | 1.9.9 | None | Persistent obstacle fixture: generic course compiled; MCP-generated `Start` graph imported and persisted through the bridge; 4/4 Play Mode tests passed |
 | 6000.3.2f1 | 1.9.9 | Public release 3.2.2 at `8cff56ed80a7f694d0de204a4fa7bfc660f6d503` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
 | 2022.3.39f1 | 1.9.4 | Public release 3.1.2 at `c75593e029cfcb7aecca6a880082f6d5d6853883` | Persistent obstacle fixture: two synced balls persisted; generated `OnGrab` graph survived bridge attachment and scene reload; SDK allow-list passed; 4/4 Play Mode tests passed |
+| 2022.3.39f1 | None | None | Isolated local compile smoke: the exact 2.4.0-3 dual-SDK bridge compiled with zero C# errors |
 | 2022.3.39f1 authoring to 6000.3.2f1 Banter client | 1.9.4 asset bundle loaded by 1.9.9 client | Authoring SDK 3.1.2; client source reports 3.2.1 | Manual real-client negative: authoring SDK validation passed, but the client rejected `UnityEngine.Rigidbody.velocity` and disabled all four gun-recovery graphs. The two installed allowlists had drifted to `velocity` versus `linearVelocity`. |
+| 6000.3.21f1 | 1.9.9 | Creator SDK 3.2.17 (`com.sidequest.creator-sdk`) | Read-only local package/source audit: detected the Creator profile, selected `BS` and `BS.VisualScripting`, matched all 162 captured custom-node class names, and found 16 additional package classes. Source-level bridge and generator fixtures passed; installation of the new bridge and hosted runtime behavior remain separate acceptance gates. |
+| 6000.3.21f1 | None | None | Isolated local compile smoke: the exact 2.4.0-3 dual-SDK bridge compiled with zero C# errors |
+
+Creator Works detects `com.sidequest.creator-sdk`, `com.sidequest.banter`, both
+packages together, neither package, and malformed or unreadable manifests. New
+graph shorthand resolves to `BS.VisualScripting` for Creator/hybrid projects and
+to `Banter.VisualScripting` for legacy projects. The compatibility-named
+`validate_banter_visual_scripting` command probes the Creator validator first
+and the legacy validator second. See
+[sidequest-sdk-transition.md](sidequest-sdk-transition.md) for the exact
+authoring and conversion boundary.
 
 The observed Banter 3.2.2 package declares Unity 2022.3.39f1 metadata, but its
 source references Unity 6 `PhysicsMaterial` and `PhysicsMaterialCombine` types.

@@ -1,8 +1,18 @@
-# Contributing to BANTWORKS MCP
+# Contributing to Creator Works MCP
+
+## Feedback Before Code
+
+You do not need to write code to contribute. Use the public process in
+[FEEDBACK.md](FEEDBACK.md) to report friction, misleading behavior, missing
+capabilities, and improvement ideas. A structured feedback issue gives the
+maintainer enough context to classify the evidence and check feasibility.
+
+When proposing code, open a draft pull request and link its feedback or bug
+issue. Keep it in Draft until focused verification is complete.
 
 ## Local Checks
 
-Node.js 18 or later is required. Run these checks before opening a pull request:
+Node.js 20 or later is required. Run these checks before opening a pull request:
 
 **Windows (PowerShell):**
 ```powershell
@@ -49,4 +59,4 @@ that can include an exact known package-compilation incompatibility.
 
 ## Pull Requests
 
-Describe the user-visible behavior, verification performed, and remaining Unity-side test gap. Do not include generated Unity `Library`, `.bantworks-mcp`, or personal client configuration files.
+Describe the user-visible behavior, verification performed, and remaining Unity-side test gap. Use the pull request checklist, link the motivating issue, and distinguish source/build proof from runtime acceptance. Do not include generated Unity `Library`, `.bantworks-mcp`, or personal client configuration files.

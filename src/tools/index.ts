@@ -19,12 +19,25 @@ import { writeWebRootJS, WriteWebRootResult } from "./write-webroot-js.js";
 import { getBridgeStatus } from "./get-bridge-status.js";
 import { encodeSerializedPropertyValue } from "./serialize-property-value.js";
 import { getUnityPackages } from "./get-unity-packages.js";
-import { getBanterSDKInfo } from "./get-banter-sdk-info.js";
+import {
+  detectSidequestSDKProfile,
+  getBanterSDKInfo,
+} from "./get-banter-sdk-info.js";
+import {
+  addShaderGraphNode,
+  connectShaderGraphNodes,
+  createShaderGraph,
+  getShaderGraphCapabilities,
+  inspectShaderGraph,
+  listShaderGraphs,
+  validateShaderGraph,
+} from "./shader-graph.js";
 import {
   dispatchUnityBridgeCommand,
   type BridgeCommandResult,
 } from "../lib/unity-bridge-transport.js";
 import type { UnityProjectRouter } from "../lib/project-router.js";
+import { getUnityCommandStatus } from "./get-unity-command-status.js";
 import {
   describeToolGroupSelection,
   isToolEnabled,
@@ -78,7 +91,7 @@ export function registerTools(selection: ToolGroupSelection = "all"): Tool[] {
       name: "validate_vs_graph",
       description: `Validate a Visual Scripting graph JSON before writing to Unity.
 Checks:
-- Banter node types use known flat namespaces
+- Creator SDK and Banter node types use their known flat namespaces
 - Connections reference node IDs that exist
 - GUIDs are properly formatted
 - Required properties are set
@@ -249,7 +262,7 @@ Use BS.* API for all Banter functionality.`,
     // Project State Tools
     {
       name: "list_unity_projects",
-      description: `List Unity projects available to this MCP session from UNITY_PROJECT_PATH and BANTWORKS launcher channels.
+      description: `List Unity projects available to this MCP session from UNITY_PROJECT_PATH and Creator Works launcher channels.
 Returns stable path-derived project IDs, bridge installation, live/stale Editor state, and editor process identity. This tool does not change the active project.`,
       inputSchema: {
         type: "object",
@@ -284,11 +297,178 @@ This is the authoritative import check after write_vs_graph. It uses reflection 
 
     {
       name: "validate_banter_visual_scripting",
-      description: `Run the selected Banter SDK's own Visual Scripting allow-list validator inside Unity.
-The SDK scans Script Graph and State Graph assets, embedded prefab graphs, and embedded graphs in the active scene. The bridge invokes the public validator through reflection, captures its [VisualScripting] diagnostics, and remains compilable in non-Banter projects. This is read-only apart from the SDK's AssetDatabase refresh and may take time in large projects.`,
+      description: `Run the selected SideQuest SDK's Visual Scripting allow-list validator inside Unity.
+The legacy tool name is retained for client compatibility. The bridge prefers BS.SDKEditor.ValidateVisualScripting for Creator SDK projects and falls back to Banter.SDKEditor.ValidateVisualScripting for legacy projects. The SDK scans Script Graph and State Graph assets, embedded prefab graphs, and embedded graphs in the active scene. The bridge invokes the public validator through reflection, captures its [VisualScripting] diagnostics, and remains compilable in projects with neither SDK. This is read-only apart from the SDK's AssetDatabase refresh and may take time in large projects.`,
       inputSchema: {
         type: "object",
         properties: {},
+      },
+    },
+
+    {
+      name: "get_shader_graph_capabilities",
+      description: `Probe the selected Unity project's installed Shader Graph package and the exact reflected GraphData, MultiJson, target, node, slot, and connection APIs available to Creator Works MCP.
+Read this before authoring. Missing or shifted internal package APIs are reported explicitly; the bridge remains compilable when Shader Graph is absent.`,
+      inputSchema: { type: "object", properties: {} },
+    },
+
+    {
+      name: "list_shader_graphs",
+      description: "List project-local .shadergraph assets with GUIDs, dependency hashes, and current Unity compile-error state.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          limit: { type: "integer", minimum: 1, maximum: 1000, default: 200 },
+        },
+      },
+    },
+
+    {
+      name: "inspect_shader_graph",
+      description: `Deserialize a Shader Graph through the installed package's GraphData reader and return targets, properties, nodes, real slot ids/directions/types, edges, positions, unresolved objects, and ShaderUtil compiler diagnostics.
+This never hand-parses or rewrites Shader Graph JSON. It can optionally open the asset in Unity after inspection.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: {
+            type: "string",
+            minLength: 20,
+            maxLength: 1024,
+            pattern: "^Assets/.+\\.shadergraph$",
+          },
+          openInEditor: { type: "boolean", default: false },
+        },
+        required: ["assetPath"],
+      },
+    },
+
+    {
+      name: "create_shader_graph",
+      description: `Create a functional Lit or Unlit Shader Graph with an active Built-in or URP target using Unity's GraphData and MultiJson APIs.
+Optional nodes are topology-laid out before creation; connections may address request ids or output blocks such as block:BaseColor. Unity synchronously imports and compiles the graph. Any deserialization, target, unresolved-object, or compiler failure rolls the write back.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: {
+            type: "string",
+            minLength: 20,
+            maxLength: 1024,
+            pattern: "^Assets/.+\\.shadergraph$",
+          },
+          pipeline: { type: "string", enum: ["auto", "built_in", "urp"], default: "auto" },
+          shaderType: { type: "string", enum: ["lit", "unlit"], default: "unlit" },
+          overwrite: { type: "boolean", default: false },
+          expectedContentHash: {
+            type: "string",
+            pattern: "^[a-fA-F0-9]{64}$",
+            description: "Required with overwrite=true; use contentHash from inspect_shader_graph.",
+          },
+          openInEditor: { type: "boolean", default: false },
+          nodes: {
+            type: "array",
+            maxItems: 200,
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", minLength: 1, maxLength: 128 },
+                nodeType: { type: "string", minLength: 1, maxLength: 256 },
+                position: {
+                  type: "object",
+                  properties: { x: { type: "number" }, y: { type: "number" } },
+                  required: ["x", "y"],
+                },
+                size: {
+                  type: "object",
+                  properties: {
+                    width: { type: "number", minimum: 24, maximum: 2048 },
+                    height: { type: "number", minimum: 24, maximum: 4096 },
+                  },
+                  required: ["width", "height"],
+                },
+              },
+              required: ["nodeType"],
+            },
+          },
+          connections: {
+            type: "array",
+            maxItems: 400,
+            items: {
+              type: "object",
+              properties: {
+                from: { type: "string", minLength: 1, maxLength: 128 },
+                fromSlot: { type: "integer", minimum: 0 },
+                to: { type: "string", minLength: 1, maxLength: 128 },
+                toSlot: { type: "integer", minimum: 0 },
+              },
+              required: ["from", "fromSlot", "to", "toSlot"],
+            },
+          },
+          layout: {
+            type: "object",
+            properties: {
+              origin: {
+                type: "object",
+                properties: { x: { type: "number" }, y: { type: "number" } },
+                required: ["x", "y"],
+              },
+              gridSize: { type: "number", minimum: 1, maximum: 256 },
+              horizontalGap: { type: "number", minimum: 1, maximum: 2048 },
+              verticalGap: { type: "number", minimum: 1, maximum: 2048 },
+            },
+          },
+        },
+        required: ["assetPath"],
+      },
+    },
+
+    {
+      name: "add_shader_graph_node",
+      description: `Add one concrete AbstractMaterialNode to an existing Shader Graph through GraphData. Pass contentHash from inspect_shader_graph as expectedContentHash so stale edits fail closed.
+When position is omitted, Creator Works MCP places the node on a 24-pixel grid to the right of the current graph without overlap. Open Shader Graph editor assets are rejected, and the original asset is restored if Unity import or shader compilation fails.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: { type: "string", maxLength: 1024, pattern: "^Assets/.+\\.shadergraph$" },
+          nodeType: { type: "string", minLength: 1, maxLength: 256 },
+          expectedContentHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+          position: {
+            type: "object",
+            properties: { x: { type: "number" }, y: { type: "number" } },
+            required: ["x", "y"],
+          },
+        },
+        required: ["assetPath", "nodeType", "expectedContentHash"],
+      },
+    },
+
+    {
+      name: "connect_shader_graph_nodes",
+      description: `Connect a real output slot to a real input slot by node object ids returned from inspect_shader_graph. Pass that inspection's contentHash so stale edits fail closed.
+The bridge verifies directions, compatibility, and that the input is unoccupied before GraphData.Connect, then reimports and compiles transactionally. Set replaceExistingInput=true only to explicitly replace an existing edge.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: { type: "string", maxLength: 1024, pattern: "^Assets/.+\\.shadergraph$" },
+          sourceNodeId: { type: "string", minLength: 1, maxLength: 128 },
+          sourceSlotId: { type: "integer", minimum: 0 },
+          destinationNodeId: { type: "string", minLength: 1, maxLength: 128 },
+          destinationSlotId: { type: "integer", minimum: 0 },
+          expectedContentHash: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
+          replaceExistingInput: { type: "boolean", default: false },
+        },
+        required: ["assetPath", "sourceNodeId", "sourceSlotId", "destinationNodeId", "destinationSlotId", "expectedContentHash"],
+      },
+    },
+
+    {
+      name: "validate_shader_graph",
+      description: "Force synchronous import and fail unless GraphData deserializes, at least one target exists, no recognized serialized object is unresolved, a Shader asset loads, and ShaderUtil reports no compiler errors.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          assetPath: { type: "string", maxLength: 1024, pattern: "^Assets/.+\\.shadergraph$" },
+        },
+        required: ["assetPath"],
       },
     },
 
@@ -311,7 +491,7 @@ In-flight calls retain their original project snapshot. This does not rewrite la
 
     {
       name: "get_bridge_status",
-      description: `Inspect BANTWORKS MCP bridge health without modifying the project.
+      description: `Inspect Creator Works MCP bridge health without modifying the project.
 Reports the configured project, bridge installation, state and command directories,
 state freshness, and the next setup step when the bridge is not ready.
 
@@ -319,6 +499,29 @@ Use this first after configuring a new Unity project or when Unity tools appear 
       inputSchema: {
         type: "object",
         properties: {},
+      },
+    },
+
+    {
+      name: "get_unity_command_status",
+      description: `Read one pending Unity command result from the currently selected project. The projectId returned with the original pending response is required, preventing a status poll from silently resolving against another Unity project.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          commandId: {
+            type: "string",
+            format: "uuid",
+            minLength: 36,
+            maxLength: 36,
+            description: "Command UUID returned by a pending Unity operation",
+          },
+          projectId: {
+            type: "string",
+            pattern: "^unity-[a-f0-9]{20}$",
+            description: "Project ID returned by the pending Unity operation",
+          },
+        },
+        required: ["commandId", "projectId"],
       },
     },
 
@@ -344,8 +547,8 @@ Returns requested and resolved versions, package source, revision hash, dependen
 
     {
       name: "get_banter_sdk_info",
-      description: `Inspect the selected project's Banter SDK package provenance and source coverage.
-Returns the requested package source, resolved metadata, git revision or package-cache identity, Unity version, and compares source classes against the embedded Banter Visual Scripting node and component catalogues. This tool is read-only and does not require the Editor to be running.`,
+      description: `Detect and inspect the selected project's SideQuest SDK profile.
+The legacy tool name is retained for client compatibility. Detects com.sidequest.creator-sdk, com.sidequest.banter, hybrid, or no-SDK projects; returns profile-correct component and Visual Scripting namespaces, validator candidates, requested and resolved package provenance, Unity version, and live source coverage against the embedded catalogue. Run this before authoring SideQuest components or custom nodes. This tool is read-only and does not require the Editor to be running.`,
       inputSchema: {
         type: "object",
         properties: {},
@@ -701,6 +904,19 @@ Requires the BanterMCPBridge Unity extension to be installed and Unity Editor ru
             type: "string",
             description: "Exact short or full component type; hierarchy results retain only matching components",
           },
+          propertyNames: {
+            type: "array",
+            maxItems: 50,
+            items: { type: "string" },
+            description: "Exact serialized property names to return for matching components, such as m_Materials or m_Mass",
+          },
+          maxResponseBytes: {
+            type: "integer",
+            minimum: 16384,
+            maximum: 4194304,
+            default: 524288,
+            description: "Final UTF-8 JSON byte budget for returned hierarchy objects or components",
+          },
           refresh: {
             type: "boolean",
             default: true,
@@ -881,6 +1097,18 @@ Requires BanterMCPBridge extension to be installed and Unity Editor running.`,
           cameraPath: {
             type: "string",
             description: "Legacy path to a GameObject containing the Camera component",
+          },
+          includeImage: {
+            type: "boolean",
+            default: true,
+            description: "Include the PNG as an MCP image block; false returns metadata and the local image path only",
+          },
+          maxImageBytes: {
+            type: "integer",
+            minimum: 65536,
+            maximum: 16777216,
+            default: 2097152,
+            description: "Maximum PNG bytes allowed in the inline MCP image payload",
           },
         },
       },
@@ -1428,7 +1656,7 @@ export async function handleToolCall(
 ): Promise<{ content: Array<ToolTextContent | ToolImageContent> }> {
   if (!isToolEnabled(name, selection)) {
     throw new Error(
-      `Tool '${name}' is disabled by BANTWORKS_TOOL_GROUPS ` +
+      `Tool '${name}' is disabled by CREATOR_WORKS_TOOL_GROUPS ` +
       `(enabled selection: ${describeToolGroupSelection(selection)}).`
     );
   }
@@ -1437,7 +1665,9 @@ export async function handleToolCall(
 
   switch (name) {
     case "validate_vs_graph":
-      result = validateVSGraph(args.graphJson as string);
+      result = validateVSGraph(args.graphJson as string, {
+        sdkProfile: detectSidequestSDKProfile(config),
+      });
       break;
 
     case "generate_vs_graph":
@@ -1448,6 +1678,7 @@ export async function handleToolCall(
         connections: args.connections as Array<unknown>,
         variables: args.variables as Array<unknown>,
         layout: args.layout as import("../lib/graph-layout.js").GraphLayoutOptions | undefined,
+        sdkProfile: detectSidequestSDKProfile(config),
       });
       break;
 
@@ -1481,6 +1712,8 @@ export async function handleToolCall(
           maxResults: args.maxResults as number | undefined,
           fields: args.fields as string[] | undefined,
           componentType: args.componentType as string | undefined,
+          propertyNames: args.propertyNames as string[] | undefined,
+          maxResponseBytes: args.maxResponseBytes as number | undefined,
           refresh: args.refresh as boolean | undefined,
           timeoutMs: args.timeoutMs as number | undefined,
         }
@@ -1499,6 +1732,65 @@ export async function handleToolCall(
       result = await validateBanterVisualScripting(config);
       break;
 
+    case "get_shader_graph_capabilities":
+      result = await getShaderGraphCapabilities(config);
+      break;
+
+    case "list_shader_graphs":
+      result = await listShaderGraphs(args.limit as number | undefined, config);
+      break;
+
+    case "inspect_shader_graph":
+      result = await inspectShaderGraph(
+        args.assetPath as string,
+        args.openInEditor as boolean | undefined,
+        config
+      );
+      break;
+
+    case "create_shader_graph":
+      result = await createShaderGraph({
+        assetPath: args.assetPath as string,
+        pipeline: args.pipeline as "auto" | "built_in" | "urp" | undefined,
+        shaderType: args.shaderType as "lit" | "unlit" | undefined,
+        overwrite: args.overwrite as boolean | undefined,
+        expectedContentHash: args.expectedContentHash as string | undefined,
+        openInEditor: args.openInEditor as boolean | undefined,
+        nodes: args.nodes as import("./shader-graph.js").ShaderGraphNodeSpec[] | undefined,
+        connections: args.connections as import("./shader-graph.js").ShaderGraphConnectionSpec[] | undefined,
+        layout: args.layout as import("../lib/graph-layout.js").GraphLayoutOptions | undefined,
+      }, config);
+      break;
+
+    case "add_shader_graph_node":
+      result = await addShaderGraphNode(
+        args.assetPath as string,
+        args.nodeType as string,
+        args.position as import("../lib/graph-layout.js").GraphPoint | undefined,
+        args.expectedContentHash as string,
+        config
+      );
+      break;
+
+    case "connect_shader_graph_nodes":
+      result = await connectShaderGraphNodes(
+        args.assetPath as string,
+        {
+          from: args.sourceNodeId as string,
+          fromSlot: args.sourceSlotId as number,
+          to: args.destinationNodeId as string,
+          toSlot: args.destinationSlotId as number,
+          expectedContentHash: args.expectedContentHash as string,
+          replaceExistingInput: args.replaceExistingInput as boolean | undefined,
+        },
+        config
+      );
+      break;
+
+    case "validate_shader_graph":
+      result = await validateShaderGraph(args.assetPath as string, config);
+      break;
+
     case "list_unity_projects":
       result = projectRouter
         ? projectRouter.listProjects()
@@ -1513,6 +1805,14 @@ export async function handleToolCall(
 
     case "get_bridge_status":
       result = getBridgeStatus(config);
+      break;
+
+    case "get_unity_command_status":
+      result = getUnityCommandStatus(
+        args.commandId as string,
+        args.projectId as string,
+        config
+      );
       break;
 
     case "get_unity_packages":
@@ -1656,6 +1956,8 @@ export async function handleToolCall(
         args.height as number | undefined,
         args.cameraId as string | undefined,
         args.cameraPath as string | undefined,
+        args.includeImage as boolean | undefined,
+        args.maxImageBytes as number | undefined,
         config
       );
       break;
@@ -2075,11 +2377,15 @@ async function captureUnityScreenshot(
   requestedHeight: number | undefined,
   cameraId: string | undefined,
   cameraPath: string | undefined,
+  requestedIncludeImage: boolean | undefined,
+  requestedMaxImageBytes: number | undefined,
   config: BanterMCPConfig
 ): Promise<unknown> {
   const source = requestedSource ?? "game";
   const width = requestedWidth ?? 1280;
   const height = requestedHeight ?? 720;
+  const includeImage = requestedIncludeImage !== false;
+  const maxImageBytes = requestedMaxImageBytes ?? 2 * 1024 * 1024;
 
   if (!["game", "scene"].includes(source)) {
     return { success: false, error: `Unknown screenshot source: ${source}` };
@@ -2087,6 +2393,9 @@ async function captureUnityScreenshot(
   if (!Number.isInteger(width) || !Number.isInteger(height) ||
       width < 64 || width > 2048 || height < 64 || height > 2048) {
     return { success: false, error: "Screenshot width and height must be whole numbers between 64 and 2048." };
+  }
+  if (!Number.isInteger(maxImageBytes) || maxImageBytes < 64 * 1024 || maxImageBytes > 16 * 1024 * 1024) {
+    return { success: false, error: "maxImageBytes must be a whole number between 65536 and 16777216." };
   }
 
   const result = await sendUnityCommand({
@@ -2107,22 +2416,50 @@ async function captureUnityScreenshot(
 
   while (Date.now() - startedAt < 15000) {
     if (fs.existsSync(screenshotPath)) {
+      const metadataPath = path.join(config.mcpStatePath, "screenshot-results", `${result.commandId}.json`);
+      let metadata: Record<string, unknown> = {};
+      if (fs.existsSync(metadataPath)) {
+        try {
+          metadata = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as Record<string, unknown>;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
+      } else if (Date.now() - startedAt < 500) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        continue;
+      }
+
       const image = fs.readFileSync(screenshotPath);
-      return {
+      const response = {
         success: true,
         commandId: result.commandId,
         source,
         width,
         height,
-        cameraId,
-        cameraPath,
+        requestedCameraId: cameraId,
+        requestedCameraPath: cameraPath,
+        ...metadata,
         imagePath: screenshotPath,
         byteLength: image.length,
         mimeType: "image/png",
+      };
+      if (!includeImage) {
+        return { ...response, imageIncluded: false };
+      }
+      if (image.length > maxImageBytes) {
+        return {
+          ...response,
+          imageIncluded: false,
+          warning: `PNG is ${image.length} bytes, above maxImageBytes=${maxImageBytes}; returning metadata and path only.`,
+        };
+      }
+      return {
+        ...response,
+        imageIncluded: true,
         imageData: image.toString("base64"),
       } satisfies ImageToolResult;
     }
-
     if (!result.completed && fs.existsSync(lateResultPath)) {
       try {
         const lateResult = JSON.parse(fs.readFileSync(lateResultPath, "utf-8")) as BridgeCommandResult;
@@ -2326,7 +2663,7 @@ async function validateBanterVisualScripting(config: BanterMCPConfig): Promise<u
   return {
     success: false,
     commandId: result.commandId,
-    error: "Timed out after 300000ms waiting for Banter's Visual Scripting validator.",
+    error: "Timed out after 300000ms waiting for the installed SideQuest SDK Visual Scripting validator.",
   };
 }
 
@@ -2884,11 +3221,16 @@ export function normalizeCustomEditorMenuPath(value: unknown): string | undefine
 
 interface UnityCommandResult {
   success: boolean;
+  accepted?: boolean;
+  pending?: boolean;
   commandId?: string;
   completed?: boolean;
-  status?: "completed" | "queued";
+  status?: "completed" | "pending";
   message?: string;
   error?: string;
+  projectId?: string;
+  projectPath?: string;
+  editorInstanceId?: string;
 }
 
 async function sendUnityCommand(
@@ -2900,11 +3242,15 @@ async function sendUnityCommand(
     if (!dispatch.acknowledgement) {
       return {
         success: true,
+        accepted: true,
+        pending: true,
         commandId: dispatch.commandId,
         completed: false,
-        status: "queued",
+        status: "pending",
         message: dispatch.fallbackReason ||
-          `Command queued over ${dispatch.transport}. Unity did not acknowledge it within 3 seconds.`,
+          `Command accepted over ${dispatch.transport}, but Unity did not acknowledge completion within 3 seconds.`,
+        projectId: config.projectId,
+        projectPath: config.unityProjectPath,
       };
     }
 
@@ -2912,26 +3258,38 @@ async function sendUnityCommand(
       success: dispatch.acknowledgement.success === true,
       commandId: dispatch.commandId,
       completed: true,
+      accepted: true,
+      pending: false,
       status: "completed",
       message: dispatch.acknowledgement.message,
       error: dispatch.acknowledgement.error,
+      projectId: config.projectId,
+      projectPath: dispatch.acknowledgement.projectPath || config.unityProjectPath,
+      editorInstanceId: dispatch.acknowledgement.editorInstanceId,
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",
+      projectId: config.projectId,
+      projectPath: config.unityProjectPath,
     };
   }
 }
 
 function commandResponse(result: UnityCommandResult, completedMessage: string): Record<string, unknown> {
   return {
-    success: true,
+    success: result.completed === true && result.success,
+    accepted: result.accepted === true,
+    pending: result.pending === true,
     commandId: result.commandId,
     status: result.status,
     message: result.completed
       ? completedMessage
-      : `${completedMessage} It is still queued in Unity.`,
+      : "Unity accepted the command, but completion is still pending. Use get_unity_command_status with this commandId and projectId before treating the operation as successful.",
+    projectId: result.projectId,
+    projectPath: result.projectPath,
+    editorInstanceId: result.editorInstanceId,
     unityMessage: result.message,
   };
 }

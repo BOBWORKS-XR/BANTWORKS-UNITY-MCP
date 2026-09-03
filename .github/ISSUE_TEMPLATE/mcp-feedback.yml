@@ -1,0 +1,109 @@
+name: MCP feedback
+description: Report friction, misleading behavior, a missing capability, or a concrete improvement.
+title: "[Feedback]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You do not need to know how MCP works. Describe the Unity task and what you observed. Please remove secrets, private URLs, personal information, and proprietary project content.
+
+  - type: dropdown
+    id: feedback_type
+    attributes:
+      label: Feedback type
+      options:
+        - Incorrect or misleading result
+        - Workflow friction
+        - Missing capability
+        - Performance problem
+        - Documentation problem
+        - Improvement idea
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Unity connection or project selection
+        - Scene objects, hierarchy, or components
+        - Assets, prefabs, materials, or shaders
+        - Visual Scripting
+        - Build, bundle, upload, or deployment
+        - Screenshots, logs, or diagnostics
+        - Performance or profiling
+        - Launcher, setup, or installation
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to do?
+      description: Describe the intended result in plain language.
+      placeholder: I wanted the AI to inspect two Unity LOD states and compare their appearance.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened?
+      description: Include the exact unexpected result. Distinguish a tool message from what Unity or the device actually did.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Why does this matter?
+      description: Explain the lost time, incorrect conclusion, unsafe risk, blocked task, or repeated manual work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Smallest useful improvement
+      description: Optional. Describe the smallest behavior or information that would have helped.
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and evidence
+      description: Add short steps, relevant log lines, screenshots, paths without private data, or a minimal public project. Do not paste credentials or full private logs.
+      render: text
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Creator Works MCP version, Unity version, SDK/package version, operating system, and device where relevant.
+      placeholder: |
+        Creator Works MCP: 2.x.x
+        Unity: 6000.x
+        SDK/package: name and version
+        OS/device: Windows 11 / Quest 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: What would prove it is improved?
+      description: Give one observable pass condition, including device or hosted testing if that is where the problem occurs.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues for the same behavior.
+          required: true
+        - label: I removed credentials, private URLs, personal information, and proprietary content.
+          required: true
+        - label: I understand that a successful source or build check is separate from Unity/device runtime acceptance.
+          required: true

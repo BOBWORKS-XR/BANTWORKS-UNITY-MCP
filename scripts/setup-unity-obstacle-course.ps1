@@ -19,6 +19,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $FixtureRoot = Join-Path $RepoRoot "compatibility\obstacle-course"
 $BridgeSource = Join-Path $RepoRoot "unity-extension\Editor\BanterMCPBridge.cs"
+$BridgeLogoSource = Join-Path $RepoRoot "unity-extension\Editor\CreatorWorksMCPLogo.png"
 $GraphWriter = Join-Path $PSScriptRoot "write-obstacle-course-vs-fixture.mjs"
 $ProjectPath = [System.IO.Path]::GetFullPath($ProjectPath).TrimEnd(
     [System.IO.Path]::DirectorySeparatorChar,
@@ -37,7 +38,10 @@ if (-not (Test-Path -LiteralPath $FixtureRoot -PathType Container)) {
     throw "Obstacle-course fixture source not found: $FixtureRoot"
 }
 if (-not (Test-Path -LiteralPath $BridgeSource -PathType Leaf)) {
-    throw "BANTWORKS bridge source not found: $BridgeSource"
+    throw "Creator Works bridge source not found: $BridgeSource"
+}
+if (-not (Test-Path -LiteralPath $BridgeLogoSource -PathType Leaf)) {
+    throw "Creator Works bridge logo source not found: $BridgeLogoSource"
 }
 if (-not (Test-Path -LiteralPath $GraphWriter -PathType Leaf)) {
     throw "Visual Scripting fixture writer not found: $GraphWriter"
@@ -242,6 +246,7 @@ Copy-Item -LiteralPath (Join-Path $FixtureRoot "Tests") -Destination $fixtureDes
 $editorDestination = Join-Path $ProjectPath "Assets\Editor"
 New-Item -ItemType Directory -Path $editorDestination -Force | Out-Null
 Copy-Item -LiteralPath $BridgeSource -Destination (Join-Path $editorDestination "BantworksMCPBridge.cs") -Force
+Copy-Item -LiteralPath $BridgeLogoSource -Destination (Join-Path $editorDestination "CreatorWorksMCPLogo.png") -Force
 
 $projectMarker = [ordered]@{
     schemaVersion = 1

@@ -1,12 +1,12 @@
 {
-  "name": "banter-mcp",
-  "version": "2.3.0",
-  "description": "Codex, Claude Code, Antigravity, OpenCode, and MCP-compatible Unity integration for Banter SDK development",
+  "name": "creator-works-mcp",
+  "version": "2.5.1",
+  "description": "Codex, Claude Code, Antigravity, OpenCode, and MCP-compatible Unity integration with first-class Creator SDK and Banter knowledge",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "bundle:server": "npm run build && esbuild dist/index.js --bundle --platform=node --format=esm --target=node20 --outfile=release/banter-mcp.mjs",
+    "bundle:server": "npm run build && esbuild dist/index.js --bundle --platform=node --format=esm --target=node20 --outfile=release/creator-works-mcp.mjs",
     "stage:runtime": "node scripts/stage-node-runtime.mjs",
     "check:version": "node scripts/check-version-sync.mjs",
     "test:bundle": "node scripts/smoke-release-bundle.mjs",
@@ -22,12 +22,15 @@
   },
   "keywords": [
     "mcp",
+    "creator-works",
+    "creator-sdk",
+    "sidequest",
     "banter",
     "unity",
     "visual-scripting",
     "vr"
   ],
-  "author": "",
+  "author": "Creator Works",
   "license": "MIT",
   "engines": {
     "node": ">=20"
@@ -42,7 +45,7 @@
   },
   "overrides": {
     "@hono/node-server": "2.0.11",
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.6",
     "hono": "4.13.0",
     "ip-address": "10.4.0"
   }

@@ -3,13 +3,13 @@
 Reviewed: 2026-07-14
 
 This benchmark is used to choose engineering work, not to make an unsupported
-"best Unity MCP" claim. BANTWORKS MCP should lead on deterministic local Unity
+"best Unity MCP" claim. Creator Works MCP should lead on deterministic local Unity
 automation and Banter knowledge while matching the strongest general Unity MCP
 workflows where they fit its security model.
 
 ## Scope
 
-BANTWORKS MCP is:
+Creator Works MCP is:
 
 - a generic Unity Editor MCP with Banter as a deeper specialization;
 - local-first and project-scoped;

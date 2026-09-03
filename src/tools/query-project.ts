@@ -19,6 +19,8 @@ export interface ProjectStateQueryOptions {
   maxResults?: number;
   fields?: string[];
   componentType?: string;
+  propertyNames?: string[];
+  maxResponseBytes?: number;
   refresh?: boolean;
   timeoutMs?: number;
 }
@@ -34,6 +36,9 @@ interface QuerySummary {
   maxResults: number;
   fields?: string[];
   componentType?: string;
+  propertyNames?: string[];
+  maxResponseBytes: number;
+  responseBytes: number;
 }
 
 interface SnapshotInfo {
@@ -83,6 +88,9 @@ export interface ProjectStateResult {
 const DEFAULT_MAX_RESULTS = 200;
 const MAX_RESULTS_LIMIT = 5000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 30000;
+const DEFAULT_MAX_RESPONSE_BYTES = 512 * 1024;
+const MIN_RESPONSE_BYTES = 16 * 1024;
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const HIERARCHY_FIELDS = new Set([
   "name",
   "globalObjectId",
@@ -190,6 +198,10 @@ function validateQueryOptions(query: string, options: ProjectStateQueryOptions):
       (!Number.isInteger(options.maxDepth) || options.maxDepth < 0 || options.maxDepth > 100)) {
     return "maxDepth must be a whole number between 0 and 100.";
   }
+  if (options.maxResponseBytes !== undefined &&
+      (!Number.isInteger(options.maxResponseBytes) || options.maxResponseBytes < MIN_RESPONSE_BYTES || options.maxResponseBytes > MAX_RESPONSE_BYTES)) {
+    return `maxResponseBytes must be a whole number between ${MIN_RESPONSE_BYTES} and ${MAX_RESPONSE_BYTES}.`;
+  }
   if (options.timeoutMs !== undefined &&
       (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 120000)) {
     return "timeoutMs must be between 1000 and 120000.";
@@ -197,6 +209,10 @@ function validateQueryOptions(query: string, options: ProjectStateQueryOptions):
   if (options.fields !== undefined &&
       (!Array.isArray(options.fields) || options.fields.length > 50 || options.fields.some((field) => typeof field !== "string" || !field))) {
     return "fields must contain at most 50 non-empty field names.";
+  }
+  if (options.propertyNames !== undefined &&
+      (!Array.isArray(options.propertyNames) || options.propertyNames.length > 50 || options.propertyNames.some((name) => typeof name !== "string" || !name.trim()))) {
+    return "propertyNames must contain at most 50 non-empty serialized property names.";
   }
   if (options.fields?.length) {
     const allowed = query === "hierarchy"
@@ -222,6 +238,7 @@ function isTargetedHierarchyQuery(
   return Boolean(
     normalizeObjectPath(options.rootPath) ||
     options.componentType ||
+    options.propertyNames?.length ||
     (options.match === "exact" && filter)
   );
 }
@@ -243,6 +260,7 @@ async function requestTargetedHierarchyQuery(
     maxDepth: options.maxDepth ?? -1,
     maxResults: options.maxResults ?? DEFAULT_MAX_RESULTS,
     componentType: options.componentType || "",
+    propertyNames: options.propertyNames || [],
   }, config, Math.min(timeoutMs, 3000));
 
   if (dispatch.acknowledgement?.success === false) {
@@ -276,11 +294,13 @@ async function requestTargetedHierarchyQuery(
         const timestamp = result.timestamp;
         const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
         const rawItems = query === "hierarchy" ? result.objects || [] : result.components || [];
-        const items = fields ? rawItems.map((item) => pickFields(item, fields)) : rawItems;
+        const projectedItems = fields ? rawItems.map((item) => pickFields(item, fields)) : rawItems;
+        const bounded = boundItemsByBytes(projectedItems, options.maxResponseBytes);
+        const items = bounded.items;
         const querySummary: QuerySummary = {
           totalMatches: result.totalMatches ?? items.length,
-          returned: result.returned ?? items.length,
-          truncated: result.truncated === true,
+          returned: items.length,
+          truncated: result.truncated === true || bounded.truncated,
           match: options.match ?? "contains",
           rootPath: normalizeObjectPath(options.rootPath),
           includeDescendants: options.includeDescendants === true,
@@ -288,6 +308,9 @@ async function requestTargetedHierarchyQuery(
           maxResults: options.maxResults ?? DEFAULT_MAX_RESULTS,
           fields,
           componentType: options.componentType,
+          propertyNames: options.propertyNames,
+          maxResponseBytes: bounded.maxResponseBytes,
+          responseBytes: bounded.responseBytes,
         };
         const snapshot = buildSnapshotInfo(
           config,
@@ -490,22 +513,24 @@ function selectHierarchyObjects(
     return !filter || matchesFilter(object, filter, match);
   });
 
-  if (options.componentType) {
-    matches = matches.map((object) => projectMatchingComponents(object, options.componentType as string));
+  if (options.componentType || options.propertyNames?.length) {
+    matches = matches.map((object) => projectMatchingComponents(object, options.componentType, options.propertyNames));
   }
 
   const totalMatches = matches.length;
   const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
-  const items = matches
+  const projectedItems = matches
     .slice(0, maxResults)
     .map((object) => fields ? pickFields(object, fields) : object);
+  const bounded = boundItemsByBytes(projectedItems, options.maxResponseBytes);
+  const items = bounded.items;
 
   return {
     items,
     summary: {
       totalMatches,
       returned: items.length,
-      truncated: totalMatches > items.length,
+      truncated: totalMatches > projectedItems.length || bounded.truncated,
       match,
       rootPath,
       includeDescendants,
@@ -513,18 +538,46 @@ function selectHierarchyObjects(
       maxResults,
       fields,
       componentType: options.componentType,
+      propertyNames: options.propertyNames,
+      maxResponseBytes: bounded.maxResponseBytes,
+      responseBytes: bounded.responseBytes,
     },
   };
 }
 
 function projectMatchingComponents(
   object: Record<string, unknown>,
-  componentType: string
+  componentType: string | undefined,
+  propertyNames: string[] | undefined
 ): Record<string, unknown> {
-  const components = Array.isArray(object.components)
-    ? object.components.filter(isRecord).filter((component) => componentMatchesType(component, componentType))
+  let components = Array.isArray(object.components)
+    ? object.components.filter(isRecord)
     : [];
+  if (componentType) {
+    components = components.filter((component) => componentMatchesType(component, componentType));
+  }
+  if (propertyNames?.length) {
+    components = components.map((component) => projectComponentProperties(component, propertyNames));
+  }
   return { ...object, components };
+}
+
+function projectComponentProperties(
+  component: Record<string, unknown>,
+  propertyNames: string[]
+): Record<string, unknown> {
+  if (!Array.isArray(component.properties)) return component;
+  const requested = new Set(propertyNames);
+  return {
+    ...component,
+    properties: component.properties.filter((property) => {
+      if (!isRecord(property)) return false;
+      const name = stringValue(property.name);
+      const propertyPath = stringValue(property.propertyPath);
+      return (name !== undefined && requested.has(name)) ||
+        (propertyPath !== undefined && requested.has(propertyPath));
+    }),
+  };
 }
 
 function objectHasComponent(object: Record<string, unknown>, componentType: string): boolean {
@@ -568,6 +621,34 @@ function pickFields(item: Record<string, unknown>, fields: string[]): Record<str
     }
   }
   return result;
+}
+
+interface BoundedItemsResult {
+  items: Array<Record<string, unknown>>;
+  responseBytes: number;
+  maxResponseBytes: number;
+  truncated: boolean;
+}
+
+function boundItemsByBytes(
+  items: Array<Record<string, unknown>>,
+  requestedMaxBytes: number | undefined
+): BoundedItemsResult {
+  const maxResponseBytes = requestedMaxBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  const bounded: Array<Record<string, unknown>> = [];
+  let responseBytes = 2;
+  for (const item of items) {
+    const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf-8") + (bounded.length > 0 ? 1 : 0);
+    if (responseBytes + itemBytes > maxResponseBytes) break;
+    bounded.push(item);
+    responseBytes += itemBytes;
+  }
+  return {
+    items: bounded,
+    responseBytes,
+    maxResponseBytes,
+    truncated: bounded.length < items.length,
+  };
 }
 
 function normalizeObjectPath(value: string | undefined): string | undefined {
@@ -649,9 +730,11 @@ function readComponentsFromHierarchy(
   const totalMatches = components.length;
   const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
   const fields = options.fields ? Array.from(new Set(options.fields)) : undefined;
-  const items = components
+  const projectedItems = components
     .slice(0, maxResults)
     .map((component) => fields ? pickFields(component, fields) : component);
+  const bounded = boundItemsByBytes(projectedItems, options.maxResponseBytes);
+  const items = bounded.items;
 
   return {
     ...hierarchyResult,
@@ -660,9 +743,12 @@ function readComponentsFromHierarchy(
       ...selectedObjects.summary,
       totalMatches,
       returned: items.length,
-      truncated: totalMatches > items.length,
+      truncated: totalMatches > projectedItems.length || bounded.truncated,
       fields,
       componentType: options.componentType,
+      propertyNames: options.propertyNames,
+      maxResponseBytes: bounded.maxResponseBytes,
+      responseBytes: bounded.responseBytes,
     },
   };
 }

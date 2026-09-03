@@ -1,6 +1,6 @@
-# Building the BANTWORKS MCP Launcher
+# Building the Creator Works MCP Launcher
 
-The Tauri launcher provides a native GUI for discovering Unity projects, installing the bridge, and configuring BANTWORKS MCP for Codex or Claude Code. It builds on Windows and Linux (and macOS, with caveats around code signing).
+The Tauri launcher provides a native GUI for discovering Unity projects, installing the bridge, and configuring Creator Works MCP for Codex or Claude Code. It builds on Windows and Linux (and macOS, with caveats around code signing).
 
 ## Prerequisites
 
@@ -49,7 +49,7 @@ The Tauri launcher provides a native GUI for discovering Unity projects, install
 ### Windows
 
 ```powershell
-Set-Location <path-to-bantworks-mcp>
+Set-Location <path-to-creator-works-mcp>
 npm ci
 npm run release:launcher
 
@@ -63,7 +63,7 @@ cargo tauri build
 
 The built executable will be at:
 ```
-launcher\src-tauri\target\release\bantworks-mcp-launcher.exe
+launcher\src-tauri\target\release\creator-works-mcp-launcher.exe
 ```
 
 The Windows build produces NSIS and MSI installers under `launcher\src-tauri\target\release\bundle\`.
