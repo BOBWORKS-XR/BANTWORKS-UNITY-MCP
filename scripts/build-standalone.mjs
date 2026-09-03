@@ -1,6 +1,6 @@
 // Cross-platform equivalent of scripts/build-standalone.ps1.
 //
-// Produces release/BANTWORKS-MCP-<version>-standalone.zip by staging the
+// Produces release/Creator-Works-MCP-<version>-standalone.zip by staging the
 // release bundle plus documentation, then zips the staging directory using
 // a tiny built-in ZIP writer so we don't depend on system tools (PowerShell
 // Compress-Archive on Windows, /usr/bin/zip on Linux). Also runs a smoke
@@ -49,7 +49,7 @@ function helpText() {
 
 Builds a ZIP archive containing the standalone MCP server bundle plus
 documentation and platform setup scripts. The archive is written to
-release/BANTWORKS-MCP-<version>-standalone.zip and then smoke-tested by
+release/Creator-Works-MCP-<version>-standalone.zip and then smoke-tested by
 extracting into a temp directory and running the bundled setup script.`;
 }
 
@@ -314,11 +314,14 @@ async function main() {
   const version = loadVersion(args.version);
   const releaseRoot = path.join(repoRoot, "release");
   const standaloneRoot = path.join(releaseRoot, "standalone");
-  const stagingRoot = path.join(standaloneRoot, `BANTWORKS-MCP-${version}`);
-  const archivePath = path.join(releaseRoot, `BANTWORKS-MCP-${version}-standalone.zip`);
-  const serverBundle = path.join(releaseRoot, "banter-mcp.mjs");
+  const stagingRoot = path.join(standaloneRoot, `Creator-Works-MCP-${version}`);
+  const archivePath = path.join(releaseRoot, `Creator-Works-MCP-${version}-standalone.zip`);
+  const serverBundle = [
+    path.join(releaseRoot, "creator-works-mcp.mjs"),
+    path.join(releaseRoot, "banter-mcp.mjs"),
+  ].find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
 
-  if (!existsSync(serverBundle) || !statSync(serverBundle).isFile()) {
+  if (!serverBundle) {
     throw new Error("Standalone server bundle is missing. Run 'npm run release:server' first.");
   }
 
@@ -333,7 +336,9 @@ async function main() {
   }
   mkdirSync(stagingRoot, { recursive: true });
 
-  writeFileSync(path.join(stagingRoot, "banter-mcp.mjs"), readFileSync(serverBundle));
+  const bundleData = readFileSync(serverBundle);
+  writeFileSync(path.join(stagingRoot, "creator-works-mcp.mjs"), bundleData);
+  writeFileSync(path.join(stagingRoot, "banter-mcp.mjs"), bundleData);
 
   const rootFiles = [
     "setup.ps1",
@@ -366,12 +371,12 @@ async function main() {
   buildZip(archivePath, entries);
 
   // Smoke test the archive.
-  const tempRoot = path.join(os.tmpdir(), `bantworks-standalone-smoke-${process.pid}-${Date.now()}`);
+  const tempRoot = path.join(os.tmpdir(), `creator-works-standalone-smoke-${process.pid}-${Date.now()}`);
   mkdirSync(tempRoot, { recursive: true });
   try {
     await extractZip(archivePath, tempRoot);
     // extractZip preserves the archive's top-level directory structure, so
-    // the entries land under <tempRoot>/BANTWORKS-MCP-<version>/.
+    // the entries land under <tempRoot>/Creator-Works-MCP-<version>/.
     const extractedRoot = path.join(tempRoot, path.basename(stagingRoot));
     const setupScript = process.platform === "win32"
       ? path.join(extractedRoot, "setup.ps1")

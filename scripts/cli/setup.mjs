@@ -155,7 +155,12 @@ async function run() {
 
 async function runInstall(context) {
   const { spawnSync } = await import("node:child_process");
-  const standaloneBundle = path.join(mcpRoot, "banter-mcp.mjs");
+  const standaloneBundle = [
+    path.join(mcpRoot, "creator-works-mcp.mjs"),
+    path.join(mcpRoot, "release", "creator-works-mcp.mjs"),
+    path.join(mcpRoot, "banter-mcp.mjs"),
+    path.join(mcpRoot, "release", "banter-mcp.mjs"),
+  ].find((candidate) => existsSyncLocal(candidate));
   const packageManifest = path.join(mcpRoot, "package.json");
   const nodeCheck = spawnSync(process.execPath, ["--version"], { encoding: "utf8" });
   if (nodeCheck.status !== 0) {
@@ -163,10 +168,10 @@ async function runInstall(context) {
   }
   const nodeVersion = nodeCheck.stdout.trim().replace(/^v/, "");
   const major = Number(nodeVersion.split(".")[0]);
-  if (!Number.isFinite(major) || major < 18) {
-    throw new Error(`Node.js 18 or newer is required; found ${nodeVersion}.`);
+  if (!Number.isFinite(major) || major < 20) {
+    throw new Error(`Node.js 20 or newer is required; found ${nodeVersion}.`);
   }
-  if (existsSyncLocal(standaloneBundle)) {
+  if (standaloneBundle) {
     const validate = spawnSync(process.execPath, ["--check", standaloneBundle], { encoding: "utf8" });
     if (validate.status !== 0) {
       throw new Error(`Standalone MCP server validation failed: ${validate.stderr || validate.stdout}`);
