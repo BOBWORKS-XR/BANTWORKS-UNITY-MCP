@@ -69,6 +69,8 @@ jobs:
             build-essential \
             file
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.9.6 --locked
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
