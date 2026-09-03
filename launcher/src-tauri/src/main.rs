@@ -428,7 +428,8 @@ fn is_legacy_server_path(value: &str) -> bool {
 }
 
 fn is_legacy_server_bundle_path(value: &str) -> bool {
-    Path::new(value)
+    let normalized = value.replace('\\', "/");
+    Path::new(&normalized)
         .file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.eq_ignore_ascii_case("banter-mcp.mjs"))
