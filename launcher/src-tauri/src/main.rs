@@ -236,7 +236,7 @@ fn normalized_existing_path(path: PathBuf) -> PathBuf {
 fn get_persistent_server_dir() -> Option<PathBuf> {
     dirs::data_local_dir()
         .or_else(dirs::data_dir)
-        .map(|dir| dir.join("bantworks-mcp").join("server"))
+        .map(|dir| dir.join(APP_CONFIG_DIR).join("server"))
 }
 
 fn is_ephemeral_path(path: &Path) -> bool {
@@ -254,12 +254,14 @@ fn sync_ephemeral_bundle(source_root: &Path) -> Option<PathBuf> {
     let _ = fs::create_dir_all(dest_root.join("unity-extension").join("Editor"));
 
     let files_to_sync = [
+        "creator-works-mcp.mjs",
         "banter-mcp.mjs",
         "LICENSE",
         "THIRD_PARTY_NOTICES.md",
         "runtime/VERSION",
         "runtime/LICENSE",
         "unity-extension/Editor/BanterMCPBridge.cs",
+        "unity-extension/Editor/CreatorWorksMCPLogo.png",
     ];
 
     for relative_file in files_to_sync {
@@ -268,6 +270,14 @@ fn sync_ephemeral_bundle(source_root: &Path) -> Option<PathBuf> {
         if src.is_file() {
             let _ = fs::copy(&src, &dst);
         }
+    }
+
+    let creator_bundle = dest_root.join("creator-works-mcp.mjs");
+    let banter_bundle = dest_root.join("banter-mcp.mjs");
+    if creator_bundle.is_file() && !banter_bundle.is_file() {
+        let _ = fs::copy(&creator_bundle, &banter_bundle);
+    } else if banter_bundle.is_file() && !creator_bundle.is_file() {
+        let _ = fs::copy(&banter_bundle, &creator_bundle);
     }
 
     let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
@@ -288,6 +298,32 @@ fn sync_ephemeral_bundle(source_root: &Path) -> Option<PathBuf> {
         {
             use std::os::unix::fs::PermissionsExt;
             let _ = fs::set_permissions(&dst_node, fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    // Also mirror to legacy bantworks-mcp/server so existing configurations
+    // referencing the former directory remain functional.
+    if let Some(base) = dirs::data_local_dir().or_else(dirs::data_dir) {
+        let legacy_dir = base.join("bantworks-mcp").join("server");
+        if legacy_dir.is_dir() {
+            let _ = fs::create_dir_all(legacy_dir.join("runtime"));
+            let _ = fs::create_dir_all(legacy_dir.join("unity-extension").join("Editor"));
+            for relative_file in files_to_sync {
+                let src = dest_root.join(relative_file);
+                let dst = legacy_dir.join(relative_file);
+                if src.is_file() {
+                    let _ = fs::copy(&src, &dst);
+                }
+            }
+            let legacy_node = legacy_dir.join("runtime").join(binary_name);
+            if dst_node.is_file() {
+                let _ = fs::copy(&dst_node, &legacy_node);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&legacy_node, fs::Permissions::from_mode(0o755));
+                }
+            }
         }
     }
 
@@ -325,8 +361,9 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
                         if let Some(persistent_root) = sync_ephemeral_bundle(root) {
                             return Ok(normalized_existing_path(persistent_root));
                         }
+                    } else {
+                        return Ok(normalized_existing_path(root.to_path_buf()));
                     }
-                    return Ok(normalized_existing_path(root.to_path_buf()));
                 }
             }
         }
@@ -345,8 +382,9 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
                         if let Some(persistent_root) = sync_ephemeral_bundle(&candidate) {
                             return Ok(normalized_existing_path(persistent_root));
                         }
+                    } else {
+                        return Ok(normalized_existing_path(candidate));
                     }
-                    return Ok(normalized_existing_path(candidate));
                 }
             }
         }
@@ -355,6 +393,15 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Some(persistent_dir) = get_persistent_server_dir() {
         if is_valid_mcp_root(&persistent_dir) {
             return Ok(normalized_existing_path(persistent_dir));
+        }
+    }
+
+    if let Some(base) = dirs::data_local_dir().or_else(dirs::data_dir) {
+        for legacy_name in ["bantworks-mcp", "banter-mcp"] {
+            let legacy_dir = base.join(legacy_name).join("server");
+            if is_valid_mcp_root(&legacy_dir) {
+                return Ok(normalized_existing_path(legacy_dir));
+            }
         }
     }
 
@@ -2527,5 +2574,45 @@ mod tests {
         assert!(!is_ephemeral_path(Path::new(
             "/usr/lib/BANTWORKS-MCP/server/banter-mcp.mjs"
         )));
+    }
+
+    #[test]
+    fn sync_ephemeral_bundle_extracts_all_required_mcp_artifacts() {
+        let temp_dir = std::env::temp_dir().join(format!("test-ephemeral-{}", uuid::Uuid::new_v4()));
+        let source_root = temp_dir.join("mount/server");
+        fs::create_dir_all(source_root.join("runtime")).unwrap();
+        fs::create_dir_all(source_root.join("unity-extension").join("Editor")).unwrap();
+
+        fs::write(source_root.join("creator-works-mcp.mjs"), "// server").unwrap();
+        fs::write(source_root.join("LICENSE"), "MIT").unwrap();
+        fs::write(source_root.join("THIRD_PARTY_NOTICES.md"), "Notices").unwrap();
+        fs::write(source_root.join("runtime").join("VERSION"), "v24.0.0").unwrap();
+        fs::write(source_root.join("runtime").join("LICENSE"), "Node").unwrap();
+        let binary_name = if cfg!(windows) { "node.exe" } else { "node" };
+        fs::write(source_root.join("runtime").join(binary_name), "#!/bin/sh").unwrap();
+        fs::write(
+            source_root.join("unity-extension").join("Editor").join("BanterMCPBridge.cs"),
+            "// bridge",
+        )
+        .unwrap();
+        fs::write(
+            source_root.join("unity-extension").join("Editor").join(UNITY_BRIDGE_LOGO_FILE_NAME),
+            "PNG",
+        )
+        .unwrap();
+
+        assert!(is_valid_mcp_root(&source_root));
+
+        let synced = sync_ephemeral_bundle(&source_root);
+        assert!(synced.is_some(), "sync_ephemeral_bundle should succeed");
+        let dest_root = synced.unwrap();
+        assert!(is_valid_mcp_root(&dest_root));
+        assert!(dest_root.join("creator-works-mcp.mjs").is_file());
+        assert!(dest_root.join("banter-mcp.mjs").is_file());
+        assert!(dest_root.join("runtime").join(binary_name).is_file());
+        assert!(dest_root.join("unity-extension").join("Editor").join("BanterMCPBridge.cs").is_file());
+        assert!(dest_root.join("unity-extension").join("Editor").join(UNITY_BRIDGE_LOGO_FILE_NAME).is_file());
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }
