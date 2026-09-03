@@ -1,5 +1,5 @@
 /**
- * Configuration management for Banter MCP
+ * Configuration management for Creator Works MCP
  */
 
 import * as fs from "fs";

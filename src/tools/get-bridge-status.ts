@@ -130,7 +130,7 @@ export function getBridgeStatus(config: BanterMCPConfig): BridgeStatusResult {
   } else if (!bridgeInstalled) {
     nextSteps.push("Install unity-extension/Editor/BanterMCPBridge.cs into Assets/Editor, then let Unity compile it.");
   } else if (!stateDirectoryExists || stateStatus === "missing") {
-    nextSteps.push("Open the project in Unity and wait for BANTWORKS MCP to export state.");
+    nextSteps.push("Open the project in Unity and wait for Creator Works MCP to export state.");
   } else if (stateStatus === "stale") {
     nextSteps.push("Open Unity and confirm the bridge is running; the most recent bridge state is older than 10 seconds.");
   } else if (!protocolCompatible) {

@@ -19,7 +19,8 @@ $SmokeLog = Join-Path $TempRoot ("bantworks-unity-asset-reference-" + $FixtureId
 
 function Invoke-Unity([string[]]$Arguments, [string]$LogPath) {
     $process = Start-Process -FilePath $UnityEditorPath -ArgumentList $Arguments `
-        -Wait -PassThru -NoNewWindow
+        -PassThru -NoNewWindow
+    $process.WaitForExit()
     if ($process.ExitCode -ne 0) {
         $tail = if (Test-Path -LiteralPath $LogPath) {
             (Get-Content -LiteralPath $LogPath -Tail 120) -join [Environment]::NewLine
@@ -54,6 +55,8 @@ try {
     New-Item -ItemType Directory -Path $EditorPath -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $RepoRoot "unity-extension\Editor\BanterMCPBridge.cs") `
         -Destination (Join-Path $EditorPath "BanterMCPBridge.cs") -Force
+    Copy-Item -LiteralPath (Join-Path $RepoRoot "unity-extension\Editor\CreatorWorksMCPLogo.png") `
+        -Destination (Join-Path $EditorPath "CreatorWorksMCPLogo.png") -Force
 
     $FixtureAssetSource = @'
 using UnityEngine;

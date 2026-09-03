@@ -251,6 +251,17 @@ function updateSetupStatus() {
   setCheck('project', !selectedProjectPath ? 'pending' : (project?.valid ? 'success' : 'error'),
     !selectedProjectPath ? 'Not selected' : (project?.valid ? 'Valid' : 'Invalid'));
 
+  const sdkProfile = project?.sdkProfile;
+  let sdkState = 'pending';
+  let sdkText = 'Not selected';
+  if (selectedProjectPath && sdkProfile) {
+    sdkState = sdkProfile.profile === 'unknown'
+      ? 'error'
+      : (sdkProfile.profile === 'none' ? 'warning' : 'success');
+    sdkText = sdkProfile.label;
+  }
+  setCheck('sdk', sdkState, sdkText);
+
   let bridgeState = 'pending';
   let bridgeText = 'Not installed';
   if (project?.bridgeInstalled && !project.bridgeCurrent) {
@@ -332,7 +343,7 @@ async function runQuickSetup() {
     elements.setupMessage.textContent = connected
       ? 'Setup complete. Restart the configured MCP client if it was already open.'
       : 'Setup complete. Open or return to Unity to finish the bridge connection.';
-    showToast('BANTWORKS MCP setup completed', 'success');
+    showToast('Creator Works MCP setup completed', 'success');
   } catch (error) {
     elements.setupMessage.textContent = String(error);
     showToast('Setup failed', 'error');
@@ -365,6 +376,7 @@ function renderProjects() {
       '<div class="project-info"><strong>' + escapeHtml(channel.name) + '</strong>' +
       '<span>' + escapeHtml(channel.unity_project_path) + '</span></div>' +
       '<div class="project-meta">' + (active ? '<span class="badge active-badge">Active</span>' : '') +
+      '<span class="badge sdk-badge">Checking SDK</span>' +
       '<span class="badge bridge-badge">Checking bridge</span></div>' +
       '<button class="icon-button remove-project" type="button" title="Remove project" aria-label="Remove project">' +
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
@@ -378,7 +390,30 @@ function renderProjects() {
     });
     elements.projectsList.appendChild(card);
     updateBridgeBadge(channel, card.querySelector('.bridge-badge'));
+    updateSdkBadge(channel, card.querySelector('.sdk-badge'));
   });
+}
+
+async function updateSdkBadge(channel, badge) {
+  try {
+    const profile = await window.__TAURI__.core.invoke('get_project_sdk_profile', {
+      unityProjectPath: channel.unity_project_path
+    });
+    badge.textContent = profile.label;
+    badge.className = 'badge sdk-badge sdk-' + profile.profile;
+    const packageDetails = profile.packages
+      .map(function(item) { return item.packageId + (item.version ? ' ' + item.version : ''); })
+      .join('\n');
+    badge.title = profile.error || [
+      'Detected from Packages/manifest.json and packages-lock.json.',
+      packageDetails,
+      profile.profile === 'none' ? '' : 'Run the SDK validator in Unity to prove Editor-domain availability.'
+    ].filter(Boolean).join('\n');
+  } catch (error) {
+    badge.textContent = 'SDK unavailable';
+    badge.className = 'badge sdk-badge warning';
+    badge.title = String(error);
+  }
 }
 
 async function updateBridgeBadge(channel, badge) {

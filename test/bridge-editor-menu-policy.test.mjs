@@ -9,6 +9,24 @@ const bridge = fs.readFileSync(
   path.join(root, "unity-extension", "Editor", "BanterMCPBridge.cs"),
   "utf8"
 );
+const bridgeLogo = path.join(
+  root,
+  "unity-extension",
+  "Editor",
+  "CreatorWorksMCPLogo.png"
+);
+
+test("status window uses the Creator Works launcher lockup", () => {
+  assert.ok(fs.existsSync(bridgeLogo));
+  assert.match(bridge, /LogoAssetFileName = "CreatorWorksMCPLogo\.png"/);
+  assert.match(bridge, /titleContent = new GUIContent\("Creator Works MCP", logoTexture\)/);
+  assert.match(bridge, />CREATOR<\/color>/);
+  assert.match(bridge, />WORKS<\/color>/);
+  assert.match(bridge, />MCP<\/color>/);
+  assert.match(bridge, /SHADER GRAPH PREVIEW/);
+  assert.doesNotMatch(bridge, /GUILayout\.Label\("BANT"/);
+  assert.doesNotMatch(bridge, /MCP Status/);
+});
 
 test("Editor menu commands block unsafe Editor states and built-in roots", () => {
   assert.match(bridge, /EditorApplication\.isCompiling \|\| EditorApplication\.isUpdating/);
@@ -35,4 +53,13 @@ test("targeted hierarchy queries are correlated and avoid full-state export", ()
   assert.match(bridge, /Path\.Combine\(HierarchyQueryResultsFolder, cmd\.id \+ "\.json"\)/);
   assert.match(bridge, /CreateGameObjectInfo/);
   assert.doesNotMatch(bridge, /case "query_hierarchy":[\s\S]{0,300}ExportProjectState/);
+});
+
+test("targeted hierarchy property reads expose bounded renderer material identity", () => {
+  assert.match(bridge, /includedPropertyNames/);
+  assert.match(bridge, /CreateRendererMaterialProperty/);
+  assert.match(bridge, /renderer\.sharedMaterials/);
+  assert.match(bridge, /sharedMaterials\.Take\(64\)/);
+  assert.match(bridge, /string assetPath = material != null \? AssetDatabase\.GetAssetPath\(material\) : null/);
+  assert.match(bridge, /shader = material != null && material\.shader != null \? material\.shader\.name : null/);
 });

@@ -111,6 +111,8 @@ try {
     New-Item -ItemType Directory -Path $EditorPath -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $RepoRoot "unity-extension\Editor\BanterMCPBridge.cs") `
         -Destination (Join-Path $EditorPath "BanterMCPBridge.cs") -Force
+    Copy-Item -LiteralPath (Join-Path $RepoRoot "unity-extension\Editor\CreatorWorksMCPLogo.png") `
+        -Destination (Join-Path $EditorPath "CreatorWorksMCPLogo.png") -Force
 
     $SmokeSource = @'
 using System;

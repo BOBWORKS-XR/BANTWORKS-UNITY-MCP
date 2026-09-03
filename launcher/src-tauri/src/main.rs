@@ -11,6 +11,15 @@ use tauri::path::BaseDirectory;
 use tauri::Manager;
 
 const LEGACY_SERVER_PATH: &str = "C:/tools/banter-mcp/dist/index.js";
+const MCP_CLIENT_ID: &str = "creator-works";
+const LEGACY_MCP_CLIENT_ID: &str = "banter";
+const APP_CONFIG_DIR: &str = "creator-works-mcp";
+const LEGACY_APP_CONFIG_DIR: &str = "banter-mcp";
+const MCP_ROOT_ENV: &str = "CREATOR_WORKS_MCP_ROOT";
+const LEGACY_MCP_ROOT_ENV: &str = "BANTWORKS_MCP_ROOT";
+const TOOL_GROUPS_ENV: &str = "CREATOR_WORKS_TOOL_GROUPS";
+const UNITY_BRIDGE_FILE_NAME: &str = "BanterMCPBridge.cs";
+const UNITY_BRIDGE_LOGO_FILE_NAME: &str = "CreatorWorksMCPLogo.png";
 
 /// A scene channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +81,7 @@ struct ProjectSetupStatus {
     bridge_installed: bool,
     bridge_current: bool,
     state_status: String,
+    sdk_profile: SdkProfileStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +89,24 @@ struct ProjectSetupStatus {
 struct UnityExtensionStatus {
     installed: bool,
     current: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SdkPackageStatus {
+    package_id: String,
+    version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SdkProfileStatus {
+    profile: String,
+    label: String,
+    creator_sdk: bool,
+    legacy_banter: bool,
+    packages: Vec<SdkPackageStatus>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -130,7 +158,8 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
 
     if entries.is_empty() {
         return Err(
-            "Tool groups must contain all, none, read, author, test, or banter".to_string(),
+            "Tool groups must contain all, none, read, author, test, banter, or shadergraph"
+                .to_string(),
         );
     }
 
@@ -141,7 +170,7 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
         return Ok(entries[0].to_string());
     }
 
-    const KNOWN_GROUPS: [&str; 4] = ["read", "author", "test", "banter"];
+    const KNOWN_GROUPS: [&str; 5] = ["read", "author", "test", "banter", "shadergraph"];
     let unknown: Vec<&str> = entries
         .iter()
         .copied()
@@ -149,7 +178,7 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
         .collect();
     if !unknown.is_empty() {
         return Err(format!(
-            "Unknown tool groups: {}. Use all, none, read, author, test, or banter",
+            "Unknown tool groups: {}. Use all, none, read, author, test, banter, or shadergraph",
             unknown.join(", ")
         ));
     }
@@ -164,6 +193,8 @@ fn normalize_tool_groups(value: &str) -> Result<String, String> {
 
 fn find_mcp_server_path(root: &Path) -> Option<PathBuf> {
     [
+        root.join("creator-works-mcp.mjs"),
+        root.join("release").join("creator-works-mcp.mjs"),
         root.join("banter-mcp.mjs"),
         root.join("release").join("banter-mcp.mjs"),
         root.join("dist").join("index.js"),
@@ -175,11 +206,19 @@ fn find_mcp_server_path(root: &Path) -> Option<PathBuf> {
 fn unity_bridge_path(root: &Path) -> PathBuf {
     root.join("unity-extension")
         .join("Editor")
-        .join("BanterMCPBridge.cs")
+        .join(UNITY_BRIDGE_FILE_NAME)
+}
+
+fn unity_bridge_logo_path(root: &Path) -> PathBuf {
+    root.join("unity-extension")
+        .join("Editor")
+        .join(UNITY_BRIDGE_LOGO_FILE_NAME)
 }
 
 fn is_valid_mcp_root(root: &Path) -> bool {
-    find_mcp_server_path(root).is_some() && unity_bridge_path(root).is_file()
+    find_mcp_server_path(root).is_some()
+        && unity_bridge_path(root).is_file()
+        && unity_bridge_logo_path(root).is_file()
 }
 
 fn normalized_existing_path(path: PathBuf) -> PathBuf {
@@ -260,29 +299,35 @@ fn sync_ephemeral_bundle(source_root: &Path) -> Option<PathBuf> {
 }
 
 fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    if let Some(configured_root) = std::env::var_os("BANTWORKS_MCP_ROOT") {
+    if let Some((variable, configured_root)) = std::env::var_os(MCP_ROOT_ENV)
+        .map(|value| (MCP_ROOT_ENV, value))
+        .or_else(|| std::env::var_os(LEGACY_MCP_ROOT_ENV).map(|value| (LEGACY_MCP_ROOT_ENV, value)))
+    {
         let root = PathBuf::from(configured_root);
         if !is_valid_mcp_root(&root) {
             return Err(format!(
-                "BANTWORKS_MCP_ROOT does not contain the MCP server and Unity bridge: {}",
+                "{} does not contain the MCP server and Unity bridge: {}",
+                variable,
                 root.display()
             ));
         }
         return Ok(normalized_existing_path(root));
     }
 
-    if let Ok(resource_server) = app
-        .path()
-        .resolve("server/banter-mcp.mjs", BaseDirectory::Resource)
-    {
-        if let Some(root) = resource_server.parent() {
-            if is_valid_mcp_root(root) {
-                if is_ephemeral_path(root) {
-                    if let Some(persistent_root) = sync_ephemeral_bundle(root) {
-                        return Ok(normalized_existing_path(persistent_root));
+    for server_name in ["creator-works-mcp.mjs", "banter-mcp.mjs"] {
+        if let Ok(resource_server) = app
+            .path()
+            .resolve(format!("server/{}", server_name), BaseDirectory::Resource)
+        {
+            if let Some(root) = resource_server.parent() {
+                if is_valid_mcp_root(root) {
+                    if is_ephemeral_path(root) {
+                        if let Some(persistent_root) = sync_ephemeral_bundle(root) {
+                            return Ok(normalized_existing_path(persistent_root));
+                        }
                     }
+                    return Ok(normalized_existing_path(root.to_path_buf()));
                 }
-                return Ok(normalized_existing_path(root.to_path_buf()));
             }
         }
     }
@@ -313,7 +358,10 @@ fn resolve_mcp_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         }
     }
 
-    Err("Could not locate the bundled MCP server and Unity bridge. Reinstall BANTWORKS MCP or set BANTWORKS_MCP_ROOT to a valid distribution root.".to_string())
+    Err(format!(
+        "Could not locate the bundled MCP server and Unity bridge. Reinstall Creator Works MCP or set {} to a valid distribution root.",
+        MCP_ROOT_ENV
+    ))
 }
 
 fn default_mcp_server_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -368,7 +416,7 @@ fn resolve_node_command(app: &tauri::AppHandle) -> Result<(PathBuf, bool), Strin
     find_command_on_path("node")
         .map(|path| (normalized_existing_path(path), false))
         .ok_or_else(|| {
-            "The bundled Node runtime is missing and Node.js was not found on PATH. Reinstall BANTWORKS MCP."
+            "The bundled Node runtime is missing and Node.js was not found on PATH. Reinstall Creator Works MCP."
                 .to_string()
         })
 }
@@ -377,6 +425,15 @@ fn is_legacy_server_path(value: &str) -> bool {
     value
         .replace('\\', "/")
         .eq_ignore_ascii_case(LEGACY_SERVER_PATH)
+}
+
+fn is_legacy_server_bundle_path(value: &str) -> bool {
+    let normalized = value.replace('\\', "/");
+    Path::new(&normalized)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("banter-mcp.mjs"))
+        .unwrap_or(false)
 }
 
 fn validate_mcp_server_path(value: &str) -> Result<PathBuf, String> {
@@ -406,14 +463,48 @@ fn validate_mcp_server_path(value: &str) -> Result<PathBuf, String> {
     Ok(normalized_existing_path(path))
 }
 
-/// Get the config file path
-fn get_config_path() -> PathBuf {
-    let config_dir = dirs::config_dir()
+fn config_path_for(directory_name: &str) -> PathBuf {
+    dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("banter-mcp");
+        .join(directory_name)
+        .join("launcher-config.json")
+}
 
-    fs::create_dir_all(&config_dir).ok();
-    config_dir.join("launcher-config.json")
+/// Get the current config path, retaining read migration from the former product name.
+fn get_config_path() -> PathBuf {
+    let config_path = config_path_for(APP_CONFIG_DIR);
+
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    config_path
+}
+
+fn get_legacy_config_path() -> PathBuf {
+    config_path_for(LEGACY_APP_CONFIG_DIR)
+}
+
+fn upgrade_loaded_config(
+    config: &mut LauncherConfig,
+    replacement_server_path: Option<&Path>,
+) -> Result<bool, String> {
+    let mut changed = false;
+
+    if let Some(path) = replacement_server_path {
+        let replacement = path.to_string_lossy().to_string();
+        if config.mcp_server_path != replacement {
+            config.mcp_server_path = replacement;
+            changed = true;
+        }
+    }
+
+    let normalized_tool_groups = normalize_tool_groups(&config.tool_groups)?;
+    if config.tool_groups != normalized_tool_groups {
+        config.tool_groups = normalized_tool_groups;
+        changed = true;
+    }
+
+    Ok(changed)
 }
 
 /// Write a text file by publishing a complete temporary file in the same directory.
@@ -501,22 +592,37 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), String> {
 #[tauri::command]
 fn load_config(app: tauri::AppHandle) -> Result<LauncherConfig, String> {
     let config_path = get_config_path();
+    let legacy_config_path = get_legacy_config_path();
+    let source_path = if config_path.exists() {
+        Some(config_path.clone())
+    } else if legacy_config_path.exists() {
+        Some(legacy_config_path)
+    } else {
+        None
+    };
 
-    if config_path.exists() {
-        let content = fs::read_to_string(&config_path)
+    if let Some(source_path) = source_path {
+        let content = fs::read_to_string(&source_path)
             .map_err(|e| format!("Failed to read config: {}", e))?;
         let mut config: LauncherConfig =
             serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
-        if config.mcp_server_path.trim().is_empty()
+        let needs_server_migration = config.mcp_server_path.trim().is_empty()
             || is_legacy_server_path(&config.mcp_server_path)
+            || is_legacy_server_bundle_path(&config.mcp_server_path)
             || !Path::new(&config.mcp_server_path).is_file()
-            || is_ephemeral_path(Path::new(&config.mcp_server_path))
-        {
-            if let Ok(default_path) = default_mcp_server_path(&app) {
-                config.mcp_server_path = default_path.to_string_lossy().to_string();
-            }
+            || is_ephemeral_path(Path::new(&config.mcp_server_path));
+        let replacement_server_path = if needs_server_migration {
+            Some(default_mcp_server_path(&app)?)
+        } else {
+            None
+        };
+        let config_changed =
+            upgrade_loaded_config(&mut config, replacement_server_path.as_deref())?;
+        if source_path != config_path || config_changed {
+            let migrated = serde_json::to_string_pretty(&config)
+                .map_err(|e| format!("Failed to migrate launcher config: {}", e))?;
+            atomic_write(&config_path, &migrated)?;
         }
-        config.tool_groups = normalize_tool_groups(&config.tool_groups)?;
         Ok(config)
     } else {
         Ok(LauncherConfig {
@@ -693,7 +799,7 @@ fn discover_unity_projects(app: tauri::AppHandle) -> Result<Vec<DiscoveredProjec
             path: normalized_existing_path(path).to_string_lossy().to_string(),
             unity_version: None,
             last_modified: None,
-            source: "BANTWORKS MCP".to_string(),
+            source: "Creator Works MCP".to_string(),
         });
     }
 
@@ -802,15 +908,20 @@ fn build_claude_mcp_config(
         return Err("Claude config mcpServers must be a JSON object".to_string());
     }
 
+    if let Some(servers) = config["mcpServers"].as_object_mut() {
+        servers.remove(MCP_CLIENT_ID);
+        servers.remove(LEGACY_MCP_CLIENT_ID);
+    }
+
     let mut env = serde_json::json!({
         "UNITY_PROJECT_PATH": channel.unity_project_path,
-        "BANTWORKS_TOOL_GROUPS": normalize_tool_groups(tool_groups)?
+        TOOL_GROUPS_ENV: normalize_tool_groups(tool_groups)?
     });
     if let Some(scene) = &channel.scene_path {
         env["UNITY_SCENE_PATH"] = serde_json::json!(scene);
     }
 
-    config["mcpServers"]["banter"] = serde_json::json!({
+    config["mcpServers"][MCP_CLIENT_ID] = serde_json::json!({
         "command": node_command,
         "args": [mcp_server_path],
         "env": env
@@ -868,14 +979,14 @@ fn build_codex_mcp_config(
     tool_groups: &str,
 ) -> Result<String, String> {
     let tool_groups = normalize_tool_groups(tool_groups)?;
-    let mut content = remove_toml_table_block(existing, "mcp_servers.banter");
-    content = remove_toml_table_block(&content, "mcp_servers.banter.env");
+    let mut content = remove_client_mcp_tables(existing, MCP_CLIENT_ID);
+    content = remove_client_mcp_tables(&content, LEGACY_MCP_CLIENT_ID);
 
     if !content.ends_with('\n') && !content.is_empty() {
         content.push('\n');
     }
 
-    content.push_str("\n[mcp_servers.banter]\n");
+    content.push_str(&format!("\n[mcp_servers.{}]\n", MCP_CLIENT_ID));
     content.push_str(&format!(
         "command = \"{}\"\n",
         escape_toml_string(&node_command.replace("\\", "/"))
@@ -886,13 +997,14 @@ fn build_codex_mcp_config(
     ));
     content.push_str("startup_timeout_sec = 20\n");
     content.push_str("tool_timeout_sec = 600\n");
-    content.push_str("\n[mcp_servers.banter.env]\n");
+    content.push_str(&format!("\n[mcp_servers.{}.env]\n", MCP_CLIENT_ID));
     content.push_str(&format!(
         "UNITY_PROJECT_PATH = \"{}\"\n",
         escape_toml_string(&channel.unity_project_path.replace("\\", "/"))
     ));
     content.push_str(&format!(
-        "BANTWORKS_TOOL_GROUPS = \"{}\"\n",
+        "{} = \"{}\"\n",
+        TOOL_GROUPS_ENV,
         escape_toml_string(&tool_groups)
     ));
     if let Some(scene) = &channel.scene_path {
@@ -904,7 +1016,7 @@ fn build_codex_mcp_config(
     Ok(content)
 }
 
-/// Remove Banter MCP from Claude config
+/// Remove Creator Works MCP and its former Banter entry from Claude config.
 #[tauri::command]
 fn remove_claude_mcp_config() -> Result<(), String> {
     let config_path = get_claude_config_path();
@@ -921,7 +1033,8 @@ fn remove_claude_mcp_config() -> Result<(), String> {
 
     if let Some(servers) = config.get_mut("mcpServers") {
         if let Some(obj) = servers.as_object_mut() {
-            obj.remove("banter");
+            obj.remove(MCP_CLIENT_ID);
+            obj.remove(LEGACY_MCP_CLIENT_ID);
         }
     }
 
@@ -968,7 +1081,7 @@ fn update_codex_mcp_config(
     atomic_write(&config_path, &content)
 }
 
-/// Remove Banter MCP from Codex config
+/// Remove Creator Works MCP and its former Banter entry from Codex config.
 #[tauri::command]
 fn remove_codex_mcp_config() -> Result<(), String> {
     let config_path = get_codex_config_path();
@@ -979,9 +1092,9 @@ fn remove_codex_mcp_config() -> Result<(), String> {
 
     let existing = fs::read_to_string(&config_path)
         .map_err(|e| format!("Failed to read Codex config: {}", e))?;
-    let content = remove_toml_table_block(
-        &remove_toml_table_block(&existing, "mcp_servers.banter"),
-        "mcp_servers.banter.env",
+    let content = remove_client_mcp_tables(
+        &remove_client_mcp_tables(&existing, MCP_CLIENT_ID),
+        LEGACY_MCP_CLIENT_ID,
     );
 
     atomic_write(&config_path, &content)
@@ -1326,6 +1439,11 @@ fn remove_toml_table_block(content: &str, table_name: &str) -> String {
     result
 }
 
+fn remove_client_mcp_tables(content: &str, client_id: &str) -> String {
+    let without_server = remove_toml_table_block(content, &format!("mcp_servers.{}", client_id));
+    remove_toml_table_block(&without_server, &format!("mcp_servers.{}.env", client_id))
+}
+
 fn escape_toml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
@@ -1342,17 +1460,36 @@ fn unity_bridge_destination(project_path: &Path) -> PathBuf {
     project_path
         .join("Assets")
         .join("Editor")
-        .join("BanterMCPBridge.cs")
+        .join(UNITY_BRIDGE_FILE_NAME)
+}
+
+fn unity_bridge_logo_destination(project_path: &Path) -> PathBuf {
+    project_path
+        .join("Assets")
+        .join("Editor")
+        .join(UNITY_BRIDGE_LOGO_FILE_NAME)
+}
+
+fn files_match(source: &Path, destination: &Path) -> bool {
+    fs::read(source)
+        .and_then(|source_bytes| {
+            fs::read(destination).map(|destination_bytes| source_bytes == destination_bytes)
+        })
+        .unwrap_or(false)
 }
 
 fn unity_extension_status(source: &Path, project_path: &Path) -> UnityExtensionStatus {
     let destination = unity_bridge_destination(project_path);
+    let logo_source = source
+        .parent()
+        .map(|parent| parent.join(UNITY_BRIDGE_LOGO_FILE_NAME));
+    let logo_destination = unity_bridge_logo_destination(project_path);
     let installed = destination.is_file();
     let current = installed
-        && fs::read(source)
-            .and_then(|source_bytes| {
-                fs::read(&destination).map(|destination_bytes| source_bytes == destination_bytes)
-            })
+        && files_match(source, &destination)
+        && logo_source
+            .as_deref()
+            .map(|logo| files_match(logo, &logo_destination))
             .unwrap_or(false);
     UnityExtensionStatus { installed, current }
 }
@@ -1375,18 +1512,27 @@ fn install_unity_extension(
     app: tauri::AppHandle,
     unity_project_path: String,
 ) -> Result<(), String> {
-    let source = unity_bridge_path(&resolve_mcp_root(&app)?);
+    let root = resolve_mcp_root(&app)?;
+    let source = unity_bridge_path(&root);
+    let logo_source = unity_bridge_logo_path(&root);
 
     let dest_dir = PathBuf::from(&unity_project_path)
         .join("Assets")
         .join("Editor");
 
-    let dest = dest_dir.join("BanterMCPBridge.cs");
+    let dest = dest_dir.join(UNITY_BRIDGE_FILE_NAME);
+    let logo_dest = dest_dir.join(UNITY_BRIDGE_LOGO_FILE_NAME);
 
     if !source.exists() {
         return Err(format!(
             "Unity bridge source was not found: {}",
             source.display()
+        ));
+    }
+    if !logo_source.exists() {
+        return Err(format!(
+            "Unity bridge logo was not found: {}",
+            logo_source.display()
         ));
     }
 
@@ -1412,8 +1558,19 @@ fn install_unity_extension(
     }
 
     let temporary_dest = dest_dir.join(format!(".BanterMCPBridge-{}.tmp", uuid::Uuid::new_v4()));
+    let temporary_logo_dest =
+        dest_dir.join(format!(".CreatorWorksMCPLogo-{}.tmp", uuid::Uuid::new_v4()));
     fs::copy(&source, &temporary_dest)
         .map_err(|e| format!("Failed to stage Unity bridge: {}", e))?;
+    if let Err(error) = fs::copy(&logo_source, &temporary_logo_dest) {
+        let _ = fs::remove_file(&temporary_dest);
+        return Err(format!("Failed to stage Unity bridge logo: {}", error));
+    }
+    publish_temporary_file(&temporary_logo_dest, &logo_dest).map_err(|e| {
+        let _ = fs::remove_file(&temporary_dest);
+        let _ = fs::remove_file(&temporary_logo_dest);
+        format!("Failed to install Unity bridge logo: {}", e)
+    })?;
     publish_temporary_file(&temporary_dest, &dest).map_err(|e| {
         let _ = fs::remove_file(&temporary_dest);
         format!("Failed to install Unity bridge: {}", e)
@@ -1470,9 +1627,11 @@ fn command_is_available(command: &str) -> bool {
 fn codex_is_configured() -> bool {
     fs::read_to_string(get_codex_config_path())
         .map(|content| {
-            content
-                .lines()
-                .any(|line| line.trim() == "[mcp_servers.banter]")
+            content.lines().any(|line| {
+                let line = line.trim();
+                line == format!("[mcp_servers.{}]", MCP_CLIENT_ID)
+                    || line == format!("[mcp_servers.{}]", LEGACY_MCP_CLIENT_ID)
+            })
         })
         .unwrap_or(false)
 }
@@ -1481,7 +1640,13 @@ fn claude_is_configured() -> bool {
     fs::read_to_string(get_claude_config_path())
         .ok()
         .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .and_then(|config| config.get("mcpServers")?.get("banter").cloned())
+        .and_then(|config| {
+            let servers = config.get("mcpServers")?;
+            servers
+                .get(MCP_CLIENT_ID)
+                .or_else(|| servers.get(LEGACY_MCP_CLIENT_ID))
+                .cloned()
+        })
         .is_some()
 }
 
@@ -1544,6 +1709,161 @@ fn client_statuses() -> Vec<ClientStatus> {
     ]
 }
 
+fn sdk_version_from_json(
+    manifest: &serde_json::Value,
+    lock: &serde_json::Value,
+    package_id: &str,
+) -> Option<String> {
+    lock.get("dependencies")
+        .and_then(|dependencies| dependencies.get(package_id))
+        .and_then(|entry| entry.get("version"))
+        .and_then(|version| version.as_str())
+        .or_else(|| {
+            manifest
+                .get("dependencies")
+                .and_then(|dependencies| dependencies.get(package_id))
+                .and_then(|version| version.as_str())
+        })
+        .map(str::to_string)
+}
+
+fn sdk_version_label(value: &str) -> String {
+    let lower = value.to_ascii_lowercase();
+    if lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("git+")
+        || value.contains(".git#")
+    {
+        return "Git".to_string();
+    }
+    if lower.starts_with("file:") {
+        return "Local".to_string();
+    }
+    if value.len() > 32 {
+        return "Custom".to_string();
+    }
+    value.to_string()
+}
+
+fn project_sdk_profile(project_path: &Path) -> SdkProfileStatus {
+    const CREATOR_PACKAGE: &str = "com.sidequest.creator-sdk";
+    const BANTER_PACKAGE: &str = "com.sidequest.banter";
+
+    let manifest_path = project_path.join("Packages").join("manifest.json");
+    let manifest_source = match fs::read_to_string(&manifest_path) {
+        Ok(source) => source,
+        Err(error) => {
+            return SdkProfileStatus {
+                profile: "unknown".to_string(),
+                label: "SDK unknown".to_string(),
+                creator_sdk: false,
+                legacy_banter: false,
+                packages: Vec::new(),
+                error: Some(format!(
+                    "Could not read {}: {}",
+                    manifest_path.display(),
+                    error
+                )),
+            }
+        }
+    };
+    let manifest: serde_json::Value = match serde_json::from_str(&manifest_source) {
+        Ok(value) => value,
+        Err(error) => {
+            return SdkProfileStatus {
+                profile: "unknown".to_string(),
+                label: "SDK unknown".to_string(),
+                creator_sdk: false,
+                legacy_banter: false,
+                packages: Vec::new(),
+                error: Some(format!(
+                    "Could not parse {}: {}",
+                    manifest_path.display(),
+                    error
+                )),
+            }
+        }
+    };
+    let lock_path = project_path.join("Packages").join("packages-lock.json");
+    let lock = fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|source| serde_json::from_str(&source).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let direct_dependencies = manifest
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.as_object());
+    let locked_dependencies = lock
+        .get("dependencies")
+        .and_then(|dependencies| dependencies.as_object());
+    let has_package = |package_id: &str| {
+        direct_dependencies
+            .map(|dependencies| dependencies.contains_key(package_id))
+            .unwrap_or(false)
+            || locked_dependencies
+                .map(|dependencies| dependencies.contains_key(package_id))
+                .unwrap_or(false)
+    };
+
+    let creator_sdk = has_package(CREATOR_PACKAGE);
+    let legacy_banter = has_package(BANTER_PACKAGE);
+    let mut packages = Vec::new();
+    if creator_sdk {
+        packages.push(SdkPackageStatus {
+            package_id: CREATOR_PACKAGE.to_string(),
+            version: sdk_version_from_json(&manifest, &lock, CREATOR_PACKAGE),
+        });
+    }
+    if legacy_banter {
+        packages.push(SdkPackageStatus {
+            package_id: BANTER_PACKAGE.to_string(),
+            version: sdk_version_from_json(&manifest, &lock, BANTER_PACKAGE),
+        });
+    }
+
+    let (profile, label) = match (creator_sdk, legacy_banter) {
+        (true, true) => ("hybrid", "Hybrid Banter + Creator SDK".to_string()),
+        (true, false) => {
+            let version = packages
+                .first()
+                .and_then(|package| package.version.as_deref());
+            (
+                "creator",
+                version.map_or_else(
+                    || "Creator SDK".to_string(),
+                    |value| format!("Creator SDK {}", sdk_version_label(value)),
+                ),
+            )
+        }
+        (false, true) => {
+            let version = packages
+                .first()
+                .and_then(|package| package.version.as_deref());
+            (
+                "banter",
+                version.map_or_else(
+                    || "Banter SDK".to_string(),
+                    |value| format!("Banter SDK {}", sdk_version_label(value)),
+                ),
+            )
+        }
+        (false, false) => ("none", "Unity only".to_string()),
+    };
+
+    SdkProfileStatus {
+        profile: profile.to_string(),
+        label,
+        creator_sdk,
+        legacy_banter,
+        packages,
+        error: None,
+    }
+}
+
+#[tauri::command]
+fn get_project_sdk_profile(unity_project_path: String) -> SdkProfileStatus {
+    project_sdk_profile(Path::new(&unity_project_path))
+}
+
 fn project_setup_status(source_bridge: Option<&Path>, project_path: &Path) -> ProjectSetupStatus {
     let valid = is_valid_unity_project(project_path);
     let extension = source_bridge
@@ -1585,6 +1905,7 @@ fn project_setup_status(source_bridge: Option<&Path>, project_path: &Path) -> Pr
         bridge_installed: extension.installed,
         bridge_current: extension.current,
         state_status: state_status.to_string(),
+        sdk_profile: project_sdk_profile(project_path),
     }
 }
 
@@ -1754,6 +2075,7 @@ fn main() {
             remove_opencode_mcp_config,
             check_unity_extension,
             get_unity_extension_status,
+            get_project_sdk_profile,
             install_unity_extension,
             update_configured_unity_extensions,
             get_mcp_root,
@@ -1795,18 +2117,23 @@ mod tests {
     use super::*;
 
     fn temporary_root() -> PathBuf {
-        std::env::temp_dir().join(format!("bantworks-launcher-test-{}", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!(
+            "creator-works-launcher-test-{}",
+            uuid::Uuid::new_v4()
+        ))
     }
 
     #[test]
     fn finds_release_bundle_and_bridge_without_a_machine_specific_root() {
         let root = temporary_root();
-        let server = root.join("release").join("banter-mcp.mjs");
+        let server = root.join("release").join("creator-works-mcp.mjs");
         let bridge = unity_bridge_path(&root);
+        let logo = unity_bridge_logo_path(&root);
         fs::create_dir_all(server.parent().unwrap()).unwrap();
         fs::create_dir_all(bridge.parent().unwrap()).unwrap();
         fs::write(&server, "// fixture").unwrap();
         fs::write(&bridge, "// fixture").unwrap();
+        fs::write(&logo, "logo fixture").unwrap();
 
         assert_eq!(find_mcp_server_path(&root), Some(server));
         assert!(is_valid_mcp_root(&root));
@@ -1821,6 +2148,36 @@ mod tests {
             "c:\\tools\\banter-mcp\\dist\\index.js"
         ));
         assert!(!is_legacy_server_path("D:/custom/banter-mcp.mjs"));
+        assert!(is_legacy_server_bundle_path(
+            "D:/installed/server/banter-mcp.mjs"
+        ));
+        assert!(is_legacy_server_bundle_path(
+            "D:\\installed\\server\\BANTER-MCP.MJS"
+        ));
+        assert!(!is_legacy_server_bundle_path(
+            "D:/installed/server/creator-works-mcp.mjs"
+        ));
+    }
+
+    #[test]
+    fn persists_loaded_config_upgrades_for_existing_creator_works_configs() {
+        let mut config = LauncherConfig {
+            channels: vec![],
+            active_channel_id: None,
+            mcp_server_path: "D:/installed/server/banter-mcp.mjs".to_string(),
+            auto_start: true,
+            enable_custom_scripts: false,
+            tool_groups: " ShaderGraph, Read, read ".to_string(),
+        };
+        let replacement = Path::new("D:/installed/server/creator-works-mcp.mjs");
+
+        assert!(upgrade_loaded_config(&mut config, Some(replacement)).unwrap());
+        assert_eq!(
+            config.mcp_server_path,
+            "D:/installed/server/creator-works-mcp.mjs"
+        );
+        assert_eq!(config.tool_groups, "read,shadergraph");
+        assert!(!upgrade_loaded_config(&mut config, None).unwrap());
     }
 
     #[test]
@@ -1837,13 +2194,12 @@ mod tests {
 
     #[test]
     fn removes_only_the_target_codex_tables() {
-        let input = "model = \"gpt\"\n\n[mcp_servers.banter]\ncommand = \"node\"\n\n[mcp_servers.banter.env]\nUNITY_PROJECT_PATH = \"X\"\n\n[other]\nkeep = true\n";
-        let without_server = remove_toml_table_block(input, "mcp_servers.banter");
-        let result = remove_toml_table_block(&without_server, "mcp_servers.banter.env");
+        let input = "model = \"gpt\"\n\n[mcp_servers.creator-works]\ncommand = \"node\"\n\n[mcp_servers.creator-works.env]\nUNITY_PROJECT_PATH = \"X\"\n\n[other]\nkeep = true\n";
+        let result = remove_client_mcp_tables(input, MCP_CLIENT_ID);
 
         assert!(result.contains("model = \"gpt\""));
         assert!(result.contains("[other]"));
-        assert!(!result.contains("mcp_servers.banter"));
+        assert!(!result.contains("mcp_servers.creator-works"));
         assert!(!result.contains("UNITY_PROJECT_PATH"));
     }
 
@@ -1869,6 +2225,10 @@ mod tests {
             Ok("read,banter".to_string())
         );
         assert_eq!(normalize_tool_groups("none"), Ok("none".to_string()));
+        assert_eq!(
+            normalize_tool_groups("shadergraph,read,author"),
+            Ok("read,author,shadergraph".to_string())
+        );
         assert!(normalize_tool_groups("all,read").is_err());
         assert!(normalize_tool_groups("admin").is_err());
         assert!(normalize_tool_groups(",,,").is_err());
@@ -1885,33 +2245,43 @@ mod tests {
         };
 
         let claude = build_claude_mcp_config(
-            serde_json::json!({ "keep": true, "mcpServers": { "other": {} } }),
+            serde_json::json!({
+                "keep": true,
+                "mcpServers": {
+                    "other": {},
+                    "banter": { "command": "old" },
+                    "creator-works": { "command": "stale" }
+                }
+            }),
             &channel,
-            "C:\\BANTWORKS\\runtime\\node.exe",
-            "C:\\BANTWORKS\\banter-mcp.mjs",
+            "C:\\CreatorWorks\\runtime\\node.exe",
+            "C:\\CreatorWorks\\creator-works-mcp.mjs",
             "banter,read",
         )
         .unwrap();
         assert_eq!(claude["keep"], true);
         assert!(claude["mcpServers"]["other"].is_object());
+        assert!(claude["mcpServers"]["banter"].is_null());
         assert_eq!(
-            claude["mcpServers"]["banter"]["env"]["BANTWORKS_TOOL_GROUPS"],
+            claude["mcpServers"]["creator-works"]["env"]["CREATOR_WORKS_TOOL_GROUPS"],
             "read,banter"
         );
 
         let codex = build_codex_mcp_config(
-            "model = \"gpt\"\n\n[other]\nkeep = true\n",
+            "model = \"gpt\"\n\n[mcp_servers.banter]\ncommand = \"old\"\n\n[mcp_servers.banter.env]\nOLD = \"true\"\n\n[other]\nkeep = true\n",
             &channel,
-            "C:/BANTWORKS/runtime/node.exe",
-            "C:/BANTWORKS/banter-mcp.mjs",
+            "C:/CreatorWorks/runtime/node.exe",
+            "C:/CreatorWorks/creator-works-mcp.mjs",
             "read,banter",
         )
         .unwrap();
         assert!(codex.contains("model = \"gpt\""));
         assert!(codex.contains("[other]"));
-        assert!(codex.contains("BANTWORKS_TOOL_GROUPS = \"read,banter\""));
+        assert!(codex.contains("[mcp_servers.creator-works]"));
+        assert!(!codex.contains("[mcp_servers.banter]"));
+        assert!(codex.contains("CREATOR_WORKS_TOOL_GROUPS = \"read,banter\""));
         assert!(codex.contains("UNITY_SCENE_PATH = \"E:/unity/Project/Assets/Main.unity\""));
-        assert!(codex.contains("command = \"C:/BANTWORKS/runtime/node.exe\""));
+        assert!(codex.contains("command = \"C:/CreatorWorks/runtime/node.exe\""));
 
         assert!(build_claude_mcp_config(
             serde_json::json!([]),
@@ -1942,9 +2312,12 @@ mod tests {
         let root = temporary_root();
         let project = root.join("Project");
         let source = root.join("BanterMCPBridge.cs");
+        let logo_source = root.join(UNITY_BRIDGE_LOGO_FILE_NAME);
         let destination = unity_bridge_destination(&project);
+        let logo_destination = unity_bridge_logo_destination(&project);
         fs::create_dir_all(destination.parent().unwrap()).unwrap();
         fs::write(&source, "current bridge").unwrap();
+        fs::write(&logo_source, "current logo").unwrap();
         fs::write(&destination, "old bridge").unwrap();
 
         let stale = unity_extension_status(&source, &project);
@@ -1952,9 +2325,88 @@ mod tests {
         assert!(!stale.current);
 
         fs::copy(&source, &destination).unwrap();
+        fs::copy(&logo_source, &logo_destination).unwrap();
         let current = unity_extension_status(&source, &project);
         assert!(current.installed);
         assert!(current.current);
+
+        fs::write(&logo_destination, "old logo").unwrap();
+        let stale_logo = unity_extension_status(&source, &project);
+        assert!(stale_logo.installed);
+        assert!(!stale_logo.current);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sdk_profile_distinguishes_banter_creator_hybrid_and_plain_unity() {
+        let root = temporary_root();
+        let project = root.join("Project");
+        fs::create_dir_all(project.join("Assets")).unwrap();
+        fs::create_dir_all(project.join("ProjectSettings")).unwrap();
+        fs::create_dir_all(project.join("Packages")).unwrap();
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.banter":"3.1.2"}}"#,
+        )
+        .unwrap();
+        let banter = project_sdk_profile(&project);
+        assert_eq!(banter.profile, "banter");
+        assert_eq!(banter.label, "Banter SDK 3.1.2");
+        assert!(banter.legacy_banter);
+        assert!(!banter.creator_sdk);
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.creator-sdk":"3.2.17"}}"#,
+        )
+        .unwrap();
+        let creator = project_sdk_profile(&project);
+        assert_eq!(creator.profile, "creator");
+        assert_eq!(creator.label, "Creator SDK 3.2.17");
+        assert!(creator.creator_sdk);
+        assert!(!creator.legacy_banter);
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.creator-sdk":"4.0.0","com.sidequest.banter":"3.2.2"}}"#,
+        )
+        .unwrap();
+        let hybrid = project_sdk_profile(&project);
+        assert_eq!(hybrid.profile, "hybrid");
+        assert_eq!(hybrid.packages.len(), 2);
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.unity.visualscripting":"1.9.1"}}"#,
+        )
+        .unwrap();
+        let plain = project_sdk_profile(&project);
+        assert_eq!(plain.profile, "none");
+        assert_eq!(plain.label, "Unity only");
+
+        fs::write(
+            project.join("Packages").join("manifest.json"),
+            r#"{"dependencies":{"com.sidequest.creator-sdk":"https://github.com/SideQuestVR/BanterSDK.git#feature/greenfield"}}"#,
+        )
+        .unwrap();
+        let git_creator = project_sdk_profile(&project);
+        assert_eq!(git_creator.label, "Creator SDK Git");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_manifest_reports_unknown_sdk_instead_of_guessing() {
+        let root = temporary_root();
+        let project = root.join("Project");
+        fs::create_dir_all(project.join("Packages")).unwrap();
+        fs::write(project.join("Packages").join("manifest.json"), "not-json").unwrap();
+
+        let profile = project_sdk_profile(&project);
+        assert_eq!(profile.profile, "unknown");
+        assert!(profile.error.unwrap().contains("Could not parse"));
 
         fs::remove_dir_all(root).unwrap();
     }

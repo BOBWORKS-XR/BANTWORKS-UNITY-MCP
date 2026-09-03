@@ -16,6 +16,9 @@ export interface BridgeCommandResult {
   message?: string;
   error?: string;
   timestamp?: number;
+  projectId?: string;
+  projectPath?: string;
+  editorInstanceId?: string;
 }
 
 export interface BridgeTransportDispatch {
@@ -27,6 +30,9 @@ export interface BridgeTransportDispatch {
 }
 
 export interface BridgeInstanceDescriptor {
+  editorInstanceId?: string;
+  projectPath?: string;
+  projectName?: string;
   bridgeVersion?: string;
   protocolVersion?: number;
   minimumProtocolVersion?: number;
@@ -49,18 +55,27 @@ export async function dispatchUnityBridgeCommand(
   timeoutMs = 3000
 ): Promise<BridgeTransportDispatch> {
   const commandId = randomUUID();
+  const descriptor = readBridgeInstanceDescriptor(config);
+  if (descriptor?.projectPath && !pathsReferToSameProject(descriptor.projectPath, config.unityProjectPath)) {
+    throw new Error(
+      `Unity bridge project mismatch: selected '${config.unityProjectPath}', descriptor reports '${descriptor.projectPath}'.`
+    );
+  }
   const payload = {
     ...command,
     id: commandId,
     timestamp: Date.now(),
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    expectedProjectId: config.projectId,
+    expectedProjectPath: config.unityProjectPath,
+    expectedEditorInstanceId: descriptor?.editorInstanceId,
   };
 
-  const descriptor = readBridgeInstanceDescriptor(config);
   const pipeEligibility = namedPipeEligibility(descriptor);
   if (pipeEligibility.eligible && descriptor?.pipeName) {
     const pipeAttempt = await sendOverNamedPipe(payload, descriptor.pipeName, timeoutMs);
     if (pipeAttempt.status === "acknowledged") {
+      assertAcknowledgementTarget(pipeAttempt.acknowledgement, config, descriptor.editorInstanceId);
       return {
         commandId,
         acknowledgement: pipeAttempt.acknowledgement,
@@ -78,10 +93,24 @@ export async function dispatchUnityBridgeCommand(
       };
     }
 
-    return dispatchOverFiles(payload, commandId, config, timeoutMs, pipeAttempt.reason);
+    return dispatchOverFiles(
+      payload,
+      commandId,
+      config,
+      timeoutMs,
+      descriptor?.editorInstanceId,
+      pipeAttempt.reason
+    );
   }
 
-  return dispatchOverFiles(payload, commandId, config, timeoutMs, pipeEligibility.reason);
+  return dispatchOverFiles(
+    payload,
+    commandId,
+    config,
+    timeoutMs,
+    descriptor?.editorInstanceId,
+    pipeEligibility.reason
+  );
 }
 
 export function readBridgeInstanceDescriptor(
@@ -137,11 +166,13 @@ async function dispatchOverFiles(
   commandId: string,
   config: BanterMCPConfig,
   timeoutMs: number,
+  expectedEditorInstanceId?: string,
   fallbackReason?: string
 ): Promise<BridgeTransportDispatch> {
   const commandFile = path.join(config.mcpCommandsPath, `${commandId}.json`);
   atomicWriteFileSync(commandFile, JSON.stringify(payload, null, 2));
   const acknowledgement = await waitForFileAcknowledgement(commandId, config, timeoutMs);
+  assertAcknowledgementTarget(acknowledgement, config, expectedEditorInstanceId);
 
   return {
     commandId,
@@ -176,6 +207,26 @@ async function waitForFileAcknowledgement(
   }
 
   return undefined;
+}
+
+function assertAcknowledgementTarget(
+  acknowledgement: BridgeCommandResult | undefined,
+  config: BanterMCPConfig,
+  expectedEditorInstanceId?: string
+): void {
+  if (!acknowledgement) return;
+  if (acknowledgement.projectPath &&
+      !pathsReferToSameProject(acknowledgement.projectPath, config.unityProjectPath)) {
+    throw new Error(
+      `Unity acknowledgement project mismatch: selected '${config.unityProjectPath}', result reports '${acknowledgement.projectPath}'.`
+    );
+  }
+  if (expectedEditorInstanceId && acknowledgement.editorInstanceId &&
+      acknowledgement.editorInstanceId !== expectedEditorInstanceId) {
+    throw new Error(
+      `Unity acknowledgement Editor mismatch: expected '${expectedEditorInstanceId}', result reports '${acknowledgement.editorInstanceId}'.`
+    );
+  }
 }
 
 function sendOverNamedPipe(
@@ -274,4 +325,13 @@ function sendOverNamedPipe(
       }
     });
   });
+}
+
+function pathsReferToSameProject(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const resolved = path.resolve(value.trim()).replace(/[\\/]+$/, "");
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+
+  return Boolean(left?.trim() && right?.trim()) && normalize(left) === normalize(right);
 }

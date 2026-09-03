@@ -1,4 +1,4 @@
-# BANTWORKS MCP Setup Script
+# Creator Works MCP Setup Script
 # Run this in PowerShell to configure Unity projects for Codex or Claude Code.
 
 param(
@@ -9,7 +9,8 @@ param(
     [switch]$Help
 )
 
-$ConfigPath = "$env:APPDATA\banter-mcp\launcher-config.json"
+$ConfigPath = "$env:APPDATA\creator-works-mcp\launcher-config.json"
+$LegacyConfigPath = "$env:APPDATA\banter-mcp\launcher-config.json"
 $ClaudeConfigPath = "$env:USERPROFILE\.claude.json"
 $CodexConfigPath = "$env:USERPROFILE\.codex\config.toml"
 $MCPRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
@@ -17,6 +18,8 @@ $LegacyServerPath = "C:/tools/banter-mcp/dist/index.js"
 
 function Get-DefaultServerPath {
     $candidates = @(
+        (Join-Path $MCPRoot "creator-works-mcp.mjs"),
+        (Join-Path $MCPRoot "release\creator-works-mcp.mjs"),
         (Join-Path $MCPRoot "banter-mcp.mjs"),
         (Join-Path $MCPRoot "release\banter-mcp.mjs"),
         (Join-Path $MCPRoot "dist\index.js")
@@ -35,7 +38,9 @@ function Test-LegacyServerPath($value) {
     if ([string]::IsNullOrWhiteSpace($value)) {
         return $false
     }
-    return (($value -replace "\\", "/").Equals($LegacyServerPath, [System.StringComparison]::OrdinalIgnoreCase))
+    $normalized = $value -replace "\\", "/"
+    return ($normalized.Equals($LegacyServerPath, [System.StringComparison]::OrdinalIgnoreCase) -or
+        [System.IO.Path]::GetFileName($normalized).Equals("banter-mcp.mjs", [System.StringComparison]::OrdinalIgnoreCase))
 }
 
 function Normalize-ToolGroups($Value) {
@@ -45,7 +50,7 @@ function Normalize-ToolGroups($Value) {
 
     $entries = @(($Value.ToLowerInvariant() -split ",") | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Sort-Object -Unique)
     if ($entries.Count -eq 0) {
-        throw "Tool groups must contain all, none, read, author, test, or banter."
+        throw "Tool groups must contain all, none, read, author, test, banter, or shadergraph."
     }
     if ($entries -contains "all" -or $entries -contains "none") {
         if ($entries.Count -ne 1) {
@@ -54,10 +59,10 @@ function Normalize-ToolGroups($Value) {
         return $entries[0]
     }
 
-    $knownGroups = @("read", "author", "test", "banter")
+    $knownGroups = @("read", "author", "test", "banter", "shadergraph")
     $unknown = @($entries | Where-Object { $_ -notin $knownGroups })
     if ($unknown.Count -gt 0) {
-        throw "Unknown tool groups: $($unknown -join ', '). Use all, none, read, author, test, or banter."
+        throw "Unknown tool groups: $($unknown -join ', '). Use all, none, read, author, test, banter, or shadergraph."
     }
 
     return (@($knownGroups | Where-Object { $_ -in $entries }) -join ",")
@@ -125,11 +130,11 @@ function Ensure-ConfigDir {
 
 function Load-Config {
     Ensure-ConfigDir
-    if (Test-Path $ConfigPath) {
-        $config = Get-Content $ConfigPath | ConvertFrom-Json
+    $sourcePath = if (Test-Path $ConfigPath) { $ConfigPath } elseif (Test-Path $LegacyConfigPath) { $LegacyConfigPath } else { $null }
+    if ($sourcePath) {
+        $config = Get-Content $sourcePath | ConvertFrom-Json
         $configuredServer = $config.mcp_server_path
-        if ([string]::IsNullOrWhiteSpace($configuredServer) -or
-            ((Test-LegacyServerPath $configuredServer) -and -not (Test-Path -LiteralPath $configuredServer -PathType Leaf))) {
+        if ([string]::IsNullOrWhiteSpace($configuredServer) -or (Test-LegacyServerPath $configuredServer)) {
             $defaultServer = Get-DefaultServerPath
             if ($null -eq $config.PSObject.Properties["mcp_server_path"]) {
                 $config | Add-Member -NotePropertyName "mcp_server_path" -NotePropertyValue $defaultServer
@@ -142,6 +147,9 @@ function Load-Config {
             $config | Add-Member -NotePropertyName "tool_groups" -NotePropertyValue $toolGroups
         } else {
             $config.tool_groups = $toolGroups
+        }
+        if ($sourcePath -eq $LegacyConfigPath) {
+            Write-AtomicText $ConfigPath ($config | ConvertTo-Json -Depth 10)
         }
         return $config
     }
@@ -167,7 +175,7 @@ function Save-Config($config) {
 function Show-Menu {
     Clear-Host
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "      BANTWORKS MCP Configuration       " -ForegroundColor Cyan
+    Write-Host "    Creator Works MCP Configuration     " -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
@@ -366,19 +374,27 @@ function Apply-ToClaudeCode {
 
     $envVars = @{
         UNITY_PROJECT_PATH = $activeChannel.unity_project_path
-        BANTWORKS_TOOL_GROUPS = Normalize-ToolGroups $config.tool_groups
+        CREATOR_WORKS_TOOL_GROUPS = Normalize-ToolGroups $config.tool_groups
     }
 
     if ($activeChannel.scene_path) {
         $envVars.UNITY_SCENE_PATH = $activeChannel.scene_path
     }
 
-    # Add/update banter MCP
-    $claudeConfig.mcpServers | Add-Member -NotePropertyName "banter" -NotePropertyValue @{
+    $serverConfig = @{
         command = "node"
         args = @($config.mcp_server_path)
         env = $envVars
-    } -Force
+    }
+    if ($claudeConfig.mcpServers -is [hashtable]) {
+        $claudeConfig.mcpServers.Remove("banter")
+        $claudeConfig.mcpServers.Remove("creator-works")
+        $claudeConfig.mcpServers["creator-works"] = $serverConfig
+    } else {
+        $claudeConfig.mcpServers.PSObject.Properties.Remove("banter")
+        $claudeConfig.mcpServers.PSObject.Properties.Remove("creator-works")
+        $claudeConfig.mcpServers | Add-Member -NotePropertyName "creator-works" -NotePropertyValue $serverConfig -Force
+    }
 
     Write-AtomicText $ClaudeConfigPath ($claudeConfig | ConvertTo-Json -Depth 10)
 
@@ -448,6 +464,8 @@ function Apply-ToCodex {
 
     $content = Remove-TomlTableBlock $content "mcp_servers.banter"
     $content = Remove-TomlTableBlock $content "mcp_servers.banter.env"
+    $content = Remove-TomlTableBlock $content "mcp_servers.creator-works"
+    $content = Remove-TomlTableBlock $content "mcp_servers.creator-works.env"
 
     if (-not [string]::IsNullOrWhiteSpace($content)) {
         $content = $content.TrimEnd() + "`n`n"
@@ -456,15 +474,15 @@ function Apply-ToCodex {
     $serverPath = Escape-TomlString ($config.mcp_server_path -replace "\\", "/")
     $projectPath = Escape-TomlString ($activeChannel.unity_project_path -replace "\\", "/")
 
-    $content += "[mcp_servers.banter]`n"
+    $content += "[mcp_servers.creator-works]`n"
     $content += "command = `"node`"`n"
     $content += "args = [`"$serverPath`"]`n"
     $content += "startup_timeout_sec = 20`n"
     $content += "tool_timeout_sec = 600`n`n"
-    $content += "[mcp_servers.banter.env]`n"
+    $content += "[mcp_servers.creator-works.env]`n"
     $content += "UNITY_PROJECT_PATH = `"$projectPath`"`n"
     $toolGroups = Escape-TomlString (Normalize-ToolGroups $config.tool_groups)
-    $content += "BANTWORKS_TOOL_GROUPS = `"$toolGroups`"`n"
+    $content += "CREATOR_WORKS_TOOL_GROUPS = `"$toolGroups`"`n"
 
     if ($activeChannel.scene_path) {
         $scenePath = Escape-TomlString ($activeChannel.scene_path -replace "\\", "/")
@@ -498,11 +516,17 @@ function Install-UnityExtension {
     }
 
     $sourcePath = "$MCPRoot\unity-extension\Editor\BanterMCPBridge.cs"
+    $sourceLogoPath = "$MCPRoot\unity-extension\Editor\CreatorWorksMCPLogo.png"
     $destDir = "$($activeChannel.unity_project_path)\Assets\Editor"
     $destPath = "$destDir\BanterMCPBridge.cs"
+    $destLogoPath = "$destDir\CreatorWorksMCPLogo.png"
 
     if (-not (Test-Path $sourcePath)) {
         Write-Host "Source extension not found at: $sourcePath" -ForegroundColor Red
+        return
+    }
+    if (-not (Test-Path $sourceLogoPath)) {
+        Write-Host "Source extension logo not found at: $sourceLogoPath" -ForegroundColor Red
         return
     }
 
@@ -520,6 +544,7 @@ function Install-UnityExtension {
         Copy-Item -LiteralPath $destPath -Destination $backupPath
     }
 
+    Copy-AtomicFile $sourceLogoPath $destLogoPath
     Copy-AtomicFile $sourcePath $destPath
 
     $stateDir = "$($activeChannel.unity_project_path)\.bantworks-mcp\state"
@@ -540,7 +565,7 @@ function Install-UnityExtension {
 }
 
 function Show-Usage {
-    Write-Host "BANTWORKS MCP setup"
+    Write-Host "Creator Works MCP setup"
     Write-Host ""
     Write-Host "  .\setup.ps1              Open the interactive configuration menu"
     Write-Host "  .\setup.ps1 -Install     Install dependencies and build the release server bundle"
@@ -575,18 +600,18 @@ function Show-ProjectList {
 function Install-ServerBundle {
     $node = Get-Command node -ErrorAction SilentlyContinue
     if ($null -eq $node) {
-        throw "Node.js 18 or newer is required but 'node' was not found on PATH."
+        throw "Node.js 20 or newer is required but 'node' was not found on PATH."
     }
 
     $nodeVersion = (& node --version).TrimStart("v")
     if ($LASTEXITCODE -ne 0 -or -not ($nodeVersion -match '^(\d+)\.')) {
         throw "Could not determine the installed Node.js version."
     }
-    if ([int]$Matches[1] -lt 18) {
-        throw "Node.js 18 or newer is required; found $nodeVersion."
+    if ([int]$Matches[1] -lt 20) {
+        throw "Node.js 20 or newer is required; found $nodeVersion."
     }
 
-    $standaloneBundle = Join-Path $MCPRoot "banter-mcp.mjs"
+    $standaloneBundle = Join-Path $MCPRoot "creator-works-mcp.mjs"
     $packageManifest = Join-Path $MCPRoot "package.json"
 
     if ((Test-Path -LiteralPath $standaloneBundle -PathType Leaf) -and
