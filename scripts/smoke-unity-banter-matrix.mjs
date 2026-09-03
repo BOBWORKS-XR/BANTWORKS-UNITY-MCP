@@ -28,6 +28,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import {
+  DEFAULT_EXPECTED_UNITY_VERSION,
   resolveUnityEditorPath,
   runBanterVsSmoke,
 } from "./smoke-unity-banter-vs.mjs";
@@ -61,7 +62,7 @@ export async function runBanterMatrix(options = {}) {
   const unityEditorPath = resolveUnityEditorPath(
     options.unityEditorPath,
     options.autoDetectUnity ?? false,
-    null
+    DEFAULT_EXPECTED_UNITY_VERSION
   );
   const matrixPath = options.matrixPath
     ? path.resolve(options.matrixPath)
