@@ -16,6 +16,7 @@ import {
   applyToCodex,
   applyToOpenCode,
   configPathFor,
+  loadConfig,
 } from "../scripts/cli/setup-lib.mjs";
 import { parseJsonc } from "../scripts/cli/jsonc-edit.mjs";
 
@@ -140,6 +141,41 @@ test("cross-platform CLI writes canonical client entries and preserves unrelated
       opencode.mcp["creator-works"].environment.CREATOR_WORKS_TOOL_GROUPS,
       "read,author",
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cross-platform CLI migrates legacy launcher config to the Creator Works path", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "creator-works-cli-migration-"));
+  try {
+    const configRoot = path.join(root, "config");
+    const mcpRoot = path.join(root, "mcp");
+    const serverPath = path.join(mcpRoot, "creator-works-mcp.mjs");
+    const legacyPath = path.join(configRoot, "banter-mcp", "launcher-config.json");
+    mkdirSync(mcpRoot, { recursive: true });
+    mkdirSync(path.dirname(legacyPath), { recursive: true });
+    writeFileSync(serverPath, "// server\n", "utf8");
+    writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        channels: [{ id: "legacy-project", name: "Legacy", unity_project_path: root }],
+        active_channel_id: "legacy-project",
+        mcp_server_path: serverPath,
+        tool_groups: "all",
+      }),
+      "utf8",
+    );
+
+    const config = loadConfig({ configRoot, mcpRoot });
+    const canonicalPath = configPathFor(configRoot);
+    assert.equal(
+      canonicalPath,
+      path.join(configRoot, "creator-works-mcp", "launcher-config.json"),
+    );
+    assert.equal(config.active_channel_id, "legacy-project");
+    assert.equal(JSON.parse(readFileSync(canonicalPath, "utf8")).active_channel_id, "legacy-project");
+    assert.equal(JSON.parse(readFileSync(legacyPath, "utf8")).active_channel_id, "legacy-project");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

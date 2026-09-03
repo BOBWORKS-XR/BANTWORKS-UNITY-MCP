@@ -7,6 +7,8 @@ const launcherHtml = fs.readFileSync("launcher/src/index.html", "utf8");
 const launcherApp = fs.readFileSync("launcher/src/app.js", "utf8");
 const tauriConfig = fs.readFileSync("launcher/src-tauri/tauri.conf.json", "utf8");
 const runtimeStage = fs.readFileSync("scripts/stage-node-runtime.mjs", "utf8");
+const standaloneBuilder = fs.readFileSync("scripts/build-standalone.mjs", "utf8");
+const setupEntry = fs.readFileSync("scripts/cli/setup.mjs", "utf8");
 const bridgeSource = fs.readFileSync("unity-extension/Editor/BanterMCPBridge.cs", "utf8");
 
 test("guided setup accepts a Unity project folder and configures selected clients", () => {
@@ -41,6 +43,17 @@ test("launcher presents Creator Works as the AI-facing MCP identity", () => {
   assert.match(launcherSource, /const TOOL_GROUPS_ENV: &str = "CREATOR_WORKS_TOOL_GROUPS"/);
   assert.match(launcherSource, /LEGACY_MCP_CLIENT_ID/);
   assert.doesNotMatch(launcherHtml, /BANTWORKS MCP/);
+});
+
+test("cross-platform standalone packaging uses Creator Works artifact names", () => {
+  assert.match(standaloneBuilder, /Creator-Works-MCP/);
+  assert.match(standaloneBuilder, /creator-works-mcp\.mjs/);
+  assert.match(standaloneBuilder, /writeFileSync\(path\.join\(stagingRoot, "banter-mcp\.mjs"\)/);
+  assert.doesNotMatch(standaloneBuilder, /BANTWORKS-MCP|bantworks-standalone/);
+
+  assert.match(setupEntry, /path\.join\(mcpRoot, "creator-works-mcp\.mjs"\)/);
+  assert.match(setupEntry, /major < 20/);
+  assert.doesNotMatch(setupEntry, /major < 18/);
 });
 
 test("custom script mode exposes existing compiled components without claiming to write C#", () => {

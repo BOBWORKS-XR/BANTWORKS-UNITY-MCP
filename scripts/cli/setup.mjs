@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Cross-platform CLI entry point for the BANTWORKS MCP setup.
+// Cross-platform CLI entry point for the Creator Works MCP setup.
 // Mirrors setup.ps1 on Windows and is invoked from setup.sh on Linux/macOS.
 //
 // Subcommands:

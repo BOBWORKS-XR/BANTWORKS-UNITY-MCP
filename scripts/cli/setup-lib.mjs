@@ -1,4 +1,4 @@
-// Cross-platform implementation of the BANTWORKS MCP setup logic that used
+// Cross-platform implementation of the Creator Works MCP setup logic that used
 // to live in setup.ps1. The PowerShell script remains the canonical entry
 // point on Windows; setup.sh and scripts/cli/setup.mjs call into this
 // module so the JSON / TOML file formats and behaviour stay in one place.
@@ -156,18 +156,28 @@ function atomicCopyFile(source, destination) {
 }
 
 export function configPathFor(configRoot) {
+  return path.join(configRoot, "creator-works-mcp", "launcher-config.json");
+}
+
+function legacyConfigPathFor(configRoot) {
   return path.join(configRoot, "banter-mcp", "launcher-config.json");
 }
 
 export function loadConfig({ configRoot, mcpRoot }) {
   const configPath = configPathFor(configRoot);
+  const legacyConfigPath = legacyConfigPathFor(configRoot);
+  const sourcePath = existsSync(configPath)
+    ? configPath
+    : existsSync(legacyConfigPath)
+      ? legacyConfigPath
+      : null;
   mkdirSync(path.dirname(configPath), { recursive: true });
-  if (existsSync(configPath)) {
+  if (sourcePath) {
     let raw;
     try {
-      raw = JSON.parse(readFileSync(configPath, "utf8"));
+      raw = JSON.parse(readFileSync(sourcePath, "utf8"));
     } catch (error) {
-      throw new Error(`Failed to parse ${configPath}: ${error.message}`);
+      throw new Error(`Failed to parse ${sourcePath}: ${error.message}`);
     }
     let configuredServer = raw.mcp_server_path;
     if (
@@ -179,7 +189,7 @@ export function loadConfig({ configRoot, mcpRoot }) {
     ) {
       configuredServer = defaultServerPath(mcpRoot);
     }
-    return {
+    const normalized = {
       channels: Array.isArray(raw.channels) ? raw.channels : [],
       active_channel_id: raw.active_channel_id ?? null,
       mcp_server_path: configuredServer,
@@ -187,6 +197,10 @@ export function loadConfig({ configRoot, mcpRoot }) {
       auto_start: Boolean(raw.auto_start),
       enable_custom_scripts: Boolean(raw.enable_custom_scripts),
     };
+    if (sourcePath === legacyConfigPath) {
+      atomicWriteText(configPath, `${JSON.stringify(normalized, null, 2)}\n`);
+    }
+    return normalized;
   }
   return {
     channels: [],
